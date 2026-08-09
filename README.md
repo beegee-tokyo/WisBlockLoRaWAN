@@ -19,8 +19,8 @@ _**to be done**_
 
 ## AT command set
 
-| Command                          | Description                                      |
-|-----------------------------------|---------------------------------------------------|
+| <div style="width:150px">Command</div> | Description                                      |
+| :--- | :--- |
 | AT+MODE=_**0/1**_                  | 0 = LoRaWAN, 1 = LoRa P2P                          |
 | AT+MODE=?                      | Query current mode                                 |
 | AT+DEVEUI=_**hex8**_               | Set Device EUI                                     |
@@ -59,3 +59,4 @@ _**to be done**_
 | AT+RESTORE                     | Reload config from flash                           |
 | AT+FACTORY                     | Reset config to factory defaults                   |
 | AT+STATUS                      | Dump current config + join/link status             |
+
