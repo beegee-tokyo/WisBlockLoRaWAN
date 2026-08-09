@@ -15,7 +15,7 @@ FUOTA function is not implemented and is not planned at this time due to the com
 
 ## API documentation
 
-_**to be done**_
+_**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the library.    
 
 ## AT command set
 
