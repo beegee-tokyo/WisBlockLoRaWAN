@@ -74,12 +74,18 @@ public:
 	 * convenience path (AT+PRECVDC=AUTO) where nothing else is available to
 	 * go on.
 	 *
-	 * @param marginSymbols Extra symbols of headroom subtracted from the
-	 *   available budget, accounting for clock drift and detection latency
-	 *   between the two radios. 2 is a reasonable default; increase if you
-	 *   see missed packets in practice.
-	 * @param rxTimeMs Out: computed RX phase duration (~2 symbols, enough
-	 *   to reliably detect a preamble already in progress).
+	 * @param marginSymbols Controls both the RX window size and the extra
+	 *   headroom subtracted from the sleep budget - increase this if you
+	 *   see missed packets in practice. NOTE: real hardware testing found
+	 *   this needs considerably more margin than the datasheet's own
+	 *   worked examples suggest to reliably catch every packet - this
+	 *   function's default assumptions have already been adjusted based on
+	 *   that testing (see the implementation's comments and the README's
+	 *   "RX duty-cycle timing needed more margin than the textbook
+	 *   formula" note), but treat the result as a starting point to verify
+	 *   on your own hardware/link, not a guaranteed-correct value.
+	 * @param rxTimeMs Out: computed RX phase duration, scaled from
+	 *   marginSymbols.
 	 * @param sleepTimeMs Out: computed sleep phase duration - the rest of
 	 *   the preamble's duration after rxTimeMs and the margin.
 	 * @returns false (outputs left untouched) if the current preamble is
@@ -87,7 +93,7 @@ public:
 	 *   setP2PPreambleLength() with a larger value first in that case, or
 	 *   just use startReceive() instead of duty-cycling.
 	 */
-	bool computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols = 2) const;
+	bool computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols = 5) const;
 
 	/**
 	 * Same computation as above, but against an explicitly given
@@ -102,7 +108,7 @@ public:
 	 *   configured preamble length, in symbols - not this radio's own.
 	 */
 	bool computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, uint32_t &rxTimeMs, uint32_t &sleepTimeMs,
-								   uint8_t marginSymbols = 2) const;
+								   uint8_t marginSymbols = 5) const;
 
 	void startCad(); // one-shot CAD; result delivered via onCadResult callback
 

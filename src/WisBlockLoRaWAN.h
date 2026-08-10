@@ -95,7 +95,7 @@ public:
 	/** Read-only access to the currently applied P2P radio settings - frequency, SF, bandwidth, preamble length, etc. */
 	const WisBlockP2PSettings &getP2PSettings() const { return config.p2p; }
 	/** See LoRaP2PEngine::computeRxDutyCycleTiming()'s doc comment for the full picture. */
-	bool computeP2PRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols = 2) const
+	bool computeP2PRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols = 5) const
 	{
 		return p2p.computeRxDutyCycleTiming(rxTimeMs, sleepTimeMs, marginSymbols);
 	}
@@ -108,7 +108,7 @@ public:
 	 * a reliable substitute for it.
 	 */
 	bool computeP2PRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, uint32_t &rxTimeMs, uint32_t &sleepTimeMs,
-									  uint8_t marginSymbols = 2) const
+									  uint8_t marginSymbols = 5) const
 	{
 		return p2p.computeRxDutyCycleTiming(txPreambleLengthSymbols, rxTimeMs, sleepTimeMs, marginSymbols);
 	}

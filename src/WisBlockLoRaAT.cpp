@@ -1,6 +1,7 @@
 
 #include <Arduino.h>
 #include "WisBlockLoRaAT.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,30 @@ namespace
 	bool startsWith(const char *str, const char *prefix)
 	{
 		return strncmp(str, prefix, strlen(prefix)) == 0;
+	}
+
+	// Case-insensitive "AT" prefix check only - used to decide whether a
+	// line should go through the (uppercasing) command parser at all,
+	// before that uppercasing happens. Lines that don't start with "AT" in
+	// any case are passed to unhandledDataCb() completely untouched - see
+	// processLine()'s doc comment for why that path must not be uppercased.
+	bool startsWithAtCaseInsensitive(const char *str)
+	{
+		return (str[0] == 'A' || str[0] == 'a') && (str[1] == 'T' || str[1] == 't');
+	}
+
+	// Shared by every "=?" getter below that reads back a byte array
+	// (DevEUI, JoinEUI, DevAddr) as upper-case hex, matching the format
+	// their corresponding setters accept.
+	void printHex(Stream *port, const uint8_t *data, size_t len)
+	{
+		char buf[3];
+		for (size_t i = 0; i < len; i++)
+		{
+			snprintf(buf, sizeof(buf), "%02X", data[i]);
+			port->print(buf);
+		}
+		port->println();
 	}
 } // namespace
 
@@ -154,7 +179,22 @@ void WisBlockLoRaAT::handleStatusQuery()
 
 void WisBlockLoRaAT::processLine(const char *line)
 {
-	if (!startsWith(line, "AT"))
+	// FIX: AT commands were case-sensitive - "AT+MODE=1" worked, "at+mode=1"
+	// didn't, which doesn't match how AT command sets are conventionally
+	// expected to behave (case-insensitive is the norm - e.g. Hayes/3GPP AT
+	// command sets). Checked and uppercased here, deliberately *after* the
+	// unhandledDataCb() branch below would otherwise fire - that path is
+	// for arbitrary non-AT application data passed through the same serial
+	// stream, which must reach the application byte-for-byte, not
+	// uppercased. Only once a line is confirmed to actually be an AT
+	// command does it get uppercased, so every subsequent comparison (all
+	// already written against uppercase literals) just works regardless of
+	// what case the caller sent, without needing every startsWith()/
+	// strcmp() call site updated individually. Safe to uppercase
+	// unconditionally for every command this parser accepts: every value
+	// is either numeric (case has no effect) or hex (uppercase and
+	// lowercase hex digits parse identically via parseHex()/strtol()).
+	if (!startsWithAtCaseInsensitive(line))
 	{
 		if (unhandledDataCb)
 		{
@@ -166,6 +206,19 @@ void WisBlockLoRaAT::processLine(const char *line)
 		}
 		return;
 	}
+
+	char upperLine[sizeof(lineBuffer)];
+	size_t len = strlen(line);
+	if (len >= sizeof(upperLine))
+	{
+		len = sizeof(upperLine) - 1;
+	}
+	for (size_t i = 0; i < len; i++)
+	{
+		upperLine[i] = (char)toupper((unsigned char)line[i]);
+	}
+	upperLine[len] = '\0';
+	line = upperLine;
 	const char *cmd = line + 2; // skip "AT"
 
 	if (strcmp(cmd, "") == 0)
@@ -184,6 +237,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORA_P2P : WISBLOCK_MODE_LORAWAN);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+DEVEUI=?") == 0)
+	{
+		printHex(port, lora->getConfig().lorawan.otaa.devEui, 8);
+	}
 	else if (startsWith(cmd, "+DEVEUI="))
 	{
 		uint8_t eui[8];
@@ -196,6 +253,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 		memcpy(keys.devEui, eui, 8);
 		lora->setOTAAKeys(keys.devEui, keys.joinEui, keys.appKey);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+APPEUI=?") == 0 || strcmp(cmd, "+JOINEUI=?") == 0)
+	{
+		printHex(port, lora->getConfig().lorawan.otaa.joinEui, 8);
 	}
 	else if (startsWith(cmd, "+APPEUI=") || startsWith(cmd, "+JOINEUI="))
 	{
@@ -211,6 +272,27 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setOTAAKeys(keys.devEui, keys.joinEui, keys.appKey);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+APPKEY=?") == 0)
+	{
+		// SECURITY: deliberately not read back in plaintext, unlike
+		// DevEUI/JoinEUI/DevAddr above - the AppKey is secret key
+		// material, and an AT interface that echoes it back over serial
+		// (often USB, sometimes UART with no physical security at all) is
+		// exactly the kind of thing a real product's AT command set
+		// normally guards against. Reports only whether one has been set,
+		// not the value. If your application genuinely needs plaintext
+		// readback (e.g. a provisioning tool that already trusts this
+		// serial link), change this block to printHex(port,
+		// lora->getConfig().lorawan.otaa.appKey, 16) instead - deliberately
+		// not the default.
+		const uint8_t *key = lora->getConfig().lorawan.otaa.appKey;
+		bool isSet = false;
+		for (int i = 0; i < 16 && !isSet; i++)
+		{
+			isSet = (key[i] != 0);
+		}
+		reply(isSet ? "SET" : "UNSET");
+	}
 	else if (startsWith(cmd, "+APPKEY="))
 	{
 		uint8_t key[16];
@@ -223,6 +305,12 @@ void WisBlockLoRaAT::processLine(const char *line)
 		memcpy(keys.appKey, key, 16);
 		lora->setOTAAKeys(keys.devEui, keys.joinEui, keys.appKey);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+DEVADDR=?") == 0)
+	{
+		uint32_t addr = lora->getConfig().lorawan.abp.devAddr;
+		uint8_t bytes[4] = {(uint8_t)(addr >> 24), (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
+		printHex(port, bytes, 4);
 	}
 	else if (startsWith(cmd, "+DEVADDR="))
 	{
@@ -238,6 +326,18 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setABPKeys(addr, keys.nwkSKey, keys.appSKey);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+NWKSKEY=?") == 0)
+	{
+		// SECURITY: same reasoning as +APPKEY=? above - session key
+		// material, masked by default.
+		const uint8_t *key = lora->getConfig().lorawan.abp.nwkSKey;
+		bool isSet = false;
+		for (int i = 0; i < 16 && !isSet; i++)
+		{
+			isSet = (key[i] != 0);
+		}
+		reply(isSet ? "SET" : "UNSET");
+	}
 	else if (startsWith(cmd, "+NWKSKEY="))
 	{
 		uint8_t key[16];
@@ -250,6 +350,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		memcpy(keys.nwkSKey, key, 16);
 		lora->setABPKeys(keys.devAddr, keys.nwkSKey, keys.appSKey);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+APPSKEY=?") == 0)
+	{
+		// SECURITY: same reasoning as +APPKEY=? above.
+		const uint8_t *key = lora->getConfig().lorawan.abp.appSKey;
+		bool isSet = false;
+		for (int i = 0; i < 16 && !isSet; i++)
+		{
+			isSet = (key[i] != 0);
+		}
+		reply(isSet ? "SET" : "UNSET");
 	}
 	else if (startsWith(cmd, "+APPSKEY="))
 	{
@@ -264,15 +375,28 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setABPKeys(keys.devAddr, keys.nwkSKey, keys.appSKey);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+REGION=?") == 0)
+	{
+		port->println((int)lora->getConfig().lorawan.region);
+	}
 	else if (startsWith(cmd, "+REGION="))
 	{
 		lora->setRegion((WisBlockRegion)atoi(cmd + 8));
 		replyOk();
 	}
+	else if (strcmp(cmd, "+DR=?") == 0)
+	{
+		port->println(lora->getConfig().lorawan.dataRate);
+	}
 	else if (startsWith(cmd, "+DR="))
 	{
 		lora->setDataRate((uint8_t)atoi(cmd + 4));
 		replyOk();
+	}
+	else if (strcmp(cmd, "+CLASS=?") == 0)
+	{
+		WisBlockDeviceClass dc = lora->getConfig().lorawan.deviceClass;
+		reply(dc == WISBLOCK_CLASS_B ? "B" : dc == WISBLOCK_CLASS_C ? "C" : "A");
 	}
 	else if (startsWith(cmd, "+CLASS="))
 	{
@@ -281,6 +405,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 																									: WISBLOCK_CLASS_A;
 		lora->setDeviceClass(dc);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+JOINMODE=?") == 0)
+	{
+		port->println(lora->getConfig().lorawan.joinMode == WISBLOCK_JOIN_ABP ? 1 : 0);
 	}
 	else if (startsWith(cmd, "+JOINMODE="))
 	{
@@ -292,15 +420,32 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->join();
 		replyOk();
 	}
+	else if (strcmp(cmd, "+JOIN=?") == 0)
+	{
+		port->println((int)lora->joinState());
+	}
+	else if (strcmp(cmd, "+ADR=?") == 0)
+	{
+		port->println(lora->getConfig().lorawan.adrEnabled ? "1" : "0");
+	}
 	else if (startsWith(cmd, "+ADR="))
 	{
 		lora->setADR(atoi(cmd + 5) != 0);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+TXP=?") == 0)
+	{
+		port->println(lora->getConfig().lorawan.txPower);
+	}
 	else if (startsWith(cmd, "+TXP="))
 	{
 		lora->setTxPower((uint8_t)atoi(cmd + 5));
 		replyOk();
+	}
+
+	else if (strcmp(cmd, "+RELAY=?") == 0)
+	{
+		port->println((int)lora->getConfig().lorawan.relayMode);
 	}
 	else if (startsWith(cmd, "+RELAY="))
 	{
@@ -308,6 +453,26 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setRelayMode(v == 1 ? WISBLOCK_RELAY_ED : v == 2 ? WISBLOCK_RELAY_SERVING
 															   : WISBLOCK_RELAY_OFF);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+RELAYED=?") == 0)
+	{
+		// Same field order as the setter above: <activationMode>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<secondChEnable>:<secondChFreqHz>:<secondChAckFreqHz>:<secondChDr>
+		const WisBlockRelayEDConfig &cfg = lora->getConfig().lorawan.relayEDConfig;
+		port->print(cfg.activationMode);
+		port->print(":");
+		port->print(cfg.smartLevel);
+		port->print(":");
+		port->print(cfg.backoff);
+		port->print(":");
+		port->print(cfg.missedWorAckToNoSync);
+		port->print(":");
+		port->print(cfg.secondChannelEnable ? 1 : 0);
+		port->print(":");
+		port->print(cfg.secondChannelFreqHz);
+		port->print(":");
+		port->print(cfg.secondChannelAckFreqHz);
+		port->print(":");
+		port->println(cfg.secondChannelDr);
 	}
 	else if (startsWith(cmd, "+RELAYED="))
 	{
@@ -345,6 +510,22 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->configureRelayED(cfg);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+RELAYSRV=?") == 0)
+	{
+		// Same field order as the setter above: <cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>
+		const WisBlockRelayServingConfig &cfg = lora->getConfig().lorawan.relayServingConfig;
+		port->print(cfg.cadPeriod);
+		port->print(":");
+		port->print(cfg.channelFreqHz);
+		port->print(":");
+		port->print(cfg.channelAckFreqHz);
+		port->print(":");
+		port->print(cfg.channelDr);
+		port->print(":");
+		port->print(cfg.errorPpm);
+		port->print(":");
+		port->println(cfg.cadToRxSymb);
+	}
 	else if (startsWith(cmd, "+RELAYSRV="))
 	{
 		// AT+RELAYSRV=<cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>
@@ -374,6 +555,18 @@ void WisBlockLoRaAT::processLine(const char *line)
 
 		lora->configureRelayServing(cfg);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+RELAYDEV=?") == 0)
+	{
+		// Deliberately not implemented, unlike every other getter in this
+		// file: the registered trusted-device list isn't kept anywhere
+		// readable on this side (see WisBlockRelayTrustedDevice's own doc
+		// comment in WisBlockLoRaWANTypes.h - "Not persisted... unlike the
+		// two configs above") - each AT+RELAYDEV= call pushes straight into
+		// LBM with no local copy retained to read back, and the entries
+		// contain a root session key (rootWorSKey) that shouldn't be echoed
+		// in plaintext regardless (see the +APPKEY=? SECURITY note above).
+		replyError("not supported - trusted device list has no local readable copy");
 	}
 	else if (startsWith(cmd, "+RELAYDEV="))
 	{
@@ -414,6 +607,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		uint8_t idx = (uint8_t)atoi(cmd + 13);
 		lora->removeRelayTrustedDevice(idx) ? replyOk() : replyError("failed");
+	}
+	else if (strcmp(cmd, "+CFM=?") == 0)
+	{
+		port->println(lora->getConfig().lorawan.confirmedUplinks ? "1" : "0");
 	}
 	else if (startsWith(cmd, "+CFM="))
 	{
@@ -481,6 +678,22 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->requestDeviceTime();
 		replyOk();
 	}
+	else if (strcmp(cmd, "+P2P=?") == 0)
+	{
+		// Same field order as the setter above: <freqHz>:<sf>:<bw>:<cr>:<preamble>:<txpower>
+		const WisBlockP2PSettings &s = lora->getP2PSettings();
+		port->print(s.frequencyHz);
+		port->print(":");
+		port->print(s.spreadingFactor);
+		port->print(":");
+		port->print((int)s.bandwidth);
+		port->print(":");
+		port->print((int)s.codingRate);
+		port->print(":");
+		port->print(s.preambleLength);
+		port->print(":");
+		port->println(s.txPowerDbm);
+	}
 	else if (startsWith(cmd, "+P2P="))
 	{
 		// AT+P2P=<freqHz>:<sf>:<bw>:<cr>:<preamble>:<txpower>
@@ -514,10 +727,18 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setP2PTxPower(txp);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+CAD=?") == 0)
+	{
+		port->println(lora->getP2PSettings().cadEnabled ? "1" : "0");
+	}
 	else if (startsWith(cmd, "+CAD="))
 	{
 		lora->setP2PCad(atoi(cmd + 5) != 0);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+RXBOOST=?") == 0)
+	{
+		port->println(lora->getP2PSettings().rxBoostedGainEnabled ? "1" : "0");
 	}
 	else if (startsWith(cmd, "+RXBOOST="))
 	{
@@ -602,6 +823,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 		}
 		lora->startP2PReceiveDutyCycle(rxTimeMs, sleepTimeMs);
 		replyOk();
+	}
+	else if (strcmp(cmd, "+LOWPOWER=?") == 0)
+	{
+		port->println(lora->isLowPowerEnabled() ? "1" : "0");
 	}
 	else if (startsWith(cmd, "+LOWPOWER="))
 	{

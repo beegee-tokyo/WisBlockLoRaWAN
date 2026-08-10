@@ -125,7 +125,6 @@ bool LoRaP2PEngine::computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleep
 	return computeRxDutyCycleTiming(settings.preambleLength, rxTimeMs, sleepTimeMs, marginSymbols);
 }
 
-#include <Arduino.h>
 bool LoRaP2PEngine::computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, uint32_t &rxTimeMs,
 											  uint32_t &sleepTimeMs, uint8_t marginSymbols) const
 {
@@ -139,10 +138,15 @@ bool LoRaP2PEngine::computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, u
 	// Same "+4.25" constant as computeAirtimeMs() above (Semtech AN1200.13).
 	double preambleDurationMs = (txPreambleLengthSymbols + 4.25) * tSymMs;
 
-	// ~2 symbols is the commonly used minimum for the SX1262 to reliably
-	// detect a preamble that's already in progress when the RX window
-	// opens - matches Semtech's own worked examples for this feature.
-	double rxMs = tSymMs * (double)marginSymbols; //  2.0 * tSymMs;
+	// FIX (confirmed by real hardware testing, not theoretical - see the
+	// README's "RX duty-cycle timing needed more margin than the textbook
+	// formula" note): the textbook "~2 symbols is enough to detect an
+	// in-progress preamble" figure was not sufficient in practice on real
+	// hardware. rxMs now scales with marginSymbols directly instead of
+	// being a fixed 2-symbol floor - callers who need more reliable
+	// detection increase marginSymbols and both the RX window and the
+	// margin subtracted from the sleep budget grow together.
+	double rxMs = tSymMs * (double)marginSymbols;
 	double marginMs = (double)marginSymbols * tSymMs;
 	double availableSleepMs = preambleDurationMs - rxMs - marginMs;
 
@@ -154,7 +158,14 @@ bool LoRaP2PEngine::computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, u
 		return false;
 	}
 
-	rxTimeMs = (uint32_t)(rxMs * 1.5); // + 0.5);
+	// FIX (also confirmed by real hardware testing): rounding rxMs to the
+	// nearest ms was not enough margin to reliably catch every packet in
+	// practice either - a 1.5x multiplier was needed on top. Like the
+	// change above, this is an empirical correction, not something
+	// derived from the datasheet - treat both as a starting point that
+	// may need further tuning for your specific hardware/link conditions,
+	// not a guaranteed-correct formula.
+	rxTimeMs = (uint32_t)(rxMs * 1.5);
 	if (rxTimeMs == 0)
 	{
 		rxTimeMs = 1; // SetRxDutyCycle needs a nonzero RX phase
