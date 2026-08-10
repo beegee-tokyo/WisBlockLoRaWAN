@@ -780,6 +780,28 @@ remains as a fallback that reads this radio's own configured preamble
 length, for cases where nothing better is available - understand that
 it's a weaker stand-in, not the primary way to use this.
 
+**Second correction, from real hardware testing at BW125/SF7/marginSymbols=5,
+transmitter preamble 100 symbols:** the formula's own textbook assumptions
+weren't sufficient either. Two further empirical adjustments, confirmed by
+testing every combination against actual packet reception:
+
+- `rxMs` was a fixed "~2 symbols" regardless of `marginSymbols` - not
+  reliable enough in practice. Changed to scale directly with
+  `marginSymbols` (`rxMs = tSymMs * marginSymbols`), so a caller who
+  increases the margin for reliability gets a correspondingly larger RX
+  window, not just a larger subtraction from the sleep budget.
+- Even with that fix, rounding `rxTimeMs` to the nearest millisecond
+  (`+ 0.5`) still missed packets. Needed a further `1.5x` multiplier
+  (`rxTimeMs = (uint32_t)(rxMs * 1.5)`) to reliably catch everything in
+  testing.
+
+Both are baked into `computeRxDutyCycleTiming()`'s current implementation
+and the default `marginSymbols` was raised from 2 to 5 to match. Treat
+this as the current best-known-working configuration from one round of
+hardware validation, not a fully-characterized formula - if you tune
+further, these are the two lines to start from
+(`LoRaP2PEngine.cpp`, `computeRxDutyCycleTiming()`).
+
 ## Radio HAL: sleep-state-aware wake handling
 
 `wisblock_radio_hal_*.cpp`'s `sx126x_hal_write()`/`read()`/`wakeup()` track
@@ -860,46 +882,69 @@ WisBlockLoRaWAN/
 
 ## AT command set (implemented in `WisBlockLoRaAT.cpp`)
 
+Commands are case-insensitive (`AT+MODE=1` and `at+mode=1` are equivalent) -
+the parser uppercases the whole line before parsing. Any non-AT-prefixed
+data on the same serial stream (see `unhandledDataCb`) is passed through to
+the application byte-for-byte, untouched by this.
+
+Every setter that persists a value also has a `=?` getter to read it back,
+except one-shot actions with nothing to read back (`AT+SEND`, `AT+PSEND`,
+`AT+PRECV`, `AT+PRECVDC`, `AT+RELAYDEVDEL`) and `AT+RELAYDEV`, whose stored
+values aren't kept anywhere readable on this side (see its own row below).
+
 | Command                          | Description                                      |
 |-----------------------------------|---------------------------------------------------|
-| `AT+MODE=<0/1>`                  | 0 = LoRaWAN, 1 = LoRa P2P                          |
-| `AT+MODE=?`                      | Query current mode                                 |
-| `AT+DEVEUI=<hex8>`               | Set Device EUI                                     |
-| `AT+APPEUI=<hex8>` / `AT+JOINEUI`| Set Join EUI                                       |
-| `AT+APPKEY=<hex16>`              | Set App/Network key (OTAA)                         |
-| `AT+DEVADDR=<hex4>`              | Set Device Address (ABP)                           |
-| `AT+NWKSKEY=<hex16>`             | Set Network Session Key (ABP)                      |
-| `AT+APPSKEY=<hex16>`             | Set App Session Key (ABP)                          |
-| `AT+REGION=<0..13>`              | EU868, US915, AU915, AS923, KR920, IN865, RU864... |
-| `AT+DR=<0..15>`                  | Data rate index                                    |
-| `AT+CLASS=<A/B/C>`               | Device class                                       |
-| `AT+JOINMODE=<0/1>`              | 0 = OTAA, 1 = ABP                                  |
+| `AT+MODE=<0/1>` / `AT+MODE=?`    | 0 = LoRaWAN, 1 = LoRa P2P                          |
+| `AT+DEVEUI=<hex8>` / `AT+DEVEUI=?` | Device EUI                                       |
+| `AT+APPEUI=<hex8>` / `AT+JOINEUI=<hex8>` / `AT+APPEUI=?` / `AT+JOINEUI=?` | Join EUI |
+| `AT+APPKEY=<hex16>` / `AT+APPKEY=?` | App/Network key (OTAA). **Getter returns `SET`/`UNSET` only, never the key itself** - see the security note below |
+| `AT+DEVADDR=<hex4>` / `AT+DEVADDR=?` | Device Address (ABP)                          |
+| `AT+NWKSKEY=<hex16>` / `AT+NWKSKEY=?` | Network Session Key (ABP). **Getter returns `SET`/`UNSET` only** |
+| `AT+APPSKEY=<hex16>` / `AT+APPSKEY=?` | App Session Key (ABP). **Getter returns `SET`/`UNSET` only** |
+| `AT+REGION=<0..13>` / `AT+REGION=?` | EU868, US915, AU915, AS923, KR920, IN865, RU864... |
+| `AT+DR=<0..15>` / `AT+DR=?`      | Data rate index                                    |
+| `AT+CLASS=<A/B/C>` / `AT+CLASS=?` | Device class                                      |
+| `AT+JOINMODE=<0/1>` / `AT+JOINMODE=?` | 0 = OTAA, 1 = ABP                            |
 | `AT+JOIN`                        | Start join procedure                               |
-| `AT+ADR=<0/1>`                   | ADR on/off                                         |
-| `AT+TXP=<0..15>`                 | TX power index                                     |
-| `AT+RELAY=<0/1/2>`               | 0 = off, 1 = relay TX (end-device), 2 = relay RX (serving) |
-| `AT+RELAYED=<activation>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<2ndChEnable>:<2ndChFreqHz>:<2ndChAckFreqHz>:<2ndChDr>` | Configure relay TX (end-device role); persisted, re-applied on AT+RELAY=1 |
-| `AT+RELAYSRV=<cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>` | Configure relay RX (serving role); persisted, re-applied on AT+RELAY=2. Requires LBM built with `ADD_RELAY_RX` |
+| `AT+JOIN=?`                      | Query current join state (`WisBlockJoinState`)     |
+| `AT+ADR=<0/1>` / `AT+ADR=?`      | ADR on/off                                         |
+| `AT+TXP=<0..15>` / `AT+TXP=?`    | TX power index                                     |
+| `AT+RELAY=<0/1/2>` / `AT+RELAY=?` | 0 = off, 1 = relay TX (end-device), 2 = relay RX (serving) |
+| `AT+RELAYED=<activation>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<2ndChEnable>:<2ndChFreqHz>:<2ndChAckFreqHz>:<2ndChDr>` / `AT+RELAYED=?` | Relay TX (end-device role) config; persisted, re-applied on AT+RELAY=1 |
+| `AT+RELAYSRV=<cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>` / `AT+RELAYSRV=?` | Relay RX (serving role) config; persisted, re-applied on AT+RELAY=2. Requires LBM built with `ADD_RELAY_RX` |
 | `AT+RELAYDEV=<idx>:<devAddr8hex>:<rootWorSKey32hex>:<unlimited0/1>:<bucketFactor>:<reloadRate>` | Register a trusted end-device (0-15) with the serving relay - **required** before it forwards anything for that device; not persisted |
+| `AT+RELAYDEV=?`                  | Returns an error - no local copy of the registered device list is kept to read back (and it contains a session key that shouldn't be echoed in plaintext regardless) |
 | `AT+RELAYDEVDEL=<idx>`            | Remove a trusted end-device from the serving relay's list |
 | `AT+SEND=<port>:<hex payload>`   | Send LoRaWAN uplink                                |
-| `AT+CFM=<0/1>`                   | Confirmed/unconfirmed uplinks                      |
+| `AT+CFM=<0/1>` / `AT+CFM=?`      | Confirmed/unconfirmed uplinks                      |
 | `AT+LINKCHECK`                   | Request a link check                               |
 | `AT+LINKCHECK=?`                 | Query the most recently answered link check's margin (dB) and gateway count, without sending a new request |
 | `AT+TIMEREQ`                     | Request network time (DeviceTimeReq)               |
-| `AT+P2P=<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | Set LoRa P2P radio params        |
-| `AT+CAD=<0/1>`                   | Enable/disable CAD before P2P TX                   |
-| `AT+RXBOOST=<0/1>`               | Enable/disable RX boosted gain (extra ~4-5mA RX current for a few dB sensitivity) |
+| `AT+P2P=<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` / `AT+P2P=?` | LoRa P2P radio params      |
+| `AT+CAD=<0/1>` / `AT+CAD=?`      | Enable/disable CAD before P2P TX                   |
+| `AT+RXBOOST=<0/1>` / `AT+RXBOOST=?` | Enable/disable RX boosted gain (extra ~4-5mA RX current for a few dB sensitivity) |
 | `AT+PSEND=<hex payload>`         | Send a LoRa P2P packet                             |
 | `AT+PRECV=<0/timeout_ms>`        | Put radio into RX (0 = continuous)                 |
 | `AT+PRECVDC=<rxTimeMs>:<sleepTimeMs>` | Put radio into SX1262 hardware RX duty-cycling (chip alternates RX/sleep on its own) |
 | `AT+PRECVDC=AUTO`                | Same, computed automatically from the currently configured bandwidth/SF/preamble length |
 | `AT+PRECVDC=AUTO:<txPreambleLengthSymbols>` | Same, computed against a given transmitter preamble length instead of this radio's own - prefer this form |
-| `AT+LOWPOWER=<0/1>`              | Enable/disable low power (DIO1 wake) mode           |
+| `AT+LOWPOWER=<0/1>` / `AT+LOWPOWER=?` | Enable/disable low power (DIO1 wake) mode      |
 | `AT+SAVE`                        | Persist current config to flash                    |
 | `AT+RESTORE`                     | Reload config from flash                           |
 | `AT+FACTORY`                     | Reset config to factory defaults                   |
 | `AT+STATUS`                      | Dump current config + join/link status             |
+
+**Why key material getters return `SET`/`UNSET` instead of the actual
+key:** an AT interface that echoes secret key material back over serial -
+often USB, sometimes a UART with no physical security at all - is exactly
+the kind of thing a real product's AT command set normally guards against.
+`AT+DEVEUI=?`/`AT+APPEUI=?`/`AT+DEVADDR=?` return their values in full
+since none of those are secret; `AT+APPKEY=?`/`AT+NWKSKEY=?`/`AT+APPSKEY=?`
+deliberately don't. If your application genuinely needs plaintext readback
+(e.g. a provisioning tool that already trusts this serial link), each of
+those three handlers in `WisBlockLoRaAT.cpp` is a few lines and clearly
+marked - change them to call the same `printHex()` helper the non-secret
+getters use, but that's a deliberate opt-in, not the default.
 
 Every setter here maps 1:1 to a public C++ API call, so the AT layer is just
 a thin serializer over `WisBlockLoRaWAN` — you never have two sources of
