@@ -668,6 +668,71 @@ sleep, worth having regardless), just not the answer to where the rest of
 the ~1mA was going. That turned out to be the SPI peripheral itself - see
 the next section.
 
+## RUI3 AT command compatibility
+
+Renamed four commands and changed one command's behavior to match
+[RUI3's AT command manual](https://docs.rakwireless.com/product-categories/software-apis-and-libraries/rui3/at-command-manual),
+so existing RUI3 tooling/scripts work against this library unmodified for
+the commands both support. This is a breaking change from this library's
+own prior naming (`AT+MODE`, `AT+REGION`, `AT+JOINMODE`, `AT+JOIN=?` no
+longer exist as command names) - deliberate, not an oversight, since
+keeping both names with *different value conventions* for the same
+setting would be a worse trap than a clean break: a script still using the
+old `AT+MODE=1` for P2P would now silently mean LoRaWAN instead if both
+names coexisted, because the values are inverted between this library's
+original convention and RUI3's.
+
+- **`AT+MODE` → `AT+NWM`**: values are inverted, not just renamed - this
+  library's original `AT+MODE` was `0 = LoRaWAN, 1 = P2P`; RUI3's `AT+NWM`
+  is `0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK`. `2` (P2P_FSK) is rejected
+  with an error - this library has no FSK P2P mode implemented at all, not
+  just under this command.
+- **`AT+REGION` → `AT+BAND`**: RUI3's region numbering doesn't match this
+  library's own `WisBlockRegion` enum values or order at all - built a
+  translation table (`bandIndexToRegion()`/`regionToBandIndex()` in
+  `WisBlockLoRaAT.cpp`) rather than just renaming the command. Two RUI3
+  band indices have no equivalent here and are rejected with an error:
+  `0` (EU433) and `12` (LA915) - this vendored LBM's `main.h` doesn't
+  define `REGION_EU_433` or `REGION_LA_915`, so those region tables were
+  never compiled in; picking a fallback region instead of erroring would
+  have been worse. Two `WisBlockRegion` values likewise have no RUI3 band
+  index at all (`WISBLOCK_REGION_CN470_RP_1_0`, `WISBLOCK_REGION_WW2G4`) -
+  library-specific regions beyond RUI3's set, simply not reachable via
+  `AT+BAND` (`AT+BAND=?` errors if the currently active region is one of
+  these, rather than printing a made-up index).
+- **`AT+JOINMODE` → `AT+NJM`**: values are inverted here too - this
+  library's original was `0 = OTAA, 1 = ABP`; RUI3's `AT+NJM` is
+  `0 = ABP, 1 = OTAA`.
+- **`AT+JOIN=?` → `AT+NJS=?`**: this library's `AT+JOIN=?` used to print
+  the raw `WisBlockJoinState` enum (`IDLE`/`IN_PROGRESS`/`SUCCEEDED`/
+  `FAILED`, i.e. 0-3). RUI3's `AT+NJS=?` is a plain joined/not-joined
+  boolean - now backed by `isJoined()`, not a cast of the richer enum.
+- **`AT+LINKCHECK`**: not just a value change - RUI3's version is a
+  persistent *mode* (`0` disabled, `1` request once, `2` request
+  automatically on every uplink from now on), not the one-shot
+  "trigger now" action plus "poll the last result" getter this library had
+  before. Modes `1`/`2` needed genuine new behavior, not a rename: added
+  `LoRaWANEngine::setLinkCheckMode()`, checked inside `send()` (the single
+  choke point every uplink goes through, regardless of whether it was
+  triggered via the AT layer or a direct `sendLoRaWAN()` call) - mode `1`
+  piggybacks a link check request onto the very next uplink and then
+  reverts itself to `0`; mode `2` does the same on every uplink
+  indefinitely, until explicitly turned off. `AT+LINKCHECK=?` now reports
+  the mode, not the last check's result - the result itself still arrives
+  asynchronously via `onLinkCheckAnswer()` either way (RUI3 doesn't have a
+  poll-style result getter either - it's event-driven there too).
+  `getLinkCheckResult()` is still available at the C++ layer for
+  applications that want to poll rather than use the callback; it's just
+  no longer surfaced under the `AT+LINKCHECK` name.
+
+Everything else keeps its existing name - `AT+DEVEUI`, `AT+APPEUI`/
+`AT+JOINEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY`,
+`AT+DR`, `AT+CLASS`, `AT+ADR`, `AT+TXP`, `AT+CFM`, `AT+SEND`, `AT+TIMEREQ`
+already matched RUI3's naming with no changes needed. RUI3 commands this
+library has no equivalent functionality for at all (BLE config, USB mode,
+sensor/interface commands, etc.) are simply absent, not stubbed - request
+any specific ones if you need them.
+
 ## Persistent idle current floor (fixed - SPI peripheral was never disabled)
 
 After every other lever - antenna power, radio SLEEP-command correctness,
@@ -892,21 +957,33 @@ except one-shot actions with nothing to read back (`AT+SEND`, `AT+PSEND`,
 `AT+PRECV`, `AT+PRECVDC`, `AT+RELAYDEVDEL`) and `AT+RELAYDEV`, whose stored
 values aren't kept anywhere readable on this side (see its own row below).
 
+Command names and value conventions follow
+[RUI3's AT command manual](https://docs.rakwireless.com/product-categories/software-apis-and-libraries/rui3/at-command-manual)
+wherever this library implements the equivalent functionality, so existing
+RUI3 tooling/scripts for `AT+NWM`/`AT+BAND`/`AT+NJM`/`AT+NJS`/`AT+LINKCHECK`
+work unmodified against this library too. RUI3 commands this library
+doesn't implement anything equivalent to are simply absent - not aliased,
+not stubbed - see the "RUI3 AT command compatibility" note further below
+for exactly what changed, why, and where the two diverge (`AT+BAND`'s
+region numbering doesn't fully overlap what this LBM vendoring supports;
+`AT+LINKCHECK` gained real automatic-trigger-on-uplink behavior, not just
+a rename).
+
 | Command                          | Description                                      |
 |-----------------------------------|---------------------------------------------------|
-| `AT+MODE=<0/1>` / `AT+MODE=?`    | 0 = LoRaWAN, 1 = LoRa P2P                          |
+| `AT+NWM=<0/1/2>` / `AT+NWM=?`    | 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (not supported - this library has no FSK P2P mode) |
 | `AT+DEVEUI=<hex8>` / `AT+DEVEUI=?` | Device EUI                                       |
 | `AT+APPEUI=<hex8>` / `AT+JOINEUI=<hex8>` / `AT+APPEUI=?` / `AT+JOINEUI=?` | Join EUI |
 | `AT+APPKEY=<hex16>` / `AT+APPKEY=?` | App/Network key (OTAA). **Getter returns `SET`/`UNSET` only, never the key itself** - see the security note below |
 | `AT+DEVADDR=<hex4>` / `AT+DEVADDR=?` | Device Address (ABP)                          |
 | `AT+NWKSKEY=<hex16>` / `AT+NWKSKEY=?` | Network Session Key (ABP). **Getter returns `SET`/`UNSET` only** |
 | `AT+APPSKEY=<hex16>` / `AT+APPSKEY=?` | App Session Key (ABP). **Getter returns `SET`/`UNSET` only** |
-| `AT+REGION=<0..13>` / `AT+REGION=?` | EU868, US915, AU915, AS923, KR920, IN865, RU864... |
+| `AT+BAND=<0..12>` / `AT+BAND=?`  | RUI3 numbering: 0 EU433 (unsupported), 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
 | `AT+DR=<0..15>` / `AT+DR=?`      | Data rate index                                    |
 | `AT+CLASS=<A/B/C>` / `AT+CLASS=?` | Device class                                      |
-| `AT+JOINMODE=<0/1>` / `AT+JOINMODE=?` | 0 = OTAA, 1 = ABP                            |
+| `AT+NJM=<0/1>` / `AT+NJM=?`      | 0 = ABP, 1 = OTAA                                  |
 | `AT+JOIN`                        | Start join procedure                               |
-| `AT+JOIN=?`                      | Query current join state (`WisBlockJoinState`)     |
+| `AT+NJS=?`                       | 0 = not joined, 1 = joined                         |
 | `AT+ADR=<0/1>` / `AT+ADR=?`      | ADR on/off                                         |
 | `AT+TXP=<0..15>` / `AT+TXP=?`    | TX power index                                     |
 | `AT+RELAY=<0/1/2>` / `AT+RELAY=?` | 0 = off, 1 = relay TX (end-device), 2 = relay RX (serving) |
@@ -917,8 +994,7 @@ values aren't kept anywhere readable on this side (see its own row below).
 | `AT+RELAYDEVDEL=<idx>`            | Remove a trusted end-device from the serving relay's list |
 | `AT+SEND=<port>:<hex payload>`   | Send LoRaWAN uplink                                |
 | `AT+CFM=<0/1>` / `AT+CFM=?`      | Confirmed/unconfirmed uplinks                      |
-| `AT+LINKCHECK`                   | Request a link check                               |
-| `AT+LINKCHECK=?`                 | Query the most recently answered link check's margin (dB) and gateway count, without sending a new request |
+| `AT+LINKCHECK=<0/1/2>` / `AT+LINKCHECK=?` | 0 = disabled, 1 = request once (on the next uplink), 2 = request automatically on every uplink |
 | `AT+TIMEREQ`                     | Request network time (DeviceTimeReq)               |
 | `AT+P2P=<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` / `AT+P2P=?` | LoRa P2P radio params      |
 | `AT+CAD=<0/1>` / `AT+CAD=?`      | Enable/disable CAD before P2P TX                   |

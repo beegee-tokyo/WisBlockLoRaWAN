@@ -223,6 +223,20 @@ bool LoRaWANEngine::send(uint8_t port, const uint8_t *data, uint8_t length, bool
 		// counter gets burned on an uplink that was never going anywhere.
 		return false;
 	}
+
+	// RUI3-compatible AT+LINKCHECK mode - see setLinkCheckMode()'s doc
+	// comment. Piggybacks a LinkCheckReq MAC command onto this uplink via
+	// the same requestLinkCheck() mechanism AT+LINKCHECK used to trigger
+	// directly; mode 1 consumes itself after one use, mode 2 persists.
+	if (linkCheckMode != 0)
+	{
+		requestLinkCheck();
+		if (linkCheckMode == 1)
+		{
+			linkCheckMode = 0;
+		}
+	}
+
 	smtc_modem_return_code_t rc = smtc_modem_request_uplink(kStackId, port, confirmed, data, length);
 	if (rc == SMTC_MODEM_RC_OK)
 	{

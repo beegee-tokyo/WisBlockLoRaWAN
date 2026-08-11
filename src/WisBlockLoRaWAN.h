@@ -71,6 +71,9 @@ public:
 	bool sendLoRaWAN(uint8_t port, const uint8_t *data, uint8_t length);
 	void requestLinkCheck() { ensureLoRaWANEngineStarted(); lorawan.requestLinkCheck(); }
 	bool getLinkCheckResult(WisBlockLinkCheckResult &out) const { return lorawan.getLinkCheckResult(out); }
+	/** See LoRaWANEngine::setLinkCheckMode()'s doc comment for the full RUI3-compatible behavior. */
+	void setLinkCheckMode(uint8_t mode) { lorawan.setLinkCheckMode(mode); }
+	uint8_t getLinkCheckMode() const { return lorawan.getLinkCheckMode(); }
 	void requestDeviceTime() { ensureLoRaWANEngineStarted(); lorawan.requestDeviceTime(); }
 
 	// --- LoRa P2P setup --------------------------------------------------

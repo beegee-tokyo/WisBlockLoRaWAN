@@ -67,6 +67,17 @@ public:
 	 * next successful link check answer overwrites it.
 	 */
 	bool getLinkCheckResult(WisBlockLinkCheckResult &out) const;
+	/**
+	 * RUI3-compatible AT+LINKCHECK mode: 0 = disabled, 1 = request a link
+	 * check on the very next uplink only (auto-reverts to 0 once that
+	 * uplink is queued), 2 = request one automatically on every uplink
+	 * from here on, until set back to 0. Checked and acted on inside
+	 * send() - see its doc comment - so it applies uniformly regardless of
+	 * whether the uplink was triggered via the AT layer or a direct
+	 * WisBlockLoRaWAN::sendLoRaWAN() call, matching RUI3's own behavior.
+	 */
+	void setLinkCheckMode(uint8_t mode) { linkCheckMode = mode; }
+	uint8_t getLinkCheckMode() const { return linkCheckMode; }
 	/** Requests device time; answer arrives later as an SMTC_MODEM_EVENT_LORAWAN_MAC_TIME event. */
 	void requestDeviceTime();
 
@@ -101,6 +112,7 @@ private:
 	// nothing pending regardless of whatever this flag happened to be
 	// left at from a previous run.
 	bool uplinkPending = false;
+	uint8_t linkCheckMode = 0; // see setLinkCheckMode()'s doc comment
 
 	JoinSuccessCb joinSuccessCb = nullptr;
 	JoinFailedCb joinFailedCb = nullptr;

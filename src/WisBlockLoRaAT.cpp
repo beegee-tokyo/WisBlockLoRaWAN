@@ -36,6 +36,91 @@ namespace
 		}
 		port->println();
 	}
+
+	// AT+BAND uses RUI3's region numbering (see the RUI3 AT command
+	// manual), which doesn't match WisBlockRegion's own enum values or
+	// order - this library predates the RUI3-compatibility pass and
+	// numbered regions in whatever order they were originally added.
+	// RUI3's EU433 (0) and LA915 (12) have no WisBlockRegion equivalent at
+	// all - this vendored LBM build's main.h doesn't define REGION_EU_433
+	// or REGION_LA_915, so those region tables were never compiled in;
+	// setBandIndexToRegion() returns false for them rather than silently
+	// picking something else.
+	bool bandIndexToRegion(int index, WisBlockRegion &outRegion)
+	{
+		switch (index)
+		{
+		case 1:
+			outRegion = WISBLOCK_REGION_CN470;
+			return true;
+		case 2:
+			outRegion = WISBLOCK_REGION_RU864;
+			return true;
+		case 3:
+			outRegion = WISBLOCK_REGION_IN865;
+			return true;
+		case 4:
+			outRegion = WISBLOCK_REGION_EU868;
+			return true;
+		case 5:
+			outRegion = WISBLOCK_REGION_US915;
+			return true;
+		case 6:
+			outRegion = WISBLOCK_REGION_AU915;
+			return true;
+		case 7:
+			outRegion = WISBLOCK_REGION_KR920;
+			return true;
+		case 8:
+			outRegion = WISBLOCK_REGION_AS923_1;
+			return true;
+		case 9:
+			outRegion = WISBLOCK_REGION_AS923_2;
+			return true;
+		case 10:
+			outRegion = WISBLOCK_REGION_AS923_3;
+			return true;
+		case 11:
+			outRegion = WISBLOCK_REGION_AS923_4;
+			return true;
+		default: // 0 (EU433), 12 (LA915), and anything else out of range
+			return false;
+		}
+	}
+
+	// Inverse of bandIndexToRegion() - returns -1 for WisBlockRegion values
+	// with no RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0,
+	// WISBLOCK_REGION_WW2G4 - library-specific regions beyond RUI3's set).
+	int regionToBandIndex(WisBlockRegion region)
+	{
+		switch (region)
+		{
+		case WISBLOCK_REGION_EU868:
+			return 4;
+		case WISBLOCK_REGION_US915:
+			return 5;
+		case WISBLOCK_REGION_AU915:
+			return 6;
+		case WISBLOCK_REGION_AS923_1:
+			return 8;
+		case WISBLOCK_REGION_AS923_2:
+			return 9;
+		case WISBLOCK_REGION_AS923_3:
+			return 10;
+		case WISBLOCK_REGION_AS923_4:
+			return 11;
+		case WISBLOCK_REGION_KR920:
+			return 7;
+		case WISBLOCK_REGION_IN865:
+			return 3;
+		case WISBLOCK_REGION_RU864:
+			return 2;
+		case WISBLOCK_REGION_CN470:
+			return 1;
+		default:
+			return -1;
+		}
+	}
 } // namespace
 
 WisBlockLoRaAT *WisBlockLoRaAT::activeInstanceForRx = nullptr;
@@ -227,14 +312,21 @@ void WisBlockLoRaAT::processLine(const char *line)
 		return;
 	}
 
-	if (startsWith(cmd, "+MODE=?"))
+	if (strcmp(cmd, "+NWM=?") == 0)
 	{
-		reply(lora->getWorkMode() == WISBLOCK_MODE_LORAWAN ? "LORAWAN" : "LORA_P2P");
+		// RUI3 numbering: 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (FSK not
+		// implemented by this library - see the AT+NWM= setter below).
+		port->println(lora->getWorkMode() == WISBLOCK_MODE_LORAWAN ? 1 : 0);
 	}
-	else if (startsWith(cmd, "+MODE="))
+	else if (startsWith(cmd, "+NWM="))
 	{
-		int v = atoi(cmd + 6);
-		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORA_P2P : WISBLOCK_MODE_LORAWAN);
+		int v = atoi(cmd + 5);
+		if (v == 2)
+		{
+			replyError("P2P_FSK not supported by this library");
+			return;
+		}
+		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORAWAN : WISBLOCK_MODE_LORA_P2P);
 		replyOk();
 	}
 	else if (strcmp(cmd, "+DEVEUI=?") == 0)
@@ -375,13 +467,25 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setABPKeys(keys.devAddr, keys.nwkSKey, keys.appSKey);
 		replyOk();
 	}
-	else if (strcmp(cmd, "+REGION=?") == 0)
+	else if (strcmp(cmd, "+BAND=?") == 0)
 	{
-		port->println((int)lora->getConfig().lorawan.region);
+		int idx = regionToBandIndex(lora->getConfig().lorawan.region);
+		if (idx < 0)
+		{
+			replyError("current region has no RUI3 band index");
+			return;
+		}
+		port->println(idx);
 	}
-	else if (startsWith(cmd, "+REGION="))
+	else if (startsWith(cmd, "+BAND="))
 	{
-		lora->setRegion((WisBlockRegion)atoi(cmd + 8));
+		WisBlockRegion region;
+		if (!bandIndexToRegion(atoi(cmd + 6), region))
+		{
+			replyError("unsupported band index - EU433/LA915 not built into this LBM vendoring");
+			return;
+		}
+		lora->setRegion(region);
 		replyOk();
 	}
 	else if (strcmp(cmd, "+DR=?") == 0)
@@ -406,13 +510,16 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setDeviceClass(dc);
 		replyOk();
 	}
-	else if (strcmp(cmd, "+JOINMODE=?") == 0)
+	else if (strcmp(cmd, "+NJM=?") == 0)
 	{
-		port->println(lora->getConfig().lorawan.joinMode == WISBLOCK_JOIN_ABP ? 1 : 0);
+		// RUI3 numbering: 0 = ABP, 1 = OTAA - inverted from this library's
+		// own WisBlockJoinMode enum (WISBLOCK_JOIN_OTAA = 0), so this
+		// translates rather than casting directly.
+		port->println(lora->getConfig().lorawan.joinMode == WISBLOCK_JOIN_ABP ? 0 : 1);
 	}
-	else if (startsWith(cmd, "+JOINMODE="))
+	else if (startsWith(cmd, "+NJM="))
 	{
-		lora->setJoinMode(atoi(cmd + 10) == 1 ? WISBLOCK_JOIN_ABP : WISBLOCK_JOIN_OTAA);
+		lora->setJoinMode(atoi(cmd + 5) == 0 ? WISBLOCK_JOIN_ABP : WISBLOCK_JOIN_OTAA);
 		replyOk();
 	}
 	else if (strcmp(cmd, "+JOIN") == 0)
@@ -420,9 +527,12 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->join();
 		replyOk();
 	}
-	else if (strcmp(cmd, "+JOIN=?") == 0)
+	else if (strcmp(cmd, "+NJS=?") == 0)
 	{
-		port->println((int)lora->joinState());
+		// RUI3: plain joined/not-joined boolean, not this library's own
+		// multi-state WisBlockJoinState (IDLE/IN_PROGRESS/SUCCEEDED/FAILED)
+		// - isJoined() is the right underlying call to match it, not a cast.
+		port->println(lora->isJoined() ? 1 : 0);
 	}
 	else if (strcmp(cmd, "+ADR=?") == 0)
 	{
@@ -652,26 +762,32 @@ void WisBlockLoRaAT::processLine(const char *line)
 		bool ok = lora->sendLoRaWAN(port_, payload, (uint8_t)(hexLen / 2));
 		ok ? replyOk() : replyError("send failed (not joined?)");
 	}
-	else if (strcmp(cmd, "+LINKCHECK") == 0)
-	{
-		lora->requestLinkCheck();
-		replyOk();
-	}
 	else if (strcmp(cmd, "+LINKCHECK=?") == 0)
 	{
-		WisBlockLinkCheckResult r;
-		if (lora->getLinkCheckResult(r))
+		// RUI3 semantics: this queries the current MODE (0/1/2), not the
+		// last check's result - see setLinkCheckMode()'s doc comment. The
+		// actual result, once one arrives, comes asynchronously via
+		// onLinkCheckAnswer() - poll-style access to it via
+		// getLinkCheckResult() is still available at the C++ layer, just
+		// no longer surfaced under this AT command name (RUI3 doesn't
+		// have an equivalent poll command either - it's event-driven
+		// there too).
+		port->println(lora->getLinkCheckMode());
+	}
+	else if (startsWith(cmd, "+LINKCHECK="))
+	{
+		// AT+LINKCHECK=<0/1/2> - 0 disabled, 1 request once (consumed on
+		// the next uplink), 2 request automatically on every uplink from
+		// here on. See LoRaWANEngine::setLinkCheckMode()'s doc comment for
+		// exactly how modes 1/2 get applied at send() time.
+		uint8_t mode = (uint8_t)atoi(cmd + 11);
+		if (mode > 2)
 		{
-			port->print("MARGIN=");
-			port->println(r.demodMargin);
-			port->print("GWCNT=");
-			port->println(r.gatewayCount);
-			replyOk();
+			replyError("bad mode - expected 0, 1, or 2");
+			return;
 		}
-		else
-		{
-			replyError("no link check answered yet - try AT+LINKCHECK first");
-		}
+		lora->setLinkCheckMode(mode);
+		replyOk();
 	}
 	else if (strcmp(cmd, "+TIMEREQ") == 0)
 	{

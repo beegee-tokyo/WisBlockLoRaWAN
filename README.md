@@ -21,7 +21,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 
 | <div style="width:150px">Command</div> | Description                                      |
 | :--- | :--- |
-| AT+MODE=_**0/1**_ / AT+MODE=?                  | 0 = LoRaWAN, 1 = LoRa P2P                          |
+| AT+MODE=_**0/1/2**_ / AT+MODE=?                  | 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (not supported - this library has no FSK P2P mode)                          |
 | AT+MODE=?                      | Query current mode                                 |
 | AT+DEVEUI=_**hex8**_ / AT+DEVEUI=?               | Device EUI                                     |
 | AT+APPEUI=_**hex8**_ / AT+JOINEUI <br> AT+APPEUI=? / AT+JOINEUI=? | Join EUI                                       |
@@ -29,12 +29,12 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+DEVADDR=_**hex4**_ / AT+DEVADDR=?             | Device Address (ABP)                           |
 | AT+NWKSKEY=_**hex16**_ / AT+NWKSKEY=?            | Network Session Key (ABP)                      |
 | AT+APPSKEY=_**hex16**_ / AT+APPSKEY=?            | App Session Key (ABP)                          |
-| AT+REGION=_**0..13**_ / AT+REGION=?             | EU868, US915, AU915, AS923, KR920, IN865, RU864... |
+| AT+BAND=_**0..12**_ / AT+BAND=?             | 0 EU433 (unsupported), 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
 | AT+DR=_**0..15**_ / AT+DR=?                 | Data rate                                     |
-| AT+CLASS=_**A/B/C**_ / AT+CLASS=?              | GDevice class                                       |
-| AT+JOINMODE=_**0/1**_ / AT+JOINMODE=?              | 0 = OTAA, 1 = ABP                                  |
+| AT+CLASS=_**A/B/C**_ / AT+CLASS=?              | Device class                                       |
+| AT+NJM=_**0/1**_ / AT+NJM=?              | 0 = ABP, 1 = OTAA                                  |
 | AT+JOIN                        | Start join procedure                               |
-| AT+JOIN=?                       | Query current join state (`WisBlockJoinState`)                               |
+| AT+NJS=?                       | 0 = not joined, 1 = joined                              |
 | AT+ADR=_**0/1**_ / AT+ADR=?                   | ADR on/off                                         |
 | AT+TXP=_**0..15**_ / AT+TXP=?                 | TX power index                                     |
 | AT+RELAY=_**0/1/2**_ / AT+RELAY=?              | 0 = off, 1 = relay TX (end-device), 2 = relay RX (serving) |
@@ -45,7 +45,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+RELAYDEVDEL=_**idx**_            | Remove a trusted end-device from the serving relay's list |
 | AT+SEND=_**port**_:_**hex payload**_   | Send LoRaWAN uplink                                |
 | AT+CFM=_**0/1**_/ AT+CFM=?                   | Confirmed/unconfirmed uplinks                      |
-| AT+LINKCHECK                   | Request a link check                               |
+| AT+LINKCHECK=<0/1/2>                   | 0 = disabled, 1 = request once (on the next uplink), 2 = request automatically on every uplink                               |
 | AT+LINKCHECK=?                 | Query the most recently answered link check's margin (dB) and gateway count, without sending a new request |
 | AT+TIMEREQ                     | Request network time (DeviceTimeReq)               |
 | AT+P2P=_**freq**_:_**sf**_:_**bw**_:_**cr**_:_**preamble**_:_**txpower**_ | Set LoRa P2P radio params        |
