@@ -207,24 +207,29 @@ bool WisBlockLoRaAT::parseHex(const char *hex, uint8_t *out, size_t outLen)
 
 void WisBlockLoRaAT::reply(const char *msg)
 {
-	port->println(msg);
+	port->printf("%s\r\n",msg);
+	port->printf("OK\r\n");
+	port->flush();
 }
 
 void WisBlockLoRaAT::replyOk()
 {
-	port->println("OK");
+	port->printf("OK\r\n");
+	port->flush();
 }
 
 void WisBlockLoRaAT::replyError(const char *reason)
 {
 	if (reason)
 	{
-		port->print("ERROR: ");
 		port->println(reason);
+		port->print("AT_ERROR\r\n");
+		port->flush();
 	}
 	else
 	{
-		port->println("ERROR");
+		port->println("AT_ERROR\r\n");
+		port->flush();
 	}
 }
 
@@ -287,7 +292,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		}
 		else
 		{
-			replyError("expected AT prefix");
+			replyError("AT_ERROR"); // expected AT prefix");
 		}
 		return;
 	}
@@ -316,14 +321,16 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		// RUI3 numbering: 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (FSK not
 		// implemented by this library - see the AT+NWM= setter below).
+		port->printf("AT+NWM=");
 		port->println(lora->getWorkMode() == WISBLOCK_MODE_LORAWAN ? 1 : 0);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+NWM="))
 	{
 		int v = atoi(cmd + 5);
 		if (v == 2)
 		{
-			replyError("P2P_FSK not supported by this library");
+			replyError("AT_PARAM_ERROR"); // P2P_FSK not supported by this library");
 			return;
 		}
 		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORAWAN : WISBLOCK_MODE_LORA_P2P);
@@ -331,14 +338,16 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+DEVEUI=?") == 0)
 	{
+		port->printf("AT+DEVEUI=");
 		printHex(port, lora->getConfig().lorawan.otaa.devEui, 8);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+DEVEUI="))
 	{
 		uint8_t eui[8];
 		if (!parseHex(cmd + 8, eui, 8))
 		{
-			replyError("bad hex, expected 16 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 16 chars");
 			return;
 		}
 		WisBlockOTAAKeys keys = lora->getConfig().lorawan.otaa;
@@ -348,7 +357,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+APPEUI=?") == 0 || strcmp(cmd, "+JOINEUI=?") == 0)
 	{
+		port->printf("AT+APPEUI=");
 		printHex(port, lora->getConfig().lorawan.otaa.joinEui, 8);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+APPEUI=") || startsWith(cmd, "+JOINEUI="))
 	{
@@ -356,7 +367,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		uint8_t eui[8];
 		if (!parseHex(hex, eui, 8))
 		{
-			replyError("bad hex, expected 16 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 16 chars");
 			return;
 		}
 		WisBlockOTAAKeys keys = lora->getConfig().lorawan.otaa;
@@ -383,14 +394,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		{
 			isSet = (key[i] != 0);
 		}
-		reply(isSet ? "SET" : "UNSET");
+		port->printf("AT+APPKEY=");
+		printHex(port, lora->getConfig().lorawan.otaa.appKey, 16);
+		replyOk();
+		// reply(isSet ? "SET" : "UNSET");
 	}
 	else if (startsWith(cmd, "+APPKEY="))
 	{
 		uint8_t key[16];
 		if (!parseHex(cmd + 8, key, 16))
 		{
-			replyError("bad hex, expected 32 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 32 chars");
 			return;
 		}
 		WisBlockOTAAKeys keys = lora->getConfig().lorawan.otaa;
@@ -402,14 +416,16 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		uint32_t addr = lora->getConfig().lorawan.abp.devAddr;
 		uint8_t bytes[4] = {(uint8_t)(addr >> 24), (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
+		port->printf("AT+DEVADDR=");
 		printHex(port, bytes, 4);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+DEVADDR="))
 	{
 		uint8_t addrBytes[4];
 		if (!parseHex(cmd + 9, addrBytes, 4))
 		{
-			replyError("bad hex, expected 8 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 8 chars");
 			return;
 		}
 		uint32_t addr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
@@ -428,14 +444,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		{
 			isSet = (key[i] != 0);
 		}
-		reply(isSet ? "SET" : "UNSET");
+		port->printf("AT+NWSKEY=");
+		printHex(port, lora->getConfig().lorawan.abp.nwkSKey, 16);
+		replyOk();
+		// reply(isSet ? "SET" : "UNSET");
 	}
 	else if (startsWith(cmd, "+NWKSKEY="))
 	{
 		uint8_t key[16];
 		if (!parseHex(cmd + 9, key, 16))
 		{
-			replyError("bad hex, expected 32 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 32 chars");
 			return;
 		}
 		WisBlockABPKeys keys = lora->getConfig().lorawan.abp;
@@ -452,14 +471,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		{
 			isSet = (key[i] != 0);
 		}
-		reply(isSet ? "SET" : "UNSET");
+		port->printf("AT+APPSKEY=");
+		printHex(port, lora->getConfig().lorawan.abp.appSKey, 16);
+		replyOk();
+		// reply(isSet ? "SET" : "UNSET");
 	}
 	else if (startsWith(cmd, "+APPSKEY="))
 	{
 		uint8_t key[16];
 		if (!parseHex(cmd + 9, key, 16))
 		{
-			replyError("bad hex, expected 32 chars");
+			replyError("AT_PARAM_ERROR"); // bad hex, expected 32 chars");
 			return;
 		}
 		WisBlockABPKeys keys = lora->getConfig().lorawan.abp;
@@ -475,7 +497,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 			replyError("current region has no RUI3 band index");
 			return;
 		}
+		port->printf("AT+BAND=");
 		port->println(idx);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+BAND="))
 	{
@@ -490,7 +514,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+DR=?") == 0)
 	{
+		port->printf("AT+DR=");
 		port->println(lora->getConfig().lorawan.dataRate);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+DR="))
 	{
@@ -500,7 +526,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 	else if (strcmp(cmd, "+CLASS=?") == 0)
 	{
 		WisBlockDeviceClass dc = lora->getConfig().lorawan.deviceClass;
-		reply(dc == WISBLOCK_CLASS_B ? "B" : dc == WISBLOCK_CLASS_C ? "C" : "A");
+		port->printf("AT+CLASS=");
+		reply(dc == WISBLOCK_CLASS_B ? "B" : dc == WISBLOCK_CLASS_C ? "C"
+																	: "A");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+CLASS="))
 	{
@@ -515,7 +544,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 		// RUI3 numbering: 0 = ABP, 1 = OTAA - inverted from this library's
 		// own WisBlockJoinMode enum (WISBLOCK_JOIN_OTAA = 0), so this
 		// translates rather than casting directly.
+		port->printf("AT+NJM=");
 		port->println(lora->getConfig().lorawan.joinMode == WISBLOCK_JOIN_ABP ? 0 : 1);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+NJM="))
 	{
@@ -532,11 +563,15 @@ void WisBlockLoRaAT::processLine(const char *line)
 		// RUI3: plain joined/not-joined boolean, not this library's own
 		// multi-state WisBlockJoinState (IDLE/IN_PROGRESS/SUCCEEDED/FAILED)
 		// - isJoined() is the right underlying call to match it, not a cast.
+		port->printf("AT+NJS=");
 		port->println(lora->isJoined() ? 1 : 0);
+		replyOk();
 	}
 	else if (strcmp(cmd, "+ADR=?") == 0)
 	{
+		port->printf("AT+ADR=");
 		port->println(lora->getConfig().lorawan.adrEnabled ? "1" : "0");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+ADR="))
 	{
@@ -545,7 +580,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+TXP=?") == 0)
 	{
+		port->printf("AT+TXP=");
 		port->println(lora->getConfig().lorawan.txPower);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+TXP="))
 	{
@@ -555,7 +592,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 
 	else if (strcmp(cmd, "+RELAY=?") == 0)
 	{
+		port->printf("AT+RELAY=");
 		port->println((int)lora->getConfig().lorawan.relayMode);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+RELAY="))
 	{
@@ -568,6 +607,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		// Same field order as the setter above: <activationMode>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<secondChEnable>:<secondChFreqHz>:<secondChAckFreqHz>:<secondChDr>
 		const WisBlockRelayEDConfig &cfg = lora->getConfig().lorawan.relayEDConfig;
+		port->printf("AT+RELAYED=");
 		port->print(cfg.activationMode);
 		port->print(":");
 		port->print(cfg.smartLevel);
@@ -583,6 +623,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		port->print(cfg.secondChannelAckFreqHz);
 		port->print(":");
 		port->println(cfg.secondChannelDr);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+RELAYED="))
 	{
@@ -624,6 +665,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		// Same field order as the setter above: <cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>
 		const WisBlockRelayServingConfig &cfg = lora->getConfig().lorawan.relayServingConfig;
+		port->printf("AT+RELAYSRV=");
 		port->print(cfg.cadPeriod);
 		port->print(":");
 		port->print(cfg.channelFreqHz);
@@ -635,6 +677,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		port->print(cfg.errorPpm);
 		port->print(":");
 		port->println(cfg.cadToRxSymb);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+RELAYSRV="))
 	{
@@ -676,7 +719,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		// LBM with no local copy retained to read back, and the entries
 		// contain a root session key (rootWorSKey) that shouldn't be echoed
 		// in plaintext regardless (see the +APPKEY=? SECURITY note above).
-		replyError("not supported - trusted device list has no local readable copy");
+		replyError("AT_PARAM_ERROR"); // not supported - trusted device list has no local readable copy");
 	}
 	else if (startsWith(cmd, "+RELAYDEV="))
 	{
@@ -688,7 +731,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		char idxStr[8] = {0}, addrStr[16] = {0}, keyStr[40] = {0}, unlimStr[8] = {0}, bucketStr[8] = {0}, reloadStr[8] = {0};
 		if (sscanf(args, "%7[^:]:%15[^:]:%39[^:]:%7[^:]:%7[^:]:%7[^:]", idxStr, addrStr, keyStr, unlimStr, bucketStr, reloadStr) != 6)
 		{
-			replyError("expected <idx>:<devaddr8hex>:<key32hex>:<unlimited0/1>:<bucket>:<reload>");
+			replyError("AT_PARAM_ERROR"); // expected <idx>:<devaddr8hex>:<key32hex>:<unlimited0/1>:<bucket>:<reload>");
 			return;
 		}
 
@@ -697,30 +740,32 @@ void WisBlockLoRaAT::processLine(const char *line)
 		uint8_t addrBytes[4];
 		if (!parseHex(addrStr, addrBytes, 4))
 		{
-			replyError("bad devaddr hex, expected 8 chars");
+			replyError("AT_PARAM_ERROR"); // bad devaddr hex, expected 8 chars");
 			return;
 		}
 		device.devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
 						 ((uint32_t)addrBytes[2] << 8) | addrBytes[3];
 		if (!parseHex(keyStr, device.rootWorSKey, 16))
 		{
-			replyError("bad key hex, expected 32 chars");
+			replyError("AT_PARAM_ERROR"); // bad key hex, expected 32 chars");
 			return;
 		}
 		device.unlimitedForward = atoi(unlimStr) != 0;
 		device.bucketFactor = (uint8_t)atoi(bucketStr);
 		device.reloadRate = (uint8_t)atoi(reloadStr);
 
-		lora->addRelayTrustedDevice(device) ? replyOk() : replyError("failed (is AT+RELAY=2 active? was LBM built with ADD_RELAY_RX?)");
+		lora->addRelayTrustedDevice(device) ? replyOk() : replyError("AT_ERROR"); // failed (is AT+RELAY=2 active? was LBM built with ADD_RELAY_RX?)");
 	}
 	else if (startsWith(cmd, "+RELAYDEVDEL="))
 	{
 		uint8_t idx = (uint8_t)atoi(cmd + 13);
-		lora->removeRelayTrustedDevice(idx) ? replyOk() : replyError("failed");
+		lora->removeRelayTrustedDevice(idx) ? replyOk() : replyError("AT_ERROR"); // failed");
 	}
 	else if (strcmp(cmd, "+CFM=?") == 0)
 	{
+		port->printf("AT+CFM=");
 		port->println(lora->getConfig().lorawan.confirmedUplinks ? "1" : "0");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+CFM="))
 	{
@@ -733,14 +778,14 @@ void WisBlockLoRaAT::processLine(const char *line)
 		const char *colon = strchr(args, ':');
 		if (!colon)
 		{
-			replyError("expected <port>:<hexpayload>");
+			replyError("AT_PARAM_ERROR"); // expected <port>:<hexpayload>");
 			return;
 		}
 		char portStr[8] = {0};
 		size_t portLen = colon - args;
 		if (portLen >= sizeof(portStr))
 		{
-			replyError("port too long");
+			replyError("AT_PARAM_ERROR"); // port too long");
 			return;
 		}
 		memcpy(portStr, args, portLen);
@@ -750,17 +795,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		size_t hexLen = strlen(hex);
 		if (hexLen % 2 != 0 || hexLen / 2 > 242)
 		{
-			replyError("bad payload hex");
+			replyError("AT_PARAM_ERROR"); // bad payload hex");
 			return;
 		}
 		uint8_t payload[242];
 		if (!parseHex(hex, payload, hexLen / 2))
 		{
-			replyError("bad payload hex");
+			replyError("AT_PARAM_ERROR"); // bad payload hex");
 			return;
 		}
 		bool ok = lora->sendLoRaWAN(port_, payload, (uint8_t)(hexLen / 2));
-		ok ? replyOk() : replyError("send failed (not joined?)");
+		ok ? replyOk() : replyError("AT_NO_NETWORK_JOINED"); // send failed (not joined?)");
 	}
 	else if (strcmp(cmd, "+LINKCHECK=?") == 0)
 	{
@@ -772,7 +817,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 		// no longer surfaced under this AT command name (RUI3 doesn't
 		// have an equivalent poll command either - it's event-driven
 		// there too).
+		port->printf("AT+LINKCHECK=");
 		port->println(lora->getLinkCheckMode());
+		replyOk();
 	}
 	else if (startsWith(cmd, "+LINKCHECK="))
 	{
@@ -783,7 +830,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		uint8_t mode = (uint8_t)atoi(cmd + 11);
 		if (mode > 2)
 		{
-			replyError("bad mode - expected 0, 1, or 2");
+			replyError("AT_PARAM_ERROR"); // bad mode - expected 0, 1, or 2");
 			return;
 		}
 		lora->setLinkCheckMode(mode);
@@ -791,6 +838,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+TIMEREQ") == 0)
 	{
+		port->printf("AT+TIMEREQ=");
 		lora->requestDeviceTime();
 		replyOk();
 	}
@@ -798,6 +846,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 	{
 		// Same field order as the setter above: <freqHz>:<sf>:<bw>:<cr>:<preamble>:<txpower>
 		const WisBlockP2PSettings &s = lora->getP2PSettings();
+		port->printf("AT+P2P=");
 		port->print(s.frequencyHz);
 		port->print(":");
 		port->print(s.spreadingFactor);
@@ -809,6 +858,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		port->print(s.preambleLength);
 		port->print(":");
 		port->println(s.txPowerDbm);
+		replyOk();
 	}
 	else if (startsWith(cmd, "+P2P="))
 	{
@@ -832,7 +882,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 
 		if (freq == 0)
 		{
-			replyError("bad frequency");
+			replyError("AT_PARAM_ERROR"); // bad frequency");
 			return;
 		}
 		lora->setP2PFrequency(freq);
@@ -845,7 +895,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+CAD=?") == 0)
 	{
+		port->printf("AT+CAD=");
 		port->println(lora->getP2PSettings().cadEnabled ? "1" : "0");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+CAD="))
 	{
@@ -854,7 +906,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+RXBOOST=?") == 0)
 	{
+		port->printf("AT+RXBOOST=");
 		port->println(lora->getP2PSettings().rxBoostedGainEnabled ? "1" : "0");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+RXBOOST="))
 	{
@@ -870,17 +924,17 @@ void WisBlockLoRaAT::processLine(const char *line)
 		size_t hexLen = strlen(hex);
 		if (hexLen % 2 != 0 || hexLen / 2 > 255)
 		{
-			replyError("bad payload hex");
+			replyError("AT_PARAM_ERROR"); // bad payload hex");
 			return;
 		}
 		uint8_t payload[255];
 		if (!parseHex(hex, payload, hexLen / 2))
 		{
-			replyError("bad payload hex");
+			replyError("AT_PARAM_ERROR"); // bad payload hex");
 			return;
 		}
 		bool ok = lora->sendP2P(payload, (uint8_t)(hexLen / 2));
-		ok ? replyOk() : replyError("send failed");
+		ok ? replyOk() : replyError("AT_ERROR"); // send failed");
 	}
 	else if (startsWith(cmd, "+PRECV="))
 	{
@@ -912,7 +966,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 		}
 		if (!ok)
 		{
-			replyError("preamble too short for any usable duty-cycle window");
+			replyError("AT_PARAM_ERROR"); // preamble too short for any usable duty-cycle window");
 			return;
 		}
 		lora->startP2PReceiveDutyCycle(rxTimeMs, sleepTimeMs);
@@ -934,7 +988,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 
 		if (rxTimeMs == 0 || sleepTimeMs == 0)
 		{
-			replyError("bad rxTimeMs/sleepTimeMs");
+			replyError("AT_PARAM_ERROR"); // bad rxTimeMs/sleepTimeMs");
 			return;
 		}
 		lora->startP2PReceiveDutyCycle(rxTimeMs, sleepTimeMs);
@@ -942,7 +996,9 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+LOWPOWER=?") == 0)
 	{
+		port->printf("AT+LOWPOWER=");
 		port->println(lora->isLowPowerEnabled() ? "1" : "0");
+		replyOk();
 	}
 	else if (startsWith(cmd, "+LOWPOWER="))
 	{
@@ -951,15 +1007,15 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (strcmp(cmd, "+SAVE") == 0)
 	{
-		lora->saveConfig() ? replyOk() : replyError("flash write failed");
+		lora->saveConfig() ? replyOk() : replyError("AT_ERROR"); // flash write failed");
 	}
 	else if (strcmp(cmd, "+RESTORE") == 0)
 	{
-		lora->restoreConfig() ? replyOk() : replyError("no saved config found, defaults loaded");
+		lora->restoreConfig() ? replyOk() : replyError("AT_ERROR"); // no saved config found, defaults loaded");
 	}
 	else if (strcmp(cmd, "+FACTORY") == 0)
 	{
-		lora->factoryReset() ? replyOk() : replyError("flash erase failed");
+		lora->factoryReset() ? replyOk() : replyError("AT_ERROR"); // flash erase failed");
 	}
 	else if (strcmp(cmd, "+STATUS") == 0)
 	{
@@ -968,7 +1024,7 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else
 	{
-		replyError("unknown command");
+		replyError("AT_ERROR"); // unknown command");
 	}
 }
 
