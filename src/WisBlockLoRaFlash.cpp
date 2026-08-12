@@ -90,9 +90,28 @@ bool init()
 
 bool read(const char *key, uint8_t *buf, size_t len)
 {
-	// NVS keys are limited to 15 chars; our keys ("wb_cfg", "wb_lbm_0"..
-	// "wb_lbm_5") all fit comfortably.
+	// FIX: calling getBytes() directly on a key that doesn't exist yet is
+	// functionally fine (returns 0, so this correctly returns false below)
+	// but the ESP32 Arduino core's Preferences library logs a scary-looking
+	// "[E][Preferences.cpp] getBytesLength(): nvs_get_blob len fail: ...
+	// NOT_FOUND" for every single miss, regardless of whether the caller
+	// treats a miss as expected. Every key this library reads is
+	// legitimately absent on a truly fresh board (wb_cfg before the first
+	// saveConfig(), wb_lbm_crash/wb_lbm_crash_flag before LBM's very first
+	// crash-status check, wb_lbm_0.. before the first LBM context store) -
+	// and LBM's own crash-status HAL callbacks in particular get called
+	// many times during a single smtc_modem_init() (once per internal
+	// service that checks for a stored crash on bring-up), so a fresh
+	// board could log dozens of these for something that was never
+	// actually an error. isKey() checks NVS's own key-presence flag
+	// without triggering that log path at all - same functional result
+	// (false on a genuine miss), silent about it.
 	prefs.begin(WISBLOCK_NVS_NAMESPACE, true /* read-only */);
+	if (!prefs.isKey(key))
+	{
+		prefs.end();
+		return false;
+	}
 	size_t got = prefs.getBytes(key, buf, len);
 	prefs.end();
 	return got == len;

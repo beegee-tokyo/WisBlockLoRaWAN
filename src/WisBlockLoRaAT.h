@@ -10,6 +10,9 @@
 #include <Stream.h>
 #include <stddef.h> // size_t
 
+/// \todo used in main application to handle AT commands from loop
+#define AT_CMD 0b0000000000100000
+
 class WisBlockLoRaAT
 {
 public:

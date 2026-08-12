@@ -1060,3 +1060,45 @@ void loop() {
 
 See `src/WisBlockLoRaWAN.h` for the full API and callback signatures, and the
 `examples/` folder for both LoRaWAN and LoRa P2P end-to-end sketches.
+
+## ESP32/RAK3312: noisy "Preferences.cpp getBytesLength() NOT_FOUND" errors on first boot (fixed)
+
+First test on RAK3312 hardware after this library's GitHub publication
+turned up something alarming-looking in the boot log: roughly twenty
+`[E][Preferences.cpp:503] getBytesLength(): nvs_get_blob len fail:
+wb_lbm_crash_flag NOT_FOUND` lines during `lora.begin()`, plus more later
+at join time. Worth being precise about what this was and wasn't:
+
+**Not a bug in LBM, and not actually a functional failure.** LBM's crash-
+status HAL callback (`smtc_modem_hal_crashlog_get_status()`) genuinely
+does get called many times during a single `smtc_modem_init()` - once per
+internal service that checks for a stored crash on its own bring-up
+(class B, class C, relay TX, relay RX, ALC sync, and others) - and that's
+expected LBM behavior, not something to reduce the call count of. Every
+key this library ever reads (`wb_cfg`, `wb_lbm_crash`, `wb_lbm_crash_flag`,
+`wb_lbm_0`..`wb_lbm_5`) is legitimately absent on a genuinely fresh board,
+before the very first `saveConfig()`/crash/context write - a miss here was
+never a real error, and `WisBlockLoRaFlash::read()`'s return value
+(`false` on a miss) was already functionally correct throughout.
+
+**The actual issue:** `WisBlockLoRaFlash::read()`'s ESP32 backend called
+`Preferences::getBytes()` directly. Internally, that calls
+`getBytesLength()`, which calls `nvs_get_blob()` to determine the stored
+size - and the ESP32 Arduino core's own `Preferences.cpp` unconditionally
+logs via `log_e()` whenever that call returns `NOT_FOUND`, regardless of
+whether the caller treats a miss as an expected, ordinary condition (which
+this one always does). With LBM calling the crash-status callback ~20
+times per `smtc_modem_init()`, a single fresh-board boot could produce
+exactly the wall of red `[E]` lines the log showed - real log noise, but
+not an actual malfunction anywhere in the read/write path.
+
+**Fixed** by checking `Preferences::isKey(key)` first and returning `false`
+immediately on a miss, before ever calling `getBytes()`. Verified directly
+against the ESP32 Arduino core's own `Preferences.cpp` source: `isKey()`
+calls `getType()`, which checks the same underlying `nvs_get_blob()`
+condition but does *not* call `log_e()` on failure - so this is the
+official, intended way to check for a key's existence quietly. Identical
+functional behavior (`read()` still returns `false` on a genuine miss),
+just without conscripting the ESP-IDF logger into announcing every single
+one of them as if something had gone wrong.
+
