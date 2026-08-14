@@ -1102,3 +1102,55 @@ functional behavior (`read()` still returns `false` on a genuine miss),
 just without conscripting the ESP-IDF logger into announcing every single
 one of them as if something had gone wrong.
 
+## `setADR(false)` silently not taking effect - ADR bit stayed on, DR kept drifting via real network commands (fixed)
+
+RAK3312 LoRaWAN Class A field test: `AT+DR=3` / `setADR(false)` at startup,
+but the very first application uplink went out at DR4, not DR3 - and the
+network's own log showed `"adr": true` on every single frame, with the
+network later issuing genuine `LinkADRReq` MAC commands that the device
+correctly obeyed, shifting it to DR5. None of this should happen with ADR
+off - and a follow-up test nailed the exact mechanism: manually calling
+`AT+DR=` or `AT+ADR=0` again after join produced LBM's own trace line,
+verbatim: `ERROR: ADR with a bad DataRate value`.
+
+**Root cause, traced directly into LBM's `smtc_modem.c`:**
+`smtc_modem_adr_set_profile(..., SMTC_MODEM_ADR_PROFILE_CUSTOM, ...)` -
+what `setADR(false)`/`setDataRate()` map to - validates the requested DR
+against `mask_dr_allowed`, the union of DR ranges every *currently
+enabled* uplink channel supports. Right after a fresh join, only the
+region's default join channels are enabled, and their DR range can be
+narrower than what the network's post-join `NewChannelReq` MAC commands
+later add (visible in the device's own log, right there as `Cmd
+new_channel_parser` lines a few frames after join). If the requested DR
+isn't covered yet, this call fails outright
+(`SMTC_MODEM_RC_INVALID`) and - critically - LBM leaves the ADR profile
+exactly as it was *before* the call: still `NETWORK_CONTROLLED`, its own
+default at init. `LoRaWANEngine::applyAdrProfile()` discarded that return
+code entirely - a bare `void` - so this failure was completely invisible
+even outside debug builds. Every symptom traces back to this one silent
+failure: the ADR bit stayed on because the profile never actually left
+`NETWORK_CONTROLLED`; the network's own ADR engine then legitimately saw
+that bit and ran its own algorithm; DR4 was LBM's own network-controlled
+selection, not the requested DR3; and the device correctly obeyed the
+resulting `LinkADRReq` because it genuinely was still in that mode the
+whole time.
+
+**Fixed** two ways:
+1. `setADR()`/`setDataRate()` now return `bool` (`false` doesn't mean
+   rejected - the requested value is still stored in `config.lorawan` and
+   will apply as soon as it's achievable - it means "not active on the
+   radio yet"). `AT+DR=`/`AT+ADR=` print an explicit `PENDING` note in that
+   case instead of silently claiming success.
+2. Added an automatic retry: `LoRaWANEngine` tracks `adrProfileApplied`,
+   and if a `CUSTOM` profile push failed, retries it after every
+   subsequent `TXDONE` event - the most likely moment a channel-widening
+   downlink has just been processed on a prior RX window, without needing
+   to parse which specific MAC command arrived. Retrying while ADR is on
+   is a harmless no-op, and this stops firing entirely once a retry
+   succeeds. In the common case (join, then a `NewChannelReq` arrives a
+   few frames later, as in the field test that surfaced this), ADR-off
+   should now take effect on its own within the first few uplinks with no
+   application action needed - but until it does, `getConfig().lorawan.adrEnabled`
+   reflects what was *requested*, not necessarily what's *active*; use the
+   new return value if an application needs to know the difference in the
+   moment.

@@ -154,11 +154,11 @@ void WisBlockLoRaWAN::setRegion(WisBlockRegion region)
 	applyLoRaWANSettings();
 }
 
-void WisBlockLoRaWAN::setDataRate(uint8_t dataRate)
+bool WisBlockLoRaWAN::setDataRate(uint8_t dataRate)
 {
 	config.lorawan.dataRate = dataRate;
 	ensureLoRaWANEngineStarted();
-	lorawan.setDataRate(dataRate);
+	return lorawan.setDataRate(dataRate);
 }
 
 void WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
@@ -168,11 +168,11 @@ void WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
 	lorawan.setDeviceClass(deviceClass);
 }
 
-void WisBlockLoRaWAN::setADR(bool enabled)
+bool WisBlockLoRaWAN::setADR(bool enabled)
 {
 	config.lorawan.adrEnabled = enabled;
 	ensureLoRaWANEngineStarted();
-	lorawan.setADR(enabled);
+	return lorawan.setADR(enabled);
 }
 
 void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)

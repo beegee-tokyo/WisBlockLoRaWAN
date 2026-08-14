@@ -51,9 +51,43 @@ public:
 	bool send(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed);
 
 	void setDeviceClass(WisBlockDeviceClass deviceClass);
-	void setADR(bool enabled);
+	/**
+	 * FIX (root cause of a confirmed, reproducible bug: setADR(false) with
+	 * a fixed DR "silently" not taking effect - the frame's ADR bit stayed
+	 * 1, the network's own ADR engine kept issuing LinkADRReq, and the
+	 * device kept obeying them, all despite the app correctly calling
+	 * this. Traced to LBM's smtc_modem.c: smtc_modem_adr_set_profile()
+	 * builds its custom single-DR distribution by intersecting the
+	 * requested DR against smtc_modem_custom_dr_distribution_to_tab()'s
+	 * mask_dr_allowed - the union of DR ranges supported by every
+	 * *currently enabled* uplink channel. Right after a fresh join, only
+	 * the region's default join channels are enabled; if the requested DR
+	 * isn't in their range (common - e.g. AS923's default channels don't
+	 * cover every DR the network's later NewChannelReq-added channels do),
+	 * the call fails outright with SMTC_MODEM_RC_INVALID and LBM's own
+	 * trace prints "ADR with a bad DataRate value" - and silently leaves
+	 * the ADR profile exactly as it was before the call (still
+	 * NETWORK_CONTROLLED, LBM's own default), not CUSTOM. This function
+	 * used to discard that return code entirely - applyAdrProfile() was a
+	 * bare void, so this failure was invisible even in normal (non-debug)
+	 * builds.
+	 *
+	 * Returns false if the requested DR isn't currently achievable given
+	 * the presently-enabled channels - config.lorawan.adrEnabled/dataRate
+	 * still reflect what you asked for (so a later retry will use the
+	 * right values), but the radio is NOT yet running with ADR actually
+	 * off. See handleEvents()'s TXDONE case for the automatic retry this
+	 * triggers - once the network's post-join channel-widening downlinks
+	 * (visible in your own log as "Cmd new_channel_parser") land and
+	 * enable wider-range channels, a retry after the next uplink will
+	 * very likely succeed on its own with no application action needed -
+	 * but until it does, don't assume ADR is actually off just because
+	 * you called this.
+	 */
+	bool setADR(bool enabled);
 	void setTxPower(uint8_t txPowerIndex);
-	void setDataRate(uint8_t dataRate);
+	/** See setADR()'s doc comment - same underlying mechanism and same meaning for the return value. */
+	bool setDataRate(uint8_t dataRate);
 
 	/** Requests link check; answer arrives later as an SMTC_MODEM_EVENT_LINK_CHECK event. */
 	void requestLinkCheck();
@@ -113,6 +147,13 @@ private:
 	// left at from a previous run.
 	bool uplinkPending = false;
 	uint8_t linkCheckMode = 0; // see setLinkCheckMode()'s doc comment
+	// FIX: see setADR()'s doc comment. Set false whenever applyAdrProfile()
+	// fails to actually push the requested CUSTOM (ADR-off) profile to LBM
+	// - checked and retried once per uplink in handleEvents()'s TXDONE
+	// case until it succeeds. Left true (a harmless no-op retry condition)
+	// when ADR is on, since NETWORK_CONTROLLED essentially never fails
+	// this validation the same way.
+	bool adrProfileApplied = true;
 
 	JoinSuccessCb joinSuccessCb = nullptr;
 	JoinFailedCb joinFailedCb = nullptr;
@@ -121,7 +162,7 @@ private:
 	TimeRequestCb timeRequestCb = nullptr;
 	LinkCheckCb linkCheckCb = nullptr;
 
-	void applyAdrProfile(); // builds the custom dr_custom_distribution_data table when ADR is off
+	bool applyAdrProfile(); // builds the custom dr_custom_distribution_data table when ADR is off; see setADR()'s doc comment for the return value
 };
 
 #endif // LORAWAN_ENGINE_H

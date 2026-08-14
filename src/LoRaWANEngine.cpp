@@ -256,10 +256,10 @@ void LoRaWANEngine::setDeviceClass(WisBlockDeviceClass deviceClass)
 	// wired up here yet since it needs an app-chosen periodicity value.
 }
 
-void LoRaWANEngine::setADR(bool enabled)
+bool LoRaWANEngine::setADR(bool enabled)
 {
 	settings.adrEnabled = enabled;
-	applyAdrProfile();
+	return applyAdrProfile();
 }
 
 void LoRaWANEngine::setTxPower(uint8_t txPowerIndex)
@@ -274,24 +274,40 @@ void LoRaWANEngine::setTxPower(uint8_t txPowerIndex)
 	// release exposes one, wire it here.
 }
 
-void LoRaWANEngine::setDataRate(uint8_t dataRate)
+bool LoRaWANEngine::setDataRate(uint8_t dataRate)
 {
 	settings.dataRate = dataRate;
-	applyAdrProfile();
+	return applyAdrProfile();
 }
 
-void LoRaWANEngine::applyAdrProfile()
+bool LoRaWANEngine::applyAdrProfile()
 {
 	if (settings.adrEnabled)
 	{
 		uint8_t unused[SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH] = {0};
 		smtc_modem_adr_set_profile(kStackId, SMTC_MODEM_ADR_PROFILE_NETWORK_CONTROLLED, unused);
+		adrProfileApplied = true;
+		return true;
 	}
 	else
 	{
 		uint8_t distribution[SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH];
 		buildSingleDrDistribution(settings.dataRate, distribution);
-		smtc_modem_adr_set_profile(kStackId, SMTC_MODEM_ADR_PROFILE_CUSTOM, distribution);
+		// FIX: see setADR()'s doc comment for the full mechanism - this
+		// call fails outright (SMTC_MODEM_RC_INVALID, LBM's own trace
+		// prints "ADR with a bad DataRate value") if settings.dataRate
+		// isn't in the union of DR ranges every *currently enabled*
+		// uplink channel supports, which right after a fresh join is only
+		// the region's default join channels - often narrower than what
+		// the network's later NewChannelReq-added channels support. LBM
+		// leaves the ADR profile exactly as it was before this call on
+		// failure (still NETWORK_CONTROLLED, its own default) - never
+		// silently discard this return code, or the app has no way to
+		// know CUSTOM/ADR-off never actually took effect.
+		smtc_modem_return_code_t rc =
+			smtc_modem_adr_set_profile(kStackId, SMTC_MODEM_ADR_PROFILE_CUSTOM, distribution);
+		adrProfileApplied = (rc == SMTC_MODEM_RC_OK);
+		return adrProfileApplied;
 	}
 }
 
@@ -398,6 +414,20 @@ uint32_t LoRaWANEngine::handleEvents()
 			uplinkPending = false;
 			WisBlockTxResult r;
 			r.success = (event.event_data.txdone.status != SMTC_MODEM_EVENT_TXDONE_NOT_SENT);
+			// FIX: see setADR()'s doc comment for the full mechanism this
+			// closes the loop on. A TXDONE means at least one uplink has
+			// gone out since the last attempt, which is exactly when the
+			// network's channel-widening MAC commands (NewChannelReq etc.)
+			// are most likely to have just been processed on a prior RX
+			// window - the best available moment to cheaply retry, without
+			// needing to parse which specific MAC command was received.
+			// Retrying with adrEnabled still true is a harmless no-op
+			// (see applyAdrProfile()); this doesn't fire at all once a
+			// retry succeeds.
+			if (!adrProfileApplied)
+			{
+				applyAdrProfile();
+			}
 			if (txFinishedCb)
 			{
 				txFinishedCb(r);

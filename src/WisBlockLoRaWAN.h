@@ -39,9 +39,18 @@ public:
 	void setABPKeys(uint32_t devAddr, const uint8_t nwkSKey[16], const uint8_t appSKey[16]);
 	void setJoinMode(WisBlockJoinMode mode);
 	void setRegion(WisBlockRegion region);
-	void setDataRate(uint8_t dataRate);
+	/**
+	 * Returns true if this DR is actually active on the radio right now.
+	 * A false return doesn't mean the request was rejected outright - see
+	 * LoRaWANEngine::setADR()'s doc comment: the requested DR is stored
+	 * either way and retried automatically after every uplink until the
+	 * network's channel list allows it, most commonly right after a fresh
+	 * join, before its post-join NewChannelReq MAC commands have landed.
+	 */
+	bool setDataRate(uint8_t dataRate);
 	void setDeviceClass(WisBlockDeviceClass deviceClass);
-	void setADR(bool enabled);
+	/** See setDataRate()'s doc comment - same underlying mechanism and same meaning for the return value. */
+	bool setADR(bool enabled);
 	void setTxPower(uint8_t txPowerIndex);
 	void setConfirmedUplinks(bool confirmed);
 	void setRelayMode(WisBlockRelayMode mode);

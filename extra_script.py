@@ -117,7 +117,7 @@ defines = [
     # gated by this in some LBM internals, not just our own port). 0 = off.
     # Flip to 1 here (or override via your own platformio.ini build_flags)
     # for verbose LBM-internal trace output during bring-up.
-    ("MODEM_HAL_DBG_TRACE", 0),
+    # ("MODEM_HAL_DBG_TRACE", 0),
 ]
 
 env.Append(CPPDEFINES=defines)

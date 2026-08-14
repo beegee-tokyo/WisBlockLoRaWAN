@@ -137,7 +137,7 @@ void WisBlockLoRaAT::begin(WisBlockLoRaWAN &loraRef, Stream &portRef)
 	lineLength = 0;
 
 #ifdef ARDUINO_ARCH_ESP32
-	// backgroundRxActive = true; 
+	backgroundRxActive = true;
 	Serial.onEvent(usbEventCallback);
 #endif
 }
@@ -207,7 +207,7 @@ bool WisBlockLoRaAT::parseHex(const char *hex, uint8_t *out, size_t outLen)
 
 void WisBlockLoRaAT::reply(const char *msg)
 {
-	port->printf("%s\r\n", msg);
+	port->printf("%s\r\n",msg);
 	port->printf("OK\r\n");
 	port->flush();
 }
@@ -520,7 +520,15 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (startsWith(cmd, "+DR="))
 	{
-		lora->setDataRate((uint8_t)atoi(cmd + 4));
+		// See LoRaWANEngine::setADR()'s doc comment: a false return here
+		// doesn't mean the command failed - the requested DR is stored and
+		// retried automatically after every uplink - just that it isn't
+		// active on the radio yet, most commonly right after a fresh join
+		// before the network's channel-widening MAC commands have landed.
+		if (!lora->setDataRate((uint8_t)atoi(cmd + 4)))
+		{
+			port->println("PENDING - not yet valid for the currently enabled channels, will retry automatically");
+		}
 		replyOk();
 	}
 	else if (strcmp(cmd, "+CLASS=?") == 0)
@@ -575,7 +583,13 @@ void WisBlockLoRaAT::processLine(const char *line)
 	}
 	else if (startsWith(cmd, "+ADR="))
 	{
-		lora->setADR(atoi(cmd + 5) != 0);
+		// See LoRaWANEngine::setADR()'s doc comment - same meaning as the
+		// AT+DR= case above: a false return means the request is stored
+		// and will retry automatically, not that anything failed outright.
+		if (!lora->setADR(atoi(cmd + 5) != 0))
+		{
+			port->println("PENDING - not yet valid for the currently enabled channels, will retry automatically");
+		}
 		replyOk();
 	}
 	else if (strcmp(cmd, "+TXP=?") == 0)
@@ -1050,12 +1064,11 @@ void WisBlockLoRaAT::processLine(const char *line)
 extern SemaphoreHandle_t g_task_sem;
 extern volatile uint16_t g_task_event_type;
 #ifdef ARDUINO_ARCH_ESP32
-
 static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 #endif
 void WisBlockLoRaAT::onBackgroundRxData()
 {
-	g_task_event_type |= AT_CMD; // #define AT_CMD
+	g_task_event_type |= 0b0000000000100000; // #define AT_CMD
 	if (g_task_sem != NULL)
 	{
 #ifdef ESP32ARDUINO_ARCH_ESP32
@@ -1102,28 +1115,20 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 
 // namespace
 // {
-void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
-	(void)arg;
-	(void)event_data;
-	// ARDUINO_HW_CDC_EVENTS/_RX_EVENT matches the ESP32-S3 native USB CDC
-	// (HWCDC) event API. TODO: if your esp32-arduino core version exposes
-	// this under a different class/event-base name (USBCDC vs HWCDC has
-	// varied across core releases), adjust this match accordingly - the
-	// rest of this file doesn't need to change.
-	if (event_base == ARDUINO_HW_CDC_EVENTS)
+	void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 	{
-		if (event_id == ARDUINO_HW_CDC_RX_EVENT)
+		(void)arg;
+		(void)event_data;
+		// ARDUINO_HW_CDC_EVENTS/_RX_EVENT matches the ESP32-S3 native USB CDC
+		// (HWCDC) event API. TODO: if your esp32-arduino core version exposes
+		// this under a different class/event-base name (USBCDC vs HWCDC has
+		// varied across core releases), adjust this match accordingly - the
+		// rest of this file doesn't need to change.
+		if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT)
 		{
-			// WisBlockLoRaAT::onBackgroundRxData();
-			g_task_event_type |= AT_CMD; // #define AT_CMD
-			if (g_task_sem != NULL)
-			{
-				xSemaphoreGiveFromISR(g_task_sem, &xHigherPriorityTaskWoken);
-			}
+			WisBlockLoRaAT::onBackgroundRxData();
 		}
 	}
-}
 // } // namespace
 
 bool WisBlockLoRaAT::enableBackgroundRx()
