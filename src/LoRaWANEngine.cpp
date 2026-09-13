@@ -29,17 +29,40 @@ void onModemEventNotify(void)
 {
 }
 
-// Builds a dr_custom_distribution_data table (SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH
-// = 16 bytes, one weight per possible DR index) with all weight on a single
-// DR - this is the only way v4.9.0 lets you pin a specific data rate when
-// ADR is off; see smtc_modem_adr_set_profile()'s doc comment in
-// smtc_modem_api.h for the "custom data" semantics.
+// FIX (root cause of a persistent, 100%-reproducible bug: setADR(false)
+// with a fixed DR failing every single time with LBM's own
+// "ADR with a bad DataRate value" trace, confirmed by tracing the actual
+// failure into smtc_modem_custom_dr_distribution_to_tab() in the vendored
+// smtc_modem.c): dr_custom_distribution_data is NOT a one-hot table
+// indexed by DR (weight at index N meaning "use DR N") - it's a flat list
+// of SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH (16) literal DR *values*, one per
+// retry-attempt slot, and LBM validates/counts each slot's value directly
+// against the current channel mask (each entry must itself be a
+// currently-allowed DR, not an index into anything). The old
+// implementation here did exactly the one-hot thing the array's name
+// invites you to assume: out[dataRate] = 1, leaving the other 15 of 16
+// slots at value 0 - meaning "15 of 16 attempts should use DR0, 1 attempt
+// should use DR1" was being requested, regardless of what dataRate the
+// caller actually wanted. On any region where dwell time or the channel
+// mask excludes DR0/DR1 (AS923's dwell-time floor is DR2 - see
+// MIN_TX_DR_LIMIT_AS_923 in region_as_923_defs.h), *every* slot fails
+// LBM's validation and the call is rejected outright with
+// SMTC_MODEM_RC_INVALID - independent of the requested DR, independent of
+// the channel mask ever widening, which is why retrying after every
+// uplink (see applyAdrProfile()'s caller in handleEvents()) never helped:
+// there was nothing time-dependent to wait out.
+//
+// Fixed by filling every slot with the literal requested DR value, which
+// is what correctly expresses "always use this DR" to LBM's own
+// validation and runtime selection logic (smtc_real_get_next_tx_dr() in
+// smtc_real.c counts occurrences per DR value across surviving slots to
+// build its actual weighted-random selection table - see
+// Creation-Log-From-Claude-AI.md's note on this for the full trace).
 void buildSingleDrDistribution(uint8_t dataRate, uint8_t out[SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH])
 {
-	memset(out, 0, SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH);
-	if (dataRate < SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH)
+	for (size_t i = 0; i < SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH; i++)
 	{
-		out[dataRate] = 1;
+		out[i] = dataRate;
 	}
 }
 // Explicit WisBlockRegion -> smtc_modem_region_t mapping. NOT a direct cast

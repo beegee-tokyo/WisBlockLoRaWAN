@@ -1154,3 +1154,47 @@ whole time.
    reflects what was *requested*, not necessarily what's *active*; use the
    new return value if an application needs to know the difference in the
    moment.
+
+## Correction: the real bug was `buildSingleDrDistribution()` itself, not channel-mask timing
+
+The fix above was real (the return-code check and retry infrastructure
+are both correct and worth keeping), but it didn't actually solve the
+problem - a follow-up field test showed `setADR(false)`/`setDataRate(3)`
+failing **every single time**, including at fcnt=11, long after all six
+of AS923's extra channels had been added via `NewChannelReq` with
+`DrMin=0, DrMax=7`. That ruled out "channel mask hasn't widened yet" as
+the explanation - if that were it, later attempts should have started
+succeeding. They never did, which meant the real bug had to be something
+that stayed broken regardless of channel state.
+
+Re-tracing `smtc_modem_custom_dr_distribution_to_tab()` in
+`smtc_modem.c` character by character (rather than trusting the earlier
+read) found it: `dr_custom_distribution_data`
+(`SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH` = 16 bytes) is **not** a one-hot
+table indexed by DR, the way its shape invites you to assume. It's a flat
+list of 16 literal DR *values*, one per retry-attempt slot - each entry
+gets validated and counted directly against the channel mask as a DR
+value in its own right, not as an index into anything.
+`buildSingleDrDistribution()` was doing exactly the one-hot thing:
+`out[dataRate] = 1`, leaving the other 15 of 16 slots at value `0`. For
+`dataRate = 3`, that array said "15 of 16 attempts should use DR0, 1
+attempt should use DR1" - not "always use DR3" at all. AS923 enforces a
+dwell-time floor of DR2 (`MIN_TX_DR_LIMIT_AS_923` in
+`region_as_923_defs.h`), which excludes DR0 and DR1 specifically - so
+*every* slot failed validation, on *every* call, regardless of the
+requested DR or how wide the channel mask ever got. This also explains
+why the failure was present from the very first call in `setup()`,
+before join - the default join channels support DR3 just fine (confirmed
+directly in `region_as_923_config()`'s channel setup), so channel
+availability was never actually the constraint.
+
+**Fixed** by filling all 16 slots with the literal requested DR value,
+which is what correctly tells LBM "always use this DR" - `smtc_real_get_next_tx_dr()`
+in `smtc_real.c` counts occurrences per DR value across the slots that
+survive validation to build its actual weighted-random selection table,
+so a uniform array of one value produces exactly the "pin to this DR"
+behavior the function's name always promised. The return-code check,
+`PENDING` AT response, and automatic per-uplink retry from the fix above
+all stay in place - genuinely useful defensive infrastructure for a
+region/DR combination that legitimately does need to wait on channel
+widening - they just weren't what was wrong here.
