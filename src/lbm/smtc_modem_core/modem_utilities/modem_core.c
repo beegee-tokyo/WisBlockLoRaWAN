@@ -58,10 +58,6 @@
 #include "lorawan_cid_request_management.h"
 #include "lorawan_class_b_management.h"
 #include "lorawan_send_management.h"
-
-#if defined( ADD_RELAY_TX )
-#include "relay_tx_api.h"
-#endif
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE MACROS-----------------------------------------------------------
@@ -341,14 +337,6 @@ int32_t modem_duty_cycle_get_status( uint8_t stack_id )
                 &number_of_freq, freq_list, sizeof( freq_list ) / sizeof( freq_list[0] ), stack_id ) == true )
         {
             region_dtc = smtc_duty_cycle_get_next_free_time_ms( number_of_freq, freq_list );
-#if defined( ADD_RELAY_TX )
-            int32_t relay_region_dtc = smtc_relay_tx_free_duty_cycle_ms_get( stack_id );
-
-            if( relay_region_dtc != 0 )
-            {
-                region_dtc = MAX( region_dtc, relay_region_dtc );
-            }
-#endif
         }
 
         if( nwk_dtc == 0 )

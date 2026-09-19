@@ -50,20 +50,16 @@ enum WisBlockJoinMode : uint8_t
 	WISBLOCK_JOIN_ABP = 1,
 };
 
-/** Relay function, introduced in LoRaWAN 1.0.4 / RP002-1.0.4. */
-enum WisBlockRelayMode : uint8_t
-{
-	WISBLOCK_RELAY_OFF = 0,
-	WISBLOCK_RELAY_ED = 1,	  /**< End-device relies on a relay to forward its uplinks (WOR). */
-	WISBLOCK_RELAY_SERVING = 2, /**< This device acts as the serving relay for nearby end-devices. */
-};
-
 enum WisBlockJoinState : uint8_t
 {
 	WISBLOCK_JOIN_IDLE = 0,
 	WISBLOCK_JOIN_IN_PROGRESS = 1,
 	WISBLOCK_JOIN_SUCCEEDED = 2,
 	WISBLOCK_JOIN_FAILED = 3,
+	/** maxJoinAttempts reached - retrying has stopped. Distinguishes "gave up" from
+	 * WISBLOCK_JOIN_FAILED's "this one attempt failed, another is already scheduled" -
+	 * see LoRaWANEngine::setMaxJoinAttempts()'s doc comment. */
+	WISBLOCK_JOIN_GAVE_UP = 4,
 };
 
 /** LoRa P2P bandwidth options (matches SX126x LORA_BW_* indices). */
@@ -105,46 +101,6 @@ struct WisBlockABPKeys
 	uint8_t appSKey[16] = {0};
 };
 
-/** Mirrors smtc_modem_relay_tx_config_t (smtc_modem_relay_api.h) - see LoRaWANRelay.h for details. */
-struct WisBlockRelayEDConfig
-{
-	uint8_t activationMode = 0; // smtc_modem_relay_tx_activation_mode_t: 0=disabled,1=enable,2=dynamic,3=ED_controlled
-	uint8_t smartLevel = 0;
-	uint8_t backoff = 0;
-	uint8_t missedWorAckToNoSync = 8; // number_of_miss_wor_ack_to_switch_in_nosync_mode
-	bool secondChannelEnable = false;
-	uint32_t secondChannelFreqHz = 0;
-	uint32_t secondChannelAckFreqHz = 0;
-	uint8_t secondChannelDr = 0;
-};
-
-/** Mirrors relay_config_t (relay_rx_api.h) + relay_init()'s own parameters - see LoRaWANRelay.h for details. */
-struct WisBlockRelayServingConfig
-{
-	uint8_t cadPeriod = 0;	 // wor_cad_periodicity_t: 0=1s,1=500ms,2=250ms,3=100ms,4=50ms,5=20ms
-	uint32_t channelFreqHz = 0;
-	uint32_t channelAckFreqHz = 0;
-	uint8_t channelDr = 0;
-	uint8_t errorPpm = 1;	 // wor_ack_ppm_error_t: 0=10ppm,1=20ppm,2=30ppm,3=40ppm
-	uint8_t cadToRxSymb = 0; // wor_ack_cad_to_rx_t: 0=2symb,1=4symb,2=6symb,3=8symb
-};
-
-/**
- * One entry in the serving relay's trusted end-device list. Not persisted
- * in WisBlockLoRaWANSettings/flash (unlike the two configs above) - see the
- * IMPORTANT note in LoRaWANRelay.h; without at least one of these
- * registered, a serving relay forwards nothing.
- */
-struct WisBlockRelayTrustedDevice
-{
-	uint8_t index = 0; // 0-15, matches relay_fwd_uplink_add_device()'s slot count
-	uint32_t devAddr = 0;
-	uint8_t rootWorSKey[16] = {0}; // TS011 WOR root session key - derived out-of-band, not by this library
-	bool unlimitedForward = true;
-	uint8_t bucketFactor = 0;
-	uint8_t reloadRate = 0;
-};
-
 /** LoRaWAN-mode runtime/persisted settings. */
 struct WisBlockLoRaWANSettings
 {
@@ -155,9 +111,31 @@ struct WisBlockLoRaWANSettings
 	bool adrEnabled = true;
 	uint8_t txPower = 0; // index, region-specific meaning
 	bool confirmedUplinks = false;
-	WisBlockRelayMode relayMode = WISBLOCK_RELAY_OFF;
-	WisBlockRelayEDConfig relayEDConfig;
-	WisBlockRelayServingConfig relayServingConfig;
+	/** Sub-band pre-selection for US915/AU915/CN470/CN470_RP_1_0 (ignored elsewhere) - see
+	 * LoRaWANEngine::setChannelMask()/WisBlockLoRaWAN::setChannelMask() for the encoding.
+	 * 0 = no restriction (all channels enabled), matching AT+MASK's own ALL=0000 convention. */
+	uint16_t channelMask = 0;
+	/** FIX (Class A pending-downlink bug): when a downlink's FPending bit is set, the network
+	 * has more downlinks queued, but a Class A device can only receive them in response to an
+	 * uplink - per LoRaWAN 1.0.4 section 5.1 the device should send another uplink promptly to
+	 * open another receive window, not wait for its next regular scheduled transmission. When
+	 * true (default), this library does that automatically (an empty, unconfirmed uplink on the
+	 * same FPort the pending-flagged downlink arrived on) - see LoRaWANEngine::handleEvents()'s
+	 * SMTC_MODEM_EVENT_DOWNDATA case. Set false to handle it yourself instead (e.g. if duty-cycle
+	 * budget is tight and an extra uplink per pending downlink isn't acceptable) - WisBlockRxResult::fpending
+	 * still reports the bit either way. Only applies to Class A; Class B/C already have a standing
+	 * receive window (ping slots / continuous RXC) so the network can just push the next downlink
+	 * without this device needing to ask for it. */
+	bool fetchPendingDownlinks = true;
+	/** RUI3-compatible AT+JOIN / api.lorawan.join parameters - see LoRaWANEngine::setAutoJoin()/
+	 * setJoinReattemptInterval()/setMaxJoinAttempts()'s doc comments for the full mechanism.
+	 * autoJoin: join automatically once the LoRaWAN engine starts, instead of waiting for an
+	 * explicit join()/AT+JOIN. Default false (matches this library's previous behavior).
+	 * joinReattemptIntervalS: seconds between join attempts after a failure, 7-255, RUI3 default 8.
+	 * maxJoinAttempts: give up after this many failed attempts, 0-255, 0 = retry forever (RUI3 default). */
+	bool autoJoin = false;
+	uint8_t joinReattemptIntervalS = 8;
+	uint8_t maxJoinAttempts = 0;
 	WisBlockOTAAKeys otaa;
 	WisBlockABPKeys abp;
 };
@@ -199,6 +177,12 @@ struct WisBlockRxResult
 	uint8_t length = 0;
 	int16_t rssi = 0;
 	int8_t snr = 0;
+	/** LoRaWAN only (always false for P2P). Mirrors the downlink's FPending bit: the network
+	 * has more downlinks queued for this device. See WisBlockLoRaWANSettings::fetchPendingDownlinks
+	 * - by default this library automatically sends an empty uplink to drain them (Class A only;
+	 * Class B/C already have a standing receive window and don't need one), so this field is
+	 * mainly informational unless that's been disabled. */
+	bool fpending = false;
 };
 
 struct WisBlockTxResult

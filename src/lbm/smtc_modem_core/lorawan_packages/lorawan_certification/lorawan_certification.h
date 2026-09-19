@@ -96,8 +96,6 @@ extern "C" {
 
 #define LORAWAN_CERTIFICATION_FRAG_SESSION_CNT_REQ_SIZE 2
 
-#define LORAWAN_CERTIFICATION_RELAY_MODE_CTRL_SIZE 2
-
 #define LORAWAN_CERTIFICATION_FPORT 224
 /*
  * -----------------------------------------------------------------------------
@@ -243,12 +241,6 @@ typedef enum lorawan_certification_requested_tx_type_e
     LORAWAN_CERTIFICATION_TX_MAC_REQ    = 0x02,
     LORAWAN_CERTIFICATION_JOIN_REQ      = 0x03,
 } lorawan_certification_requested_tx_type_t;
-
-typedef enum lorawan_certification_relay_tx_enabled_e
-{
-    LORAWAN_CERTIFICATION_RELAY_TX_OFF = 0x00,
-    LORAWAN_CERTIFICATION_RELAY_TX_ON,
-} lorawan_certification_relay_tx_enabled_t;
 
 /**
  * @brief LoRaWAN Certification Object

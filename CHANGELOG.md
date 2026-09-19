@@ -1,5 +1,5 @@
 # WisBlockLoRaWAN
-Unified LoRaWAN (Class A/B/C, Relay) and LoRa P2P library for RAKwireless WisBlock boards using Semtech SX1262 + LoRa Basics Modem.
+Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boards using Semtech SX1262 + LoRa Basics Modem.
 
 Release Notes
 

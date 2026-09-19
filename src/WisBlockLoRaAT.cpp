@@ -6,6 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**@brief Unique Devices IDs register set (nRF52)
+ */
+#define ID1 (0x10000060)
+#define ID2 (0x10000064)
+
+#if defined ARDUINO_ARCH_ESP32
+#include "boards/mcu/board.h"
+#endif
+
 namespace
 {
 	bool startsWith(const char *str, const char *prefix)
@@ -33,8 +42,10 @@ namespace
 		{
 			snprintf(buf, sizeof(buf), "%02X", data[i]);
 			port->print(buf);
+			delay(10);
 		}
-		port->println();
+		port->printf("\r\n");
+		port->flush();
 	}
 
 	// AT+BAND uses RUI3's region numbering (see the RUI3 AT command
@@ -182,6 +193,7 @@ void WisBlockLoRaAT::processIncomingBytes()
 		{
 			lineBuffer[lineLength++] = c;
 		}
+		delay(5);
 	}
 }
 
@@ -247,10 +259,14 @@ void WisBlockLoRaAT::handleStatusQuery()
 																													  : "C");
 		port->print("ADR=");
 		port->println(cfg.lorawan.adrEnabled ? "1" : "0");
+		port->print("MASK=");
+		{
+			char buf[5];
+			snprintf(buf, sizeof(buf), "%04X", cfg.lorawan.channelMask);
+			port->println(buf);
+		}
 		port->print("JOINSTATE=");
 		port->println((int)lora->joinState());
-		port->print("RELAY=");
-		port->println((int)cfg.lorawan.relayMode);
 	}
 	else
 	{
@@ -311,6 +327,8 @@ void WisBlockLoRaAT::processLine(const char *line)
 	line = upperLine;
 	const char *cmd = line + 2; // skip "AT"
 
+	// port->printf(">> %s", cmd);
+	// port->println("");
 	if (strcmp(cmd, "") == 0)
 	{
 		replyOk(); // bare "AT" -> liveness check
@@ -512,6 +530,30 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setRegion(region);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+MASK=?") == 0)
+	{
+		// Only meaningful for US915/AU915/CN470/CN470_RP_1_0 - see
+		// LoRaWANEngine::setChannelMask()'s doc comment. Matches RUI3's
+		// AT+MASK: 4 hex digits, bit N (0-indexed) = sub-band N+1 enabled,
+		// 0000 = all channels (no restriction).
+		char buf[5];
+		snprintf(buf, sizeof(buf), "%04X", lora->getChannelMask());
+		port->printf("AT+MASK=");
+		port->println(buf);
+		replyOk();
+	}
+	else if (startsWith(cmd, "+MASK="))
+	{
+		char *end = nullptr;
+		unsigned long mask = strtoul(cmd + 6, &end, 16);
+		if (end == cmd + 6 || mask > 0xFFFF)
+		{
+			replyError("AT_PARAM_ERROR"); // expected 4 hex digits
+			return;
+		}
+		lora->setChannelMask((uint16_t)mask);
+		replyOk();
+	}
 	else if (strcmp(cmd, "+DR=?") == 0)
 	{
 		port->printf("AT+DR=");
@@ -566,6 +608,64 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->join();
 		replyOk();
 	}
+	else if (strcmp(cmd, "+JOIN=?") == 0)
+	{
+		// AT+JOIN=w:x:y:z - w: currently joining/joined; x: auto-join on power-up;
+		// y: reattempt interval (s); z: max join attempts (0 = unlimited).
+		port->printf("AT+JOIN=");
+		port->print(lora->isJoined() || lora->joinState() == WISBLOCK_JOIN_IN_PROGRESS ? 1 : 0);
+		port->print(":");
+		port->print(lora->getAutoJoin() ? 1 : 0);
+		port->print(":");
+		port->print(lora->getJoinReattemptInterval());
+		port->print(":");
+		port->println(lora->getMaxJoinAttempts());
+		replyOk();
+	}
+	else if (startsWith(cmd, "+JOIN="))
+	{
+		// Parameters are positional and all optional after the first - only w is required;
+		// x/y/z each apply (and persist) only if actually present, matching RUI3's own
+		// "configure then join" AT+JOIN=w:x:y:z, where a shorter form leaves the rest as
+		// previously configured rather than resetting them to default.
+		char buf[32];
+		strncpy(buf, cmd + 6, sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+
+		char *tok = strtok(buf, ":");
+		if (!tok)
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		int joinNow = atoi(tok);
+
+		tok = strtok(nullptr, ":");
+		if (tok)
+		{
+			lora->setAutoJoin(atoi(tok) != 0);
+		}
+		tok = strtok(nullptr, ":");
+		if (tok)
+		{
+			lora->setJoinReattemptInterval((uint8_t)atoi(tok));
+		}
+		tok = strtok(nullptr, ":");
+		if (tok)
+		{
+			lora->setMaxJoinAttempts((uint8_t)atoi(tok));
+		}
+
+		if (joinNow != 0)
+		{
+			lora->join();
+		}
+		else
+		{
+			lora->stopJoin();
+		}
+		replyOk();
+	}
 	else if (strcmp(cmd, "+NJS=?") == 0)
 	{
 		// RUI3: plain joined/not-joined boolean, not this library's own
@@ -604,177 +704,6 @@ void WisBlockLoRaAT::processLine(const char *line)
 		replyOk();
 	}
 
-	else if (strcmp(cmd, "+RELAY=?") == 0)
-	{
-		port->printf("AT+RELAY=");
-		port->println((int)lora->getConfig().lorawan.relayMode);
-		replyOk();
-	}
-	else if (startsWith(cmd, "+RELAY="))
-	{
-		int v = atoi(cmd + 7);
-		lora->setRelayMode(v == 1 ? WISBLOCK_RELAY_ED : v == 2 ? WISBLOCK_RELAY_SERVING
-															   : WISBLOCK_RELAY_OFF);
-		replyOk();
-	}
-	else if (strcmp(cmd, "+RELAYED=?") == 0)
-	{
-		// Same field order as the setter above: <activationMode>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<secondChEnable>:<secondChFreqHz>:<secondChAckFreqHz>:<secondChDr>
-		const WisBlockRelayEDConfig &cfg = lora->getConfig().lorawan.relayEDConfig;
-		port->printf("AT+RELAYED=");
-		port->print(cfg.activationMode);
-		port->print(":");
-		port->print(cfg.smartLevel);
-		port->print(":");
-		port->print(cfg.backoff);
-		port->print(":");
-		port->print(cfg.missedWorAckToNoSync);
-		port->print(":");
-		port->print(cfg.secondChannelEnable ? 1 : 0);
-		port->print(":");
-		port->print(cfg.secondChannelFreqHz);
-		port->print(":");
-		port->print(cfg.secondChannelAckFreqHz);
-		port->print(":");
-		port->println(cfg.secondChannelDr);
-		replyOk();
-	}
-	else if (startsWith(cmd, "+RELAYED="))
-	{
-		// AT+RELAYED=<activationMode>:<smartLevel>:<backoff>:<missedWorAckToNoSync>:<secondChEnable>:<secondChFreqHz>:<secondChAckFreqHz>:<secondChDr>
-		char buf[96];
-		strncpy(buf, cmd + 9, sizeof(buf) - 1);
-		buf[sizeof(buf) - 1] = '\0';
-
-		WisBlockRelayEDConfig cfg;
-		char *tok = strtok(buf, ":");
-		if (tok)
-			cfg.activationMode = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.smartLevel = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.backoff = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.missedWorAckToNoSync = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.secondChannelEnable = atoi(tok) != 0;
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.secondChannelFreqHz = strtoul(tok, nullptr, 10);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.secondChannelAckFreqHz = strtoul(tok, nullptr, 10);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.secondChannelDr = (uint8_t)atoi(tok);
-
-		lora->configureRelayED(cfg);
-		replyOk();
-	}
-	else if (strcmp(cmd, "+RELAYSRV=?") == 0)
-	{
-		// Same field order as the setter above: <cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>
-		const WisBlockRelayServingConfig &cfg = lora->getConfig().lorawan.relayServingConfig;
-		port->printf("AT+RELAYSRV=");
-		port->print(cfg.cadPeriod);
-		port->print(":");
-		port->print(cfg.channelFreqHz);
-		port->print(":");
-		port->print(cfg.channelAckFreqHz);
-		port->print(":");
-		port->print(cfg.channelDr);
-		port->print(":");
-		port->print(cfg.errorPpm);
-		port->print(":");
-		port->println(cfg.cadToRxSymb);
-		replyOk();
-	}
-	else if (startsWith(cmd, "+RELAYSRV="))
-	{
-		// AT+RELAYSRV=<cadPeriod>:<freqHz>:<ackFreqHz>:<dr>:<errorPpm>:<cadToRxSymb>
-		char buf[96];
-		strncpy(buf, cmd + 10, sizeof(buf) - 1);
-		buf[sizeof(buf) - 1] = '\0';
-
-		WisBlockRelayServingConfig cfg;
-		char *tok = strtok(buf, ":");
-		if (tok)
-			cfg.cadPeriod = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.channelFreqHz = strtoul(tok, nullptr, 10);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.channelAckFreqHz = strtoul(tok, nullptr, 10);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.channelDr = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.errorPpm = (uint8_t)atoi(tok);
-		tok = strtok(nullptr, ":");
-		if (tok)
-			cfg.cadToRxSymb = (uint8_t)atoi(tok);
-
-		lora->configureRelayServing(cfg);
-		replyOk();
-	}
-	else if (strcmp(cmd, "+RELAYDEV=?") == 0)
-	{
-		// Deliberately not implemented, unlike every other getter in this
-		// file: the registered trusted-device list isn't kept anywhere
-		// readable on this side (see WisBlockRelayTrustedDevice's own doc
-		// comment in WisBlockLoRaWANTypes.h - "Not persisted... unlike the
-		// two configs above") - each AT+RELAYDEV= call pushes straight into
-		// LBM with no local copy retained to read back, and the entries
-		// contain a root session key (rootWorSKey) that shouldn't be echoed
-		// in plaintext regardless (see the +APPKEY=? SECURITY note above).
-		replyError("AT_PARAM_ERROR"); // not supported - trusted device list has no local readable copy");
-	}
-	else if (startsWith(cmd, "+RELAYDEV="))
-	{
-		// AT+RELAYDEV=<idx>:<devAddrHex8>:<rootWorSKeyHex32>:<unlimitedFwd>:<bucketFactor>:<reloadRate>
-		// Registers a trusted end-device with the serving relay - required
-		// before it will forward anything for that device (see
-		// LoRaWANRelay.h). No effect unless AT+RELAY=2 (serving) is active.
-		const char *args = cmd + 10;
-		char idxStr[8] = {0}, addrStr[16] = {0}, keyStr[40] = {0}, unlimStr[8] = {0}, bucketStr[8] = {0}, reloadStr[8] = {0};
-		if (sscanf(args, "%7[^:]:%15[^:]:%39[^:]:%7[^:]:%7[^:]:%7[^:]", idxStr, addrStr, keyStr, unlimStr, bucketStr, reloadStr) != 6)
-		{
-			replyError("AT_PARAM_ERROR"); // expected <idx>:<devaddr8hex>:<key32hex>:<unlimited0/1>:<bucket>:<reload>");
-			return;
-		}
-
-		WisBlockRelayTrustedDevice device;
-		device.index = (uint8_t)atoi(idxStr);
-		uint8_t addrBytes[4];
-		if (!parseHex(addrStr, addrBytes, 4))
-		{
-			replyError("AT_PARAM_ERROR"); // bad devaddr hex, expected 8 chars");
-			return;
-		}
-		device.devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
-						 ((uint32_t)addrBytes[2] << 8) | addrBytes[3];
-		if (!parseHex(keyStr, device.rootWorSKey, 16))
-		{
-			replyError("AT_PARAM_ERROR"); // bad key hex, expected 32 chars");
-			return;
-		}
-		device.unlimitedForward = atoi(unlimStr) != 0;
-		device.bucketFactor = (uint8_t)atoi(bucketStr);
-		device.reloadRate = (uint8_t)atoi(reloadStr);
-
-		lora->addRelayTrustedDevice(device) ? replyOk() : replyError("AT_ERROR"); // failed (is AT+RELAY=2 active? was LBM built with ADD_RELAY_RX?)");
-	}
-	else if (startsWith(cmd, "+RELAYDEVDEL="))
-	{
-		uint8_t idx = (uint8_t)atoi(cmd + 13);
-		lora->removeRelayTrustedDevice(idx) ? replyOk() : replyError("AT_ERROR"); // failed");
-	}
 	else if (strcmp(cmd, "+CFM=?") == 0)
 	{
 		port->printf("AT+CFM=");
@@ -784,6 +713,19 @@ void WisBlockLoRaAT::processLine(const char *line)
 	else if (startsWith(cmd, "+CFM="))
 	{
 		lora->setConfirmedUplinks(atoi(cmd + 5) != 0);
+		replyOk();
+	}
+	else if (strcmp(cmd, "+FPENDING=?") == 0)
+	{
+		// Library-specific (no RUI3 equivalent) - see
+		// WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment.
+		port->printf("AT+FPENDING=");
+		port->println(lora->getFetchPendingDownlinks() ? "1" : "0");
+		replyOk();
+	}
+	else if (startsWith(cmd, "+FPENDING="))
+	{
+		lora->setFetchPendingDownlinks(atoi(cmd + 10) != 0);
 		replyOk();
 	}
 	else if (startsWith(cmd, "+SEND="))
@@ -1034,6 +976,70 @@ void WisBlockLoRaAT::processLine(const char *line)
 	else if (strcmp(cmd, "+STATUS") == 0)
 	{
 		handleStatusQuery();
+		replyOk();
+	}
+	else if (strcmp(cmd, "+HWMODEL=?") == 0)
+	{
+#ifdef NRF52_SERIES
+		port->println("rak4630");
+#elif defined(ARDUINO_ARCH_ESP32)
+		port->println("rak3112");
+#endif
+		replyOk();
+	}
+	else if (strcmp(cmd, "+HWID=?") == 0)
+	{
+#ifdef NRF52_SERIES
+		port->println("nrf52840");
+#elif defined(ARDUINO_ARCH_ESP32)
+		port->println("esp32-s3");
+#endif
+		replyOk();
+	}
+	else if (strcmp(cmd, "+SN=?") == 0)
+	{
+		uint8_t id[8];
+#ifdef NRF52_SERIES
+		id[7] = ((*(uint32_t *)ID1));
+		id[6] = ((*(uint32_t *)ID1)) >> 8;
+		id[5] = ((*(uint32_t *)ID1)) >> 16;
+		id[4] = ((*(uint32_t *)ID1)) >> 24;
+		id[3] = ((*(uint32_t *)ID2));
+		id[2] = ((*(uint32_t *)ID2)) >> 8;
+		id[1] = ((*(uint32_t *)ID2)) >> 16;
+		id[0] = ((*(uint32_t *)ID2)) >> 24;
+#elif defined(ARDUINO_ARCH_ESP32)
+		uint64_t uniqueId = ESP.getEfuseMac();
+		// Using ESP32 MAC (48 bytes only, so upper 2 bytes will be 0)
+		id[7] = (uint8_t)(uniqueId >> 56);
+		id[6] = (uint8_t)(uniqueId >> 48);
+		id[5] = (uint8_t)(uniqueId >> 40);
+		id[4] = (uint8_t)(uniqueId >> 32);
+		id[3] = (uint8_t)(uniqueId >> 24);
+		id[2] = (uint8_t)(uniqueId >> 16);
+		id[1] = (uint8_t)(uniqueId >> 8);
+		id[0] = (uint8_t)(uniqueId);
+#endif
+		port->printf("AT+SN=");
+		printHex(port, id, 8);
+		replyOk();
+	}
+	else if (strcmp(cmd, "+VER=?") == 0)
+	{
+#ifdef NRF52_SERIES
+		port->println("RUI_comp_1.0.0_RAK4631");
+#elif defined(ARDUINO_ARCH_ESP32)
+		port->println("RUI_comp_1.0.0_RAK3312");
+#endif
+		replyOk();
+	}
+	else if (strcmp(cmd, "+ALIAS=?") == 0)
+	{
+#ifdef NRF52_SERIES
+		port->println("WISBLOCK_BASICMODEM_RAK4631");
+#elif defined(ARDUINO_ARCH_ESP32)
+		port->println("WISBLOCK_BASICMODEM_RAK3312");
+#endif
 		replyOk();
 	}
 	else

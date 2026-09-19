@@ -101,15 +101,6 @@
 #include "mw_gnss_almanac_full_update.h"
 #endif
 
-#if defined( ADD_RELAY_TX )
-#include "smtc_modem_relay_api.h"
-#include "relay_tx_api.h"
-#endif
-
-#if defined( ADD_RELAY_RX )
-#include "relay_rx_api.h"
-#endif
-
 #if defined( ADD_SMTC_STORE_AND_FORWARD )
 #include "store_and_forward_flash.h"
 #endif
@@ -865,20 +856,6 @@ smtc_modem_return_code_t smtc_modem_get_event( smtc_modem_event_t* event, uint8_
             event->event_data.uploaddone.status = get_modem_event_status( event->event_type );
             break;
 #endif  // ADD_SMTC_LFU
-
-#if defined( ADD_RELAY_TX )
-        case SMTC_MODEM_EVENT_RELAY_TX_DYNAMIC:
-        case SMTC_MODEM_EVENT_RELAY_TX_MODE:
-        case SMTC_MODEM_EVENT_RELAY_TX_SYNC:
-            event->event_data.relay_tx.status = get_modem_event_status( event->event_type );
-            break;
-#endif
-
-#if defined( ADD_RELAY_RX )
-        case SMTC_MODEM_EVENT_RELAY_RX_RUNNING:
-            event->event_data.relay_rx.status = get_modem_event_status( event->event_type );
-            break;
-#endif
 
         case SMTC_MODEM_EVENT_TEST_MODE:
             event->event_data.test_mode_status.status = get_modem_event_status( event->event_type );
@@ -2945,67 +2922,6 @@ static void modem_load_appkey_context( void )
 }
 #endif
 
-#if defined( ADD_RELAY_TX )
-smtc_modem_return_code_t smtc_modem_relay_tx_get_activation_mode( uint8_t                                stack_id,
-                                                                  smtc_modem_relay_tx_activation_mode_t* mode )
-{
-    relay_tx_config_t config;
-
-    smtc_relay_tx_get_config( stack_id, &config );
-    *mode = ( smtc_modem_relay_tx_activation_mode_t ) config.activation;
-    return SMTC_MODEM_RC_OK;
-}
-smtc_modem_return_code_t smtc_modem_relay_tx_get_config( uint8_t stack_id, smtc_modem_relay_tx_config_t* config )
-{
-    UNUSED( stack_id );
-    RETURN_BUSY_IF_TEST_MODE( );
-    RETURN_INVALID_IF_NULL( config );
-    smtc_relay_tx_get_config( stack_id, ( relay_tx_config_t* ) config );
-    return SMTC_MODEM_RC_OK;
-}
-smtc_modem_return_code_t smtc_modem_relay_tx_get_sync_status( uint8_t                            stack_id,
-                                                              smtc_modem_relay_tx_sync_status_t* status )
-{
-    *status = ( smtc_modem_relay_tx_sync_status_t ) smtc_relay_tx_get_sync_status( stack_id );
-    return SMTC_MODEM_RC_OK;
-}
-
-smtc_modem_return_code_t smtc_modem_relay_tx_is_enable( uint8_t stack_id, bool* is_enable )
-{
-    *is_enable = smtc_relay_tx_is_enable( stack_id );
-    return SMTC_MODEM_RC_OK;
-}
-
-smtc_modem_return_code_t smtc_modem_relay_tx_enable( uint8_t                             stack_id,
-                                                     const smtc_modem_relay_tx_config_t* relay_config )
-{
-    UNUSED( stack_id );
-    RETURN_BUSY_IF_TEST_MODE( );
-    RETURN_INVALID_IF_NULL( relay_config );
-
-#if defined( ADD_RELAY_RX )
-    if( relay_rx_get_flag_started( ) == true )
-    {
-        return SMTC_MODEM_RC_FAIL;
-    }
-#endif  // ADD_RELAY_RX
-
-    if( smtc_relay_tx_update_config( stack_id, ( relay_tx_config_t* ) relay_config ) != true )
-    {
-        return SMTC_MODEM_RC_FAIL;
-    }
-
-    smtc_relay_tx_enable( stack_id );
-    return SMTC_MODEM_RC_OK;
-}
-
-smtc_modem_return_code_t smtc_modem_relay_tx_disable( uint8_t stack_id )
-{
-    smtc_relay_tx_disable( stack_id );
-    return SMTC_MODEM_RC_OK;
-}
-
-#endif
 
 bool smtc_modem_radio_is_free( void )
 {

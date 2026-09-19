@@ -65,6 +65,13 @@ public:
 	 */
 	static void onBackgroundRxData();
 
+	// Shared byte-accumulation logic: reads everything currently available
+	// from `port` and feeds it into the line buffer, dispatching
+	// processLine() on each complete line. Used by both handleSerial()
+	// (loop()-polled) and the background RX path (called from the USB CDC
+	// RX callback instead).
+	void processIncomingBytes();
+
 private:
 	WisBlockLoRaWAN *lora = nullptr;
 	Stream *port = nullptr;
@@ -77,13 +84,6 @@ private:
 	void replyOk();
 	void replyError(const char *reason = nullptr);
 	void handleStatusQuery();
-
-	// Shared byte-accumulation logic: reads everything currently available
-	// from `port` and feeds it into the line buffer, dispatching
-	// processLine() on each complete line. Used by both handleSerial()
-	// (loop()-polled) and the background RX path (called from the USB CDC
-	// RX callback instead).
-	void processIncomingBytes();
 
 	static bool parseHex(const char *hex, uint8_t *out, size_t outLen);
 

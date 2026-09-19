@@ -27,16 +27,19 @@ env.Dir()/CPPPATH, so plain relative paths below resolve correctly with no
 need to compute an absolute base path.
 
 IMPORTANT: this library only vendors the subset of LBM actually needed for
-LoRaWAN Class A/B/C + Relay (TX and RX/serving) + LoRa P2P on SX1262 - the
-scope of the original request. Deliberately NOT vendored/enabled: FUOTA
+LoRaWAN Class A/B/C + LoRa P2P on SX1262 - the scope of the original
+request. Deliberately NOT vendored/enabled: FUOTA
 (fragmented data block transport, firmware management, multi-package
 access), multicast, application layer clock sync, cloud device management,
-LFU (log file upload), store-and-forward, the beacon-TX *test/demo* service
-(smtc_modem_core/modem_services/beacon_tx_service - a simulated beacon
-transmitter for testing Class B without a real gateway, not needed for
-normal Class B operation), almanac packages and geolocation services
-(LR11xx-only). If you need any of these later: check that feature's guard
-macro in src/lbm/smtc_modem_core/modem_utilities/modem_services_config.h,
+LFU (log file upload), store-and-forward, the LoRaWAN Relay service (both
+TX/end-device and RX/serving roles - relay support has been fully removed
+from this library, see Creation-Log-From-Claude-AI.md), the beacon-TX
+*test/demo* service (smtc_modem_core/modem_services/beacon_tx_service - a
+simulated beacon transmitter for testing Class B without a real gateway,
+not needed for normal Class B operation), almanac packages and
+geolocation services (LR11xx-only). If you need any of these later: check
+that feature's guard macro in
+src/lbm/smtc_modem_core/modem_utilities/modem_services_config.h,
 re-vendor its source directory from upstream SWL2001, add it to
 include_dirs below, and add its -D flag to defines below.
 
@@ -60,13 +63,9 @@ include_dirs = [
     "src/lbm/smtc_modem_core/lr1mac/src",
     "src/lbm/smtc_modem_core/lr1mac/src/lr1mac_class_b",
     "src/lbm/smtc_modem_core/lr1mac/src/lr1mac_class_c",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/common",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/relay_rx",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/relay_tx",
     "src/lbm/smtc_modem_core/lr1mac/src/services",
     "src/lbm/smtc_modem_core/lr1mac/src/smtc_real/src",
     "src/lbm/smtc_modem_core/modem_services",
-    "src/lbm/smtc_modem_core/modem_services/relay_service",
     "src/lbm/smtc_modem_core/modem_supervisor",
     "src/lbm/smtc_modem_core/modem_utilities",
     "src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src",
@@ -109,10 +108,6 @@ defines = [
     # Device classes - both required per the original spec.
     "ADD_CLASS_B",
     "ADD_CLASS_C",
-    # Relay - both roles required per the original spec. See
-    # LoRaWANRelay.h for the important caveat on the RX/serving side.
-    "ADD_RELAY_TX",
-    "ADD_RELAY_RX",
     # LBM's own debug trace macro (smtc_modem_hal_print_trace calls are
     # gated by this in some LBM internals, not just our own port). 0 = off.
     # Flip to 1 here (or override via your own platformio.ini build_flags)

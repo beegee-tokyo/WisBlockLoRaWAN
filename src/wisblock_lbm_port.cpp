@@ -362,31 +362,12 @@ extern "C"
 		// so it kept firing IRQ_TIMEOUT with nothing detected, well within
 		// the 3-second window LBM had genuinely budgeted.
 		//
-		// BUT matching P2P's 50ms exactly turned out to be one step too
-		// far: smtc_relay_tx_init() (src/lbm/.../relay_tx/relay_tx.c) hard-
-		// panics ("TCXO delay not compatible with relay mode") if this
-		// value is >= DELAY_WOR_TO_WORACK_MS (also 50ms, defined in
-		// wake_on_radio_def.h) - a LoRaWAN Relay *protocol* timing budget,
-		// not a hardware limit, and this library's own main.h has
-		// ADD_RELAY_TX on, so that init runs unconditionally at
-		// lorawan.begin() before a join is ever attempted. P2P mode never
-		// calls into relay code at all, which is why 50ms was safe there
-		// but not here.
-		//
-		// kMaxForRelayMs keeps this comfortably under that ceiling
-		// regardless of what antennaPowerSettleMs() reports, so a future
-		// change to the antenna-power settle delay can't silently
-		// reintroduce this exact panic. The base 40ms is a deliberately
-		// conservative middle ground - meaningfully closer to P2P's
-		// proven-working 50ms than the original wrong 5ms, while leaving
-		// slack under the 50ms relay ceiling - not a measured value; if
-		// RX1/RX2 are still marginal after this, that's the number to
-		// tune first, and if you don't need ADD_RELAY_TX at all, disabling
-		// it in main.h removes this ceiling entirely.
+		// The base 40ms is a deliberately conservative middle ground -
+		// meaningfully closer to P2P's proven-working 50ms than the
+		// original wrong 5ms - not a measured value; if RX1/RX2 are still
+		// marginal after this, that's the number to tune first.
 		constexpr uint32_t kBaseTcxoStartupMs = 40;
-		constexpr uint32_t kMaxForRelayMs = 49; // DELAY_WOR_TO_WORACK_MS - 1
-		uint32_t total = kBaseTcxoStartupMs + WisBlockRadioHal::antennaPowerSettleMs();
-		return (total < kMaxForRelayMs) ? total : kMaxForRelayMs;
+		return kBaseTcxoStartupMs + WisBlockRadioHal::antennaPowerSettleMs();
 	}
 
 	void smtc_modem_hal_set_ant_switch(bool is_tx_on)

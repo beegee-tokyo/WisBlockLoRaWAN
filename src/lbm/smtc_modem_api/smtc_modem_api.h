@@ -350,10 +350,6 @@ typedef enum smtc_modem_event_type_e
     SMTC_MODEM_EVENT_GNSS_ALMANAC_DEMOD_UPDATE,
     SMTC_MODEM_EVENT_WIFI_SCAN_DONE,
     SMTC_MODEM_EVENT_WIFI_TERMINATED,
-    SMTC_MODEM_EVENT_RELAY_TX_DYNAMIC,  //!< Relay TX dynamic mode has enable or disable the WOR protocol
-    SMTC_MODEM_EVENT_RELAY_TX_MODE,     //!< Relay TX activation has been updated
-    SMTC_MODEM_EVENT_RELAY_TX_SYNC,     //!< Relay TX synchronisation has changed
-    SMTC_MODEM_EVENT_RELAY_RX_RUNNING,  //!< Relay RX running has changed
     SMTC_MODEM_EVENT_TEST_MODE,
     SMTC_MODEM_EVENT_REGIONAL_DUTY_CYCLE,
     SMTC_MODEM_EVENT_NO_DOWNLINK_THRESHOLD,  //!< ADR backoff end, or user-defined no RX number threshold
@@ -502,14 +498,6 @@ typedef struct smtc_modem_event_s
         {
             smtc_modem_event_mute_status_t status;
         } mute;
-        struct
-        {
-            uint8_t status;
-        } relay_tx;
-        struct
-        {
-            uint8_t status;
-        } relay_rx;
         struct
         {
             smtc_modem_event_test_mode_status_t status;

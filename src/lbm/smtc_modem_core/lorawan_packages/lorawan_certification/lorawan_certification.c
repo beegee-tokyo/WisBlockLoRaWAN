@@ -55,10 +55,6 @@
 #include "lorawan_fragmentation_package.h"
 #endif
 
-#if defined( ADD_RELAY_TX )
-#include "smtc_modem_relay_api.h"
-#endif
-
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE MACROS-----------------------------------------------------------
@@ -848,32 +844,7 @@ static lorawan_certification_requested_tx_type_t lorawan_certification_parser(
 
     case LORAWAN_CERTIFICATION_RELAY_MODE_CTRL_REQ:
     {
-#if defined( ADD_RELAY_TX )
-        if( rx_buffer_length == LORAWAN_CERTIFICATION_RELAY_MODE_CTRL_SIZE )
-        {
-            if( rx_buffer[1] == ( uint8_t ) LORAWAN_CERTIFICATION_RELAY_TX_OFF )
-            {
-                smtc_modem_relay_tx_disable( lorawan_certification_obj->stack_id );
-            }
-            else
-            {
-                smtc_modem_relay_tx_config_t user_relay_config = { 0 };
-                user_relay_config.second_ch_enable             = false;
-                user_relay_config.activation                   = SMTC_MODEM_RELAY_TX_ACTIVATION_MODE_ED_CONTROLLED;
-                user_relay_config.number_of_miss_wor_ack_to_switch_in_nosync_mode = 1;
-                user_relay_config.smart_level                                     = 5;
-                user_relay_config.backoff                                         = 4;
-
-                smtc_modem_relay_tx_enable( lorawan_certification_obj->stack_id, &user_relay_config );
-            }
-        }
-        else
-        {
-            SMTC_MODEM_HAL_TRACE_ERROR( "bad size\n" );
-        }
-#else
         SMTC_MODEM_HAL_TRACE_ERROR( "RELAY_TX not implemented\n" );
-#endif
         break;
     }
     case LORAWAN_CERTIFICATION_BEACON_CNT_RST_REQ:

@@ -390,6 +390,31 @@ uint8_t lorawan_api_min_tx_dr_get( uint8_t stack_id );
 uint16_t lorawan_api_mask_tx_dr_channel_up_dwell_time_check( uint8_t stack_id );
 
 /**
+ * @brief Restrict join/uplink channels to a specific sub-band, for regions with more channels
+ * than a typical 8-channel gateway supports (US915, AU915, CN470, CN470_RP_1_0). Mirrors RUI3's
+ * AT+MASK / api.lorawan.mask semantics: bit N (0-indexed) enables sub-band N+1 (8 channels each,
+ * numbered from 0); a mask of 0 means no restriction (all channels enabled). No effect on regions
+ * with 8 or fewer channels (EU868, AS923, ...).
+ *
+ * Safe to call before joining - in fact that is the point: pre-selecting the sub-band the
+ * gateway actually listens on avoids wasting join attempts cycling through the wrong ones.
+ *
+ * @param [in] stack_id
+ * @param [in] mask Sub-band bitmask, see above.
+ */
+void lorawan_api_set_channel_mask( uint8_t stack_id, uint16_t mask );
+
+/**
+ * @brief Get the sub-band mask last set via lorawan_api_set_channel_mask() (0 if none set, or if
+ * the current region doesn't support sub-band selection).
+ *
+ * @param [in] stack_id
+ * @return uint16_t
+ */
+uint16_t lorawan_api_get_channel_mask( uint8_t stack_id );
+
+
+/**
  * @brief returns the current state of the MAC layer.
  * @remark  If the MAC is not in the idle state, the user cannot call any methods except the lorawan_api_process()
  *          and the lorawan_api_state_get() functions

@@ -1,7 +1,7 @@
 /**
  * @file LoRaWANEngine.h
  * @brief Wraps Semtech LoRa Basics Modem v4.9.0's `smtc_modem_api` (vendored
- * at src/lbm/smtc_modem_api/) for join, uplink, class switching, ADR, relay,
+ * at src/lbm/smtc_modem_api/) for join, uplink, class switching, ADR,
  * link check and device-time request.
  *
  * Every public method here maps to real, verified `smtc_modem_api` /
@@ -12,7 +12,6 @@
 #ifndef LORAWAN_ENGINE_H
 #define LORAWAN_ENGINE_H
 
-#include "LoRaWANRelay.h"
 #include "WisBlockLoRaWANTypes.h"
 
 class LoRaWANEngine
@@ -29,28 +28,114 @@ public:
 	void applySettings(const WisBlockLoRaWANSettings &settings);
 
 	void join();
+	/** RUI3's AT+JOIN=0:... ("stop joining"). See this method's implementation for what it
+	 * actually cancels - both an in-progress OTAA join and this library's own custom-interval
+	 * retry timer, if either is active. */
+	void stopJoin();
 	bool isJoined() const;
 	WisBlockJoinState joinState() const;
+	/**
+	 * RUI3-compatible AT+JOIN / api.lorawan.join parameters. See
+	 * WisBlockLoRaWANSettings' doc comments for the persisted fields these
+	 * setters write - all three are stored and take effect on the next
+	 * join()/retry, matching RUI3's own "configure then join" pattern
+	 * (AT+JOIN's parameters are set and used together, not applied
+	 * retroactively to a join already in progress).
+	 *
+	 * Reattempt interval and max attempts are both new mechanisms this
+	 * library didn't have before: LBM's own join task (lorawan_join_management.c)
+	 * retries automatically forever on failure, using its own region-
+	 * appropriate, spec-compliant backoff timing - which this library
+	 * previously just left alone entirely. That backoff is not something
+	 * this library should override downward (it exists for good regulatory
+	 * reasons), but a longer, fixed interval - exactly what "extend the
+	 * time between attempts to save battery" asks for - is a legitimate
+	 * choice to make instead of it. When either setting is at its default
+	 * (interval 8s, matching RUI3's own default, or maxAttempts 0), this
+	 * library's behavior is unchanged from before - LBM's automatic retry
+	 * runs as it always has. As soon as either is set to a non-default
+	 * value, this library takes over scheduling retries itself: each
+	 * SMTC_MODEM_EVENT_JOINFAIL cancels LBM's own auto-scheduled next
+	 * attempt (smtc_modem_leave_network() - see its own doc comment,
+	 * "...or cancels an ongoing join process") and instead waits exactly
+	 * joinReattemptIntervalS seconds (tracked in handleEvents(), including
+	 * clamping its own returned sleep duration so a background-task-mode
+	 * application actually wakes up in time - see the FIX comment there)
+	 * before calling smtc_modem_join_network() again itself. maxJoinAttempts
+	 * counts these attempts and, once reached, stops retrying entirely
+	 * (also via smtc_modem_leave_network()) and reports WISBLOCK_JOIN_GAVE_UP
+	 * from joinState() - joinFailedCb() itself still fires on every
+	 * individual failed attempt as before, so existing applications relying
+	 * on that aren't affected; checking joinState() from inside that
+	 * callback is how to tell whether this specific failure was the final
+	 * one.
+	 */
+	void setAutoJoin(bool enabled) { settings.autoJoin = enabled; }
+	bool getAutoJoin() const { return settings.autoJoin; }
+	/** Clamped to RUI3's own valid range (7-255s) - a value outside it is clamped rather than
+	 * rejected, since "closest valid value" is more useful here than refusing the call outright. */
+	void setJoinReattemptInterval(uint8_t seconds);
+	uint8_t getJoinReattemptInterval() const { return settings.joinReattemptIntervalS; }
+	void setMaxJoinAttempts(uint8_t attempts) { settings.maxJoinAttempts = attempts; }
+	uint8_t getMaxJoinAttempts() const { return settings.maxJoinAttempts; }
 
 	/**
 	 * Queues an uplink with LBM. Unlike a bare pass-through to
-	 * smtc_modem_request_uplink(), this refuses (returns false, no LBM call
-	 * made at all) if a previous send() is still in flight - LBM holds at
-	 * most one pending uplink, and calling this again before the previous
-	 * one has actually been dispatched silently discards it (still
-	 * reported honestly afterward via onTxFinished() with success=false
-	 * and SMTC_MODEM_EVENT_TXDONE_NOT_SENT - that part of LBM's behavior
-	 * was always correct; nothing was being mis-reported). See the
-	 * "First send after join lost" / uplinkPending README notes for the
-	 * real log capture that prompted this - a full Class A TX+RX1+RX2
-	 * cycle, especially amid post-join MAC command negotiation, routinely
-	 * took longer than a naive fixed-interval application timer expected,
-	 * so periodic sends were racing (and losing to) the send already in
-	 * flight, wasting a frame counter each time.
+	 * smtc_modem_request_uplink(), this refuses outright (returns false, no
+	 * LBM call made at all) only when a second send() arrives while one is
+	 * already deferred (see below) - a true "nothing more can be done right
+	 * now" case. LBM holds at most one pending uplink, and calling this
+	 * again before the previous one has actually been dispatched silently
+	 * discards it (still reported honestly afterward via onTxFinished()
+	 * with success=false and SMTC_MODEM_EVENT_TXDONE_NOT_SENT - that part
+	 * of LBM's behavior was always correct; nothing was being mis-reported).
+	 * See the "First send after join lost" / uplinkPending README notes for
+	 * the real log capture that prompted the original version of this
+	 * guard - a full Class A TX+RX1+RX2 cycle, especially amid post-join
+	 * MAC command negotiation, routinely took longer than a naive fixed-
+	 * interval application timer expected, so periodic sends were racing
+	 * (and losing to) the send already in flight, wasting a frame counter
+	 * each time.
+	 *
+	 * FIX: a send() arriving while the uplink slot is already occupied -
+	 * by this library's own FPending auto-fetch (see
+	 * autoFetchUplinkPending's doc comment), by a real application send
+	 * still in flight, or by an earlier deferred send only now being
+	 * replayed - is deferred rather than refused, and still returns true:
+	 * it genuinely will be transmitted, automatically, the moment whatever
+	 * is currently in flight finishes (see deferredSend's doc comment and
+	 * the SMTC_MODEM_EVENT_TXDONE case in handleEvents()). Only one level
+	 * of deferral is ever held; a second send() arriving before the first
+	 * deferred one has gone out still gets the original, unconditional
+	 * refusal. Confirmed against two real device logs on a duty-cycle-
+	 * constrained region: without this - or with an earlier, narrower
+	 * version of this fix that only deferred when specifically the auto-
+	 * fetch was in flight - an application's own regularly-scheduled send
+	 * could land during any of several several-second delays this feature
+	 * can introduce and be indistinguishable from a genuine double-send
+	 * race, dropped even though the application did nothing wrong.
 	 */
 	bool send(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed);
 
-	void setDeviceClass(WisBlockDeviceClass deviceClass);
+	bool setDeviceClass(WisBlockDeviceClass deviceClass);
+	/**
+	 * Pre-selects a sub-band for regions with more channels than a typical 8-channel gateway
+	 * supports (US915, AU915, CN470, CN470_RP_1_0) - no effect elsewhere (EU868, AS923, ...).
+	 * Mirrors RUI3's AT+MASK / api.lorawan.mask: bit N (0-indexed) enables sub-band N+1 (8
+	 * channels each); 0 means no restriction (all channels enabled).
+	 *
+	 * Without this, a device joining on one of these regions has to try every sub-band the
+	 * region defines in turn before it happens to land on the one the gateway actually
+	 * listens on - each failed attempt is a wasted join request and, on a duty-cycled or
+	 * battery-powered device, real airtime and time-to-first-join. Setting this to the known
+	 * sub-band before the first join() call goes straight to it instead.
+	 *
+	 * Safe to call before joining (in fact that's the intended use) - unlike setDeviceClass()/
+	 * setADR(), this does not require the device to already be joined, since it only affects
+	 * which channels this device itself considers when choosing one to transmit on.
+	 */
+	bool setChannelMask(uint16_t mask);
+	uint16_t getChannelMask() const;
 	/**
 	 * FIX (root cause of a confirmed, reproducible bug: setADR(false) with
 	 * a fixed DR "silently" not taking effect - the frame's ADR bit stayed
@@ -112,14 +197,12 @@ public:
 	 */
 	void setLinkCheckMode(uint8_t mode) { linkCheckMode = mode; }
 	uint8_t getLinkCheckMode() const { return linkCheckMode; }
+	/** See WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment. Takes effect
+	 * immediately (just a locally-read behavior flag, not something pushed to LBM). */
+	void setFetchPendingDownlinks(bool enabled) { settings.fetchPendingDownlinks = enabled; }
+	bool getFetchPendingDownlinks() const { return settings.fetchPendingDownlinks; }
 	/** Requests device time; answer arrives later as an SMTC_MODEM_EVENT_LORAWAN_MAC_TIME event. */
 	void requestDeviceTime();
-
-	void setRelayMode(WisBlockRelayMode mode); // see LoRaWANRelay.h
-	void configureRelayED(const WisBlockRelayEDConfig &cfg);
-	void configureRelayServing(const WisBlockRelayServingConfig &cfg);
-	bool addRelayTrustedDevice(const WisBlockRelayTrustedDevice &device);
-	bool removeRelayTrustedDevice(uint8_t index);
 
 	/** Pumps smtc_modem_run_engine() + drains smtc_modem_get_event(). Call every loop().
 	 * Returns the ms budget smtc_modem_run_engine() itself reports before it must be
@@ -146,6 +229,67 @@ private:
 	// nothing pending regardless of whatever this flag happened to be
 	// left at from a previous run.
 	bool uplinkPending = false;
+	// FIX (downlink-queue drain bug - confirmed against two real device
+	// logs): tracks whether uplinkPending is true specifically because of
+	// this library's own FPending auto-fetch uplink (see
+	// SMTC_MODEM_EVENT_DOWNDATA in handleEvents()), as opposed to a real
+	// application send. No longer used to gate whether a colliding send()
+	// gets deferred (see send()'s doc comment - that's now unconditional
+	// regardless of what's occupying the slot); kept so
+	// SMTC_MODEM_EVENT_TXDONE can suppress the onTxFinished() callback for
+	// the auto-fetch's own completions specifically - an application never
+	// asked for those empty uplinks and has no reason to hear about them,
+	// unlike a real send that merely had to wait its turn.
+	bool autoFetchUplinkPending = false;
+	// FIX: see send()'s doc comment. A single-slot queue - deliberately not
+	// more than one - for an application send() that arrived while the
+	// uplink slot was already occupied by anything else: this library's own
+	// auto-fetch, a real send still in flight, or an earlier deferred send
+	// only now being replayed. Replayed automatically via dispatchUplink()
+	// the moment whatever was ahead of it clears uplinkPending on
+	// SMTC_MODEM_EVENT_TXDONE, so the application's own uplink still goes
+	// out - just delayed by however many duty-cycle-limited hops it took to
+	// get there - instead of being silently dropped and requiring the
+	// application to notice the false return and retry itself.
+	//
+	// CORRECTION: originally only accepted a deferral when
+	// autoFetchUplinkPending was specifically true, on the theory that two
+	// genuine application sends racing each other should still fail as
+	// before. On a duty-cycle/LBT-constrained region, a single deferral can
+	// itself take long enough to transmit that the application's *next*
+	// regularly-scheduled send arrives before that replay's own TXDONE -
+	// confirmed against a real device log where exactly this happened one
+	// step later than the original fix accounted for. Deferring
+	// unconditionally (still only ever one level deep) closes that gap
+	// rather than just moving it.
+	struct
+	{
+		bool valid = false;
+		uint8_t port = 0;
+		uint8_t data[242] = {0}; // SMTC_MODEM_MAX_LORAWAN_PAYLOAD_LENGTH - hardcoded rather than
+								 // pulling smtc_modem_api.h into this header; matches
+								 // WisBlockRxResult::data's own sizing in WisBlockLoRaWANTypes.h
+		uint8_t length = 0;
+		bool confirmed = false;
+	} deferredSend;
+	// FIX (downlink-queue-drain bug #4 - confirmed against two more real
+	// device logs, one with fetchPendingDownlinks on and one off): the
+	// auto-fetch above assumed SMTC_MODEM_EVENT_TXDONE for the uplink that
+	// solicited a downlink is always processed before
+	// SMTC_MODEM_EVENT_DOWNDATA for that same downlink, so uplinkPending
+	// would already be false by the time this fires. That ordering is NOT
+	// guaranteed - LBM can deliver them either way - and when DOWNDATA
+	// arrives first, uplinkPending is still true (from the very uplink that
+	// just solicited this downlink), so the auto-fetch's own `!uplinkPending`
+	// check silently skipped it every time that ordering occurred, with no
+	// deferral and no way to retry - unlike a real application send(), which
+	// already had deferredSend to fall back on. When that happens, the
+	// fetch is remembered here instead of just being dropped, and serviced
+	// from SMTC_MODEM_EVENT_TXDONE the moment uplinkPending actually does
+	// clear - which is correct regardless of which order the two events
+	// arrived in, since TXDONE is unambiguous about when the slot is free.
+	bool pendingDownlinkFetchRequested = false;
+	uint8_t pendingDownlinkFetchPort = 1;
 	uint8_t linkCheckMode = 0; // see setLinkCheckMode()'s doc comment
 	// FIX: see setADR()'s doc comment. Set false whenever applyAdrProfile()
 	// fails to actually push the requested CUSTOM (ADR-off) profile to LBM
@@ -154,6 +298,31 @@ private:
 	// when ADR is on, since NETWORK_CONTROLLED essentially never fails
 	// this validation the same way.
 	bool adrProfileApplied = true;
+	// FIX: see setDeviceClass()'s doc comment - smtc_modem_set_class()
+	// requires the device to already be joined, so the very first call
+	// (from applySettings(), which runs from begin(), before join())
+	// always fails. Starts false after every begin() and is retried at
+	// the moment the device actually becomes joined (SMTC_MODEM_EVENT_JOINED
+	// / the synchronous ABP success path), with a TXDONE-time fallback
+	// retry mirroring adrProfileApplied's, in case that first retry
+	// somehow still didn't land (e.g. RETURN_BUSY_IF_TEST_MODE).
+	bool classProfileApplied = false;
+	// FIX: see setJoinReattemptInterval()'s/setMaxJoinAttempts()'s doc comments. Tracks failed
+	// OTAA join attempts within the current join "cycle" - reset to 0 by join() itself (a fresh,
+	// application-or-auto-triggered join request), NOT by the internal retry path in
+	// handleEvents(), so it correctly counts across every automatic retry in between.
+	uint8_t joinAttemptCount = 0;
+	// FIX: when set, handleEvents() calls smtc_modem_join_network() again once millis() reaches
+	// this deadline, instead of relying on LBM's own auto-scheduled retry (already cancelled via
+	// smtc_modem_leave_network() when this was set - see the SMTC_MODEM_EVENT_JOINFAIL case).
+	bool joinRetryScheduled = false;
+	uint32_t nextJoinRetryAtMs = 0;
+	// FIX: see computeLoRaWANAirtimeMs()'s doc comment in LoRaWANEngine.cpp
+	// - captured in send() for whichever uplink is currently in flight,
+	// consumed by the TXDONE handler in handleEvents() to fill in
+	// WisBlockTxResult::airtimeMs, which previously always reported 0.
+	uint8_t lastTxDr = 0;
+	uint8_t lastTxPhyPayloadLen = 0;
 
 	JoinSuccessCb joinSuccessCb = nullptr;
 	JoinFailedCb joinFailedCb = nullptr;
@@ -163,6 +332,12 @@ private:
 	LinkCheckCb linkCheckCb = nullptr;
 
 	bool applyAdrProfile(); // builds the custom dr_custom_distribution_data table when ADR is off; see setADR()'s doc comment for the return value
+	// FIX: shared by send() and the deferred-send replay in handleEvents()'s SMTC_MODEM_EVENT_TXDONE
+	// case (see deferredSend's doc comment) - the actual smtc_modem_request_uplink() call plus the
+	// uplinkPending/lastTxDr/lastTxPhyPayloadLen bookkeeping that has to happen identically either way.
+	// Doesn't repeat send()'s isJoined()/data-null/uplinkPending guards - callers are expected to have
+	// already established it's safe to actually dispatch.
+	bool dispatchUplink(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed);
 };
 
 #endif // LORAWAN_ENGINE_H

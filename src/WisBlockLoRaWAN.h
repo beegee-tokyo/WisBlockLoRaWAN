@@ -21,7 +21,7 @@ class WisBlockLoRaWAN
 public:
 	/** Loads saved config (or factory defaults), inits radio + board pins. Call once from setup().
 	 * Deliberately does NOT start the LoRaWAN engine (smtc_modem_init() and everything that follows
-	 * from it - region/class/ADR/relay setup) here, even if that's the configured/default work mode
+	 * from it - region/class/ADR setup) here, even if that's the configured/default work mode
 	 * - see ensureLoRaWANEngineStarted() below for why. */
 	void begin();
 
@@ -48,20 +48,52 @@ public:
 	 * join, before its post-join NewChannelReq MAC commands have landed.
 	 */
 	bool setDataRate(uint8_t dataRate);
-	void setDeviceClass(WisBlockDeviceClass deviceClass);
+	/** See setDataRate()'s doc comment - same underlying mechanism and same meaning for the return value:
+	 * fails (returns false) if the device isn't joined yet, and is retried automatically the moment it is
+	 * - see LoRaWANEngine::setDeviceClass()'s doc comment. */
+	bool setDeviceClass(WisBlockDeviceClass deviceClass);
+	/** Sub-band pre-selection for US915/AU915/CN470/CN470_RP_1_0; no effect elsewhere.
+	 * See LoRaWANEngine::setChannelMask()'s doc comment for the encoding and why it matters -
+	 * short version: it avoids wasting join attempts cycling through the wrong sub-band on
+	 * these many-channel regions. Unlike setDeviceClass()/setADR(), safe to call before join(). */
+	bool setChannelMask(uint16_t mask);
+	uint16_t getChannelMask() const { return lorawan.getChannelMask(); }
 	/** See setDataRate()'s doc comment - same underlying mechanism and same meaning for the return value. */
 	bool setADR(bool enabled);
 	void setTxPower(uint8_t txPowerIndex);
 	void setConfirmedUplinks(bool confirmed);
-	void setRelayMode(WisBlockRelayMode mode);
-	void configureRelayED(const WisBlockRelayEDConfig &cfg) { ensureLoRaWANEngineStarted(); lorawan.configureRelayED(cfg); }
-	void configureRelayServing(const WisBlockRelayServingConfig &cfg) { ensureLoRaWANEngineStarted(); lorawan.configureRelayServing(cfg); }
-	bool addRelayTrustedDevice(const WisBlockRelayTrustedDevice &device) { ensureLoRaWANEngineStarted(); return lorawan.addRelayTrustedDevice(device); }
-	bool removeRelayTrustedDevice(uint8_t index) { ensureLoRaWANEngineStarted(); return lorawan.removeRelayTrustedDevice(index); }
+	/** See WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment - default true (fixes
+	 * the Class A "downlink queue never drains faster than my own send interval" bug). */
+	void setFetchPendingDownlinks(bool enabled) { config.lorawan.fetchPendingDownlinks = enabled; ensureLoRaWANEngineStarted(); lorawan.setFetchPendingDownlinks(enabled); }
+	bool getFetchPendingDownlinks() const { return config.lorawan.fetchPendingDownlinks; }
 
 	void join();
+	void stopJoin() { ensureLoRaWANEngineStarted(); lorawan.stopJoin(); }
 	bool isJoined() const { return lorawan.isJoined(); }
 	WisBlockJoinState joinState() const { return lorawan.joinState(); }
+	/** See LoRaWANEngine::setAutoJoin()'s doc comment for the full mechanism these three cover
+	 * (RUI3-compatible AT+JOIN parameters). Pure configuration - doesn't itself start the
+	 * LoRaWAN engine or join anything; autoJoin is only consulted once the engine actually
+	 * starts (via ensureLoRaWANEngineStarted()), and the other two only take effect on the
+	 * next join()/retry. Safe to call before or after the engine has started either way. */
+	void setAutoJoin(bool enabled)
+	{
+		config.lorawan.autoJoin = enabled;
+		lorawan.setAutoJoin(enabled);
+	}
+	bool getAutoJoin() const { return config.lorawan.autoJoin; }
+	void setJoinReattemptInterval(uint8_t seconds)
+	{
+		lorawan.setJoinReattemptInterval(seconds); // clamps to RUI3's 7-255s range
+		config.lorawan.joinReattemptIntervalS = lorawan.getJoinReattemptInterval();
+	}
+	uint8_t getJoinReattemptInterval() const { return config.lorawan.joinReattemptIntervalS; }
+	void setMaxJoinAttempts(uint8_t attempts)
+	{
+		config.lorawan.maxJoinAttempts = attempts;
+		lorawan.setMaxJoinAttempts(attempts);
+	}
+	uint8_t getMaxJoinAttempts() const { return config.lorawan.maxJoinAttempts; }
 	/**
 	 * Queues an uplink with LBM. The return value only reflects whether the
 	 * request itself was valid and got accepted onto the queue (joined,
@@ -213,7 +245,7 @@ private:
 	void applyP2PSettings();
 
 	/**
-	 * Lazily runs lorawan.begin() (smtc_modem_init() + region/class/ADR/relay
+	 * Lazily runs lorawan.begin() (smtc_modem_init() + region/class/ADR
 	 * setup) the first time anything LoRaWAN-specific is actually touched,
 	 * instead of begin() doing it unconditionally for every application
 	 * regardless of work mode.
@@ -222,25 +254,21 @@ private:
 	 * for every application - including pure P2P sketches that call
 	 * setWorkMode(WISBLOCK_MODE_LORA_P2P) right afterward and never touch
 	 * a single LoRaWAN API again. That's not just wasted flash-load/region-
-	 * table setup: LoRaWANEngine::begin() also runs
-	 * LoRaWANRelay::configureED()/setRelayMode(), which - with
-	 * ADD_RELAY_RX/ADD_RELAY_TX enabled, as this library's example main.h
-	 * does - arms the LoRaWAN Relay end-device's WOR (Wake-on-Radio)
-	 * listening configuration against the *same physical radio* the P2P
-	 * engine then tries to run, before the application ever calls
-	 * setWorkMode(P2P) to say it doesn't want that. p2p.sleep()'s plain
-	 * SX126x SetSleep command doesn't know anything about relay WOR
-	 * scheduling and can't cancel it - LBM's radio planner still considers
-	 * that listening slot its own. That contention - not a HAL-level bug -
-	 * is the source of the residual elevated idle current on top of the
-	 * antenna-power/DIO1 fixes: the two engines were fighting over the same
-	 * SX1262 the whole time.
+	 * table setup: starting the LoRaWAN engine also hands LBM's radio
+	 * planner ownership of the *same physical radio* the P2P engine then
+	 * tries to run, before the application ever calls setWorkMode(P2P) to
+	 * say it doesn't want that. p2p.sleep()'s plain SX126x SetSleep command
+	 * doesn't know anything about LBM's own scheduling and can't cancel it -
+	 * LBM's radio planner still considers itself the owner. That
+	 * contention - not a HAL-level bug - is the source of the residual
+	 * elevated idle current on top of the antenna-power/DIO1 fixes: the two
+	 * engines were fighting over the same SX1262 the whole time.
 	 *
 	 * Now nothing calls this until something actually needs it - the
 	 * LoRaWAN-only setters/actions below, or setWorkMode(WISBLOCK_MODE_LORAWAN)
 	 * itself. A P2P-only application that calls setWorkMode(LORA_P2P) before
 	 * ever calling any LoRaWAN API never starts the LoRaWAN engine at all,
-	 * so there's no relay configuration, no smtc_modem_init(), and nothing
+	 * so there's no smtc_modem_init(), and nothing
 	 * else contending with p2p's ownership of the radio.
 	 *
 	 * No-op before begin() (mirrors applyLoRaWANSettings()'s existing

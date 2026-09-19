@@ -168,7 +168,7 @@ static void lorawan_join_management_service_on_launch( void* context )
         }
         else
         {
-            // can happen in specific cases such as no more duty cycle for wor tx when relay tx is activated
+            // can happen in specific cases such as no more duty cycle available for the join request
             task_manager->modem_task[VIRTUAL_TASK_ID].task_context = FAIL_TO_LAUNCH_JOIN;
         }
     }

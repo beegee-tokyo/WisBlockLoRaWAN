@@ -24,13 +24,18 @@ void buildFilename(const char *key, char *out, size_t outLen)
 
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
+#include <Arduino.h>
 using namespace Adafruit_LittleFS_Namespace;
 
 namespace WisBlockLoRaFlash
 {
 bool init()
 {
-	InternalFS.begin();
+	if (!InternalFS.begin()){
+		Serial.println("FS begin failed");
+		Serial.flush();
+		InternalFS.format();
+	}
 	return true;
 }
 

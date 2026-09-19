@@ -1,6 +1,6 @@
 # WisBlockLoRaWAN
 
-Arduino library skeleton for **LoRaWAN (Class A/B/C + Relay)** and **LoRa P2P** on
+Arduino library skeleton for **LoRaWAN (Class A/B/C)** and **LoRa P2P** on
 RAKwireless WisBlock modules using the built-in **Semtech SX1262** transceiver:
 
 | Board     | MCU                | Arduino core         |
@@ -1198,3 +1198,1394 @@ behavior the function's name always promised. The return-code check,
 all stay in place - genuinely useful defensive infrastructure for a
 region/DR combination that legitimately does need to wait on channel
 widening - they just weren't what was wrong here.
+
+## `WisBlockTxResult::airtimeMs` always reported 0 for LoRaWAN uplinks (fixed)
+
+Reported directly: `result.airtimeMs` in `onLoRaWANTxFinished()` has been
+0 for every uplink since the TXDONE handler was first written -
+`SMTC_MODEM_EVENT_TXDONE`'s own event data (`smtc_modem_api.h`) carries
+only a status enum, no airtime figure, and nothing was ever computing one
+to fill the field with.
+
+**Fixed** by computing it with the standard LoRa airtime formula (Semtech
+AN1200.13 - the same one `LoRaP2PEngine::computeAirtimeMs()` already uses
+for P2P) fed by two things captured in `send()` right after an uplink is
+accepted: `lorawan_api_next_dr_get(kStackId)` for the DR that specific
+uplink will actually use (captured per-send rather than once, since ADR/
+`LinkADRReq` can legitimately change it between one uplink and the next),
+and an estimated PHY payload length (application length + the standard
+13-byte MHDR+FHDR+FPort+MIC overhead, assuming no MAC commands happen to
+be piggybacked in FOpts on that specific frame - not knowable from this
+layer, so this is an estimate, not exact).
+
+**Verified against this project's own hardware trace, not just derived
+from the datasheet formula**: a real device log captured earlier in this
+project showed an actual SF8/BW125 uplink with a 22-byte PHY frame and a
+measured `toa = 103ms`. Feeding those same SF/BW/length values into the
+formula predicts 102.9ms - a match, not a coincidence, and good
+confirmation the formula and its parameters (preamble=8, CR=4/5, explicit
+header, CRC on - all fixed by the LoRaWAN Regional Parameters spec) are
+implemented correctly for this DR family.
+
+The DR-to-SF/BW mapping (`drToSfBw()`) is implemented and confirmed for
+EU868/AS923(-1..4)/RU864/IN865/KR920/CN470/CN470_RP_1_0's standard DR
+tables, and for US915/AU915's 125kHz sub-band (DR0-DR4 - the range a
+device's own uplinks normally use). Deliberately left unimplemented
+(`airtimeMs` stays 0 rather than reporting a number that isn't backed by
+anything): FSK data rates (not a LoRa airtime computation at all), and
+US915/AU915's DR5-7 (RFU for uplink) and DR8-13 (500kHz channels) - less
+commonly hit by a device's own uplinks, and without a hardware trace to
+verify those specific entries the way the EU-like table above was
+verified, reporting a number for them would be a guess dressed up as a
+fact.
+
+---
+
+## 2026-09-14 - LoRaWAN Relay functionality removed (Claude AI)
+
+At the requester's instruction, all LoRaWAN Relay support (both the
+TX/end-device role and the RX/serving role, TS011 / RP002-1.0.4) has been
+completely removed from this library. Everything described earlier in
+this log under "Relay" reflects the *previous* state of the project and
+is kept here for history, not as a description of the current code.
+
+### Why this was more than deleting a couple of files
+
+Relay wasn't an optional add-on bolted on at one layer - it was wired
+into the LoRaWAN stack at four different levels:
+
+1. **This library's own public API and AT command set** - `LoRaWANRelay`
+   (a thin wrapper class), relay-specific fields in
+   `WisBlockLoRaWANSettings`, `LoRaWANEngine`/`WisBlockLoRaWAN` setters,
+   and five AT commands (`AT+RELAY`, `AT+RELAYED`, `AT+RELAYSRV`,
+   `AT+RELAYDEV`, `AT+RELAYDEVDEL`).
+2. **Vendored Semtech LoRa Basics Modem (LBM) relay modules** - two whole
+   source directories (`lr1mac/src/relay/{common,relay_rx,relay_tx}` and
+   `modem_services/relay_service/`) plus `smtc_modem_relay_api.h`.
+3. **LBM's core MAC/crypto/scheduling code**, which had relay-specific
+   branches spliced in at points that have nothing to do with relay on
+   the surface: RX-window timing and frequency selection
+   (`lr1_stack_mac_layer.c`), the MAC-command dispatcher's default case,
+   session-key derivation (`soft_se.c`, `smtc_modem_crypto.c`), radio
+   scheduler hook IDs (`radio_planner_hook_id_defs.h`), the public event
+   enum (`smtc_modem_api.h`), duty-cycle accounting (`modem_core.c`), and
+   - the single largest piece - a relay TX state machine woven through
+   `modem_tx_protocol_manager.c`'s transmission scheduling logic (roughly
+   twenty separate `#if defined( ADD_RELAY_TX )` blocks across ~1450
+   lines).
+4. **The PlatformIO build script** (`extra_script.py`) actually defined
+   `ADD_RELAY_TX` and `ADD_RELAY_RX` unconditionally, so - contrary to
+   what this log's own earlier "Honest scope statement" section implied
+   about relay being an easily-disabled extra - relay code was in fact
+   being compiled into every build of this library, and
+   `wisblock_lbm_port.cpp`'s TCXO startup timing had a whole comment
+   block (and an active 49ms clamp, `kMaxForRelayMs`) built around
+   working around one of relay's own hard-coded protocol constraints.
+
+### What was deleted outright
+
+- `src/LoRaWANRelay.cpp` / `.h`
+- `src/wisblock_relay_rx_bridge.c` / `.h`
+- `src/lbm/smtc_modem_core/lr1mac/src/relay/` (all of `common/`,
+  `relay_rx/`, `relay_tx/`)
+- `src/lbm/smtc_modem_core/modem_services/relay_service/`
+- `src/lbm/smtc_modem_api/smtc_modem_relay_api.h`
+
+### What was surgically edited (relay code/comments removed, everything
+### else in the file left untouched)
+
+- `src/lbm/smtc_modem_api/smtc_modem_api.h` - removed the four
+  `SMTC_MODEM_EVENT_RELAY_*` event enum values and their `relay_tx`/
+  `relay_rx` union members from `smtc_modem_event_t`.
+- `src/lbm/smtc_modem_core/radio_planner/src/radio_planner_hook_id_defs.h`
+  - removed the `RP_HOOK_ID_RELAY_*` hook IDs and collapsed the
+  now-unconditional `ADD_CLASS_C` numbering.
+- `src/lbm/smtc_modem_core/smtc_modem_crypto/smtc_modem_crypto.c` / `.h`
+  - removed `smtc_modem_crypto_derive_relay_session_keys()`.
+- `src/lbm/smtc_modem_core/smtc_modem_crypto/smtc_secure_element/`
+  `smtc_secure_element.h` - removed the three `SMTC_SE_RELAY_*` key-slot
+  enum values and `smtc_secure_element_derive_relay_session_keys()`'s
+  declaration.
+- `src/lbm/smtc_modem_core/smtc_modem_crypto/soft_secure_element/soft_se.c`
+  - removed the three relay key-slot table entries and the
+  `smtc_secure_element_derive_relay_session_keys()` implementation
+  (WOR root/integrity/encryption session-key derivation).
+- `src/lbm/smtc_modem_core/smtc_modem.c` - removed relay event mapping
+  and the entire public `smtc_modem_relay_tx_*` API implementation block
+  (enable/disable/config get-set, activation mode, sync status).
+- `src/lbm/smtc_modem_core/lorawan_packages/lorawan_certification/`
+  `lorawan_certification.c` / `.h` - the certification test protocol's
+  `LORAWAN_CERTIFICATION_RELAY_MODE_CTRL_REQ` opcode (0x53) is a fixed
+  part of the TS011 certification protocol's command-ID space and was
+  kept so the dispatcher still recognizes the message; it now
+  unconditionally replies "not implemented" (its behavior already
+  defaulted to, since `ADD_RELAY_TX` was never defined in *this specific
+  file's* build path). The relay-specific config-parsing branch, the
+  `smtc_modem_relay_api.h` include, and the unused
+  `lorawan_certification_relay_tx_enabled_t` enum were removed.
+- `src/lbm/smtc_modem_core/lr1mac/src/lr1mac_defs.h` - removed the
+  relay-only `LWPSTATE_RXR`, `RXR` (rx window type), and
+  `RECEIVE_ON_RXR` enum values.
+- `src/lbm/smtc_modem_core/lr1mac/src/lr1_stack_mac_layer.c` - the
+  largest single-file cleanup after the TX protocol manager: removed the
+  relay includes, the `RXR` debug-name entry, the `FPORT_RELAY`
+  encryption-key branch, the `RXR` case in both RX-window-frequency
+  functions, the relay crystal-error adjustment in RX timing parameter
+  calculation, the FPORT_RELAY MAC-decode-key branch, and the relay
+  MAC-command-parser fallback in the default case of the MAC command
+  dispatcher (now a plain "unknown mac command" trace, matching the
+  behavior every other LBM build without relay already had).
+- `src/lbm/smtc_modem_core/lr1mac/src/lr1mac_core.c` - removed the relay
+  include and the entire `#else` (relay-enabled) branch of the
+  `LWPSTATE_RXR`/`RECEIVE_ON_RXR` state-machine handling, keeping only
+  the `#if !defined( ADD_RELAY_TX )` branch's body unconditionally.
+- `src/lbm/smtc_modem_core/lorawan_manager/lorawan_join_management.c` -
+  reworded one comment that referenced relay WOR duty-cycle exhaustion.
+- `src/lbm/smtc_modem_core/lorawan_manager/lorawan_send_management.c` -
+  removed the `RECEIVE_ON_RXR` branch from an RX-window check.
+- `src/lbm/smtc_modem_core/modem_utilities/modem_core.c` - removed the
+  relay include and the relay duty-cycle contribution to
+  `smtc_duty_cycle_get_next_free_time_ms()`'s result.
+- `src/lbm/smtc_modem_core/modem_utilities/modem_services_config.h` -
+  removed the two relay service includes and their entries in the
+  services-init table.
+- `src/lbm/smtc_modem_core/modem_supervisor/modem_tx_protocol_manager.c`
+  - the big one. Programmatically stripped all ~19 top-level
+  `#if defined( ADD_RELAY_TX )` blocks (keeping the `#else` branch's body
+  where one existed, deleting the block outright where it didn't), then
+  removed the now-dead `MAX_TRIAL_RELAY` macro and
+  `current_tpm_cpt_relay_max_trial` counter (write-only once the state
+  machine reading them was gone), then rewrote the handful of Doxygen
+  comment blocks that described the two-case (LoRaWAN vs. WOR/relay)
+  transmission sequencing down to the single LoRaWAN-only case that's
+  now the only one that exists.
+- `src/lbm/smtc_modem_core/modem_supervisor/modem_tx_protocol_manager.h`
+  - reworded one comment.
+- `src/lbm/smtc_modem_core/CMakeLists.txt` - removed the `LBM_RELAY_RX`/
+  `LBM_RELAY_TX` conditional blocks (these referenced source files that
+  no longer exist; this file is for non-Arduino/CMake consumers of the
+  vendored LBM tree and isn't used by the Arduino or PlatformIO builds
+  of this library, but was cleaned up for consistency).
+
+### This library's own code
+
+- `src/WisBlockLoRaWANTypes.h` - removed `WisBlockRelayMode`,
+  `WisBlockRelayEDConfig`, `WisBlockRelayServingConfig`,
+  `WisBlockRelayTrustedDevice`, and the three relay fields from
+  `WisBlockLoRaWANSettings`.
+- `src/LoRaWANEngine.h` / `.cpp` - removed the `LoRaWANRelay.h` include
+  and the five relay methods (`setRelayMode`, `configureRelayED`,
+  `configureRelayServing`, `add/removeRelayTrustedDevice`); `begin()`/
+  `applySettings()` no longer touch relay config at all.
+- `src/WisBlockLoRaWAN.h` / `.cpp` - removed the same five methods at
+  this layer, and rewrote `ensureLoRaWANEngineStarted()`'s doc comment
+  (previously explained a real P2P/relay radio-contention bug this
+  lazy-init design fixed; kept the P2P-contention explanation since
+  eager `smtc_modem_init()` is still wasteful for P2P-only sketches, but
+  removed the relay-specific mechanism since it no longer exists).
+- `src/WisBlockLoRaAT.cpp` - removed the `RELAY=` line from `AT+CFG?`'s
+  status dump, and all five `AT+RELAY*` command handlers
+  (~185 lines total, including hex-key parsing for the trusted-device
+  list and the config get/set pairs for both relay roles).
+- `src/wisblock_lbm_port.cpp` - `maxSleepDuration()`'s TCXO startup-time
+  comment explained a real hardware bug fix (5ms was too optimistic for
+  this board's TCXO) but the actual constraint it was clamping against
+  (`kMaxForRelayMs`, keeping the value under relay's
+  `DELAY_WOR_TO_WORACK_MS` protocol timing budget so
+  `smtc_relay_tx_init()` wouldn't panic) no longer applies to code that
+  doesn't exist. Removed the clamp and the relay-specific half of the
+  comment; kept the hardware-bug explanation and the 40ms base value,
+  since that part was never about relay.
+- `examples/RX-Duty-LoRaP2P/main.h` - removed the two commented-out
+  `#define ADD_RELAY_TX/RX` lines.
+
+### Build metadata and docs
+
+- `library.properties`, `library.json`, `CHANGELOG.md` (description
+  line) - dropped "Relay" from the one-line project description.
+- `extra_script.py` - removed the `ADD_RELAY_TX`/`ADD_RELAY_RX`
+  `CPPDEFINES` entries (these were the ones actually compiling relay
+  code into every PlatformIO build of this library) and the four relay
+  include-directory entries, and updated the file's own top-of-file
+  scope comment to say relay was deliberately removed rather than
+  vendored.
+- `README.md` - removed "Relay (not yet tested)" from the feature list
+  and deleted the six `AT+RELAY*` rows from the AT command reference
+  table.
+
+### What's intentionally still there
+
+`src/lbm/smtc_modem_core/lorawan_packages/lorawan_certification/`
+`lorawan_certification.{c,h}` still contain the `0x53`
+(`LORAWAN_CERTIFICATION_RELAY_MODE_CTRL_REQ`) opcode. This is a fixed
+command ID in the TS011 certification test protocol itself (the network
+certification test tool can send this opcode to any device under test,
+relay-capable or not); removing the enum value entirely would either
+break the dispatcher's `switch` numbering or require it to silently
+ignore a valid certification-protocol message instead of correctly
+replying "not implemented," which is what a compliant non-relay device
+is supposed to do. Two vendored upstream `CHANGELOG.md` files
+(`smtc_modem_api/CHANGELOG.md`, `smtc_modem_hal/CHANGELOG.md`) also
+still mention relay - these are Semtech's own historical release notes
+for past LBM versions and document what upstream actually shipped, not
+this library's current functionality, so they were left as-is.
+
+### Verification
+
+A recursive case-insensitive search for "relay" across the entire
+repository (`grep -rli -i relay .`, excluding `.git`) now returns only:
+this log file itself, the two vendored upstream `CHANGELOG.md` files
+noted above, `extra_script.py`'s scope comment explaining the removal,
+and the two intentionally-kept certification opcode references. No
+source file references a deleted symbol, type, header, or macro
+(`LoRaWANRelay`, `WisBlockRelay*`, `smtc_relay_tx_*`,
+`smtc_modem_relay_*`, `relay_tx_api.h`, `relay_rx_api.h`,
+`ADD_RELAY_TX`/`ADD_RELAY_RX`) anywhere in the tree.
+
+**Not done**: this removal was performed by editing vendored C source
+directly rather than by building and running the toolchain (no compiler
+was available in this environment), so it has not been verified with an
+actual `arduino-cli`/PlatformIO compile against real RAK4631/RAK3312/
+RAK11310 targets. The `#if`/`#endif` block extraction in
+`modem_tx_protocol_manager.c` in particular was done programmatically
+across ~19 blocks; a real build (or at minimum a `gcc -fsyntax-only`
+pass with the right include paths and macro defines from
+`extra_script.py`) is the recommended next step before flashing this to
+hardware.
+
+---
+
+## 2026-09-14 - Class C bug fix: device class silently never switched away from Class A
+
+### The bug, as reported
+
+A Class C device log showed RX1 and RX2 opening with a fixed timeout and
+closing again after every single uplink, with no continuous receive
+window ever appearing between transmissions - i.e. pure Class A
+behavior, even though the application had configured Class C.
+
+### Root cause
+
+Traced into the vendored LBM source. `smtc_modem_set_class()`
+(`src/lbm/smtc_modem_core/smtc_modem.c`) checks
+`SMTC_MODEM_STATUS_JOINED` first and returns `SMTC_MODEM_RC_FAIL`
+outright - leaving the class unchanged - if the device isn't joined yet:
+
+```c
+smtc_modem_status_mask_t status_mask = modem_get_status( stack_id );
+if( ( status_mask & SMTC_MODEM_STATUS_JOINED ) != SMTC_MODEM_STATUS_JOINED )
+{
+    return SMTC_MODEM_RC_FAIL;
+}
+```
+
+`LoRaWANEngine::setDeviceClass()` was called exactly once: from
+`applySettings()`, which runs from `begin()` - i.e. before `join()` is
+ever called. So the very first (and, before this fix, *only*) attempt to
+switch to Class C was guaranteed to fail on every boot, and
+`setDeviceClass()` didn't check the return code at all - the failure was
+completely silent. The device was left on Class A permanently, matching
+the log exactly.
+
+This is the identical "must be joined first" gate that
+`smtc_modem_adr_set_profile()` has (already documented in this file
+under the ADR/DR-distribution fix), which is why the same log also shows
+`[LoRaWAN] Failed to disable ADR` / `[LoRaWAN] Failed to set DR3` right
+after init - same root cause, different symptom. ADR happens to recover
+on its own because `handleEvents()`'s `TXDONE` case already retries
+`applyAdrProfile()` once per uplink until it succeeds; there was no
+equivalent retry anywhere for device class, so it never recovered.
+
+### Fix
+
+`LoRaWANEngine::setDeviceClass()` now checks `smtc_modem_set_class()`'s
+return code and records success/failure in a new `classProfileApplied`
+flag (mirroring `adrProfileApplied`'s existing pattern), and its return
+type changed from `void` to `bool` so callers can see whether the class
+actually took effect - `WisBlockLoRaWAN::setDeviceClass()` was updated to
+match and forward the result. The flag is retried at every point the
+device can newly become joined:
+
+- `begin()` resets `classProfileApplied = false` (a fresh
+  `smtc_modem_init()` always comes up in Class A regardless of what's
+  about to be requested).
+- `SMTC_MODEM_EVENT_JOINED` in `handleEvents()` - the actual moment an
+  OTAA device becomes joined, and therefore the first point the pending
+  class request can possibly succeed. This is the fix that matters for
+  the log's OTAA join flow.
+- The synchronous ABP-success path in `join()` - ABP never raises
+  `SMTC_MODEM_EVENT_JOINED`, so this path needed its own retry rather
+  than relying on the event handler.
+- A `TXDONE`-time fallback retry in `handleEvents()`, mirroring the
+  existing ADR retry, as a belt-and-suspenders catch-all in case
+  `classProfileApplied` is somehow still false by the time an uplink
+  completes (e.g. `RETURN_BUSY_IF_TEST_MODE`).
+
+All four retries call `setDeviceClass()` unconditionally guarded by
+`if (!classProfileApplied)`, so once the class switch actually lands
+none of the later checks do anything.
+
+### Files changed
+
+`src/LoRaWANEngine.h` (new `classProfileApplied` member,
+`setDeviceClass()` signature `void` -> `bool`), `src/LoRaWANEngine.cpp`
+(the fix itself, in `begin()`, `setDeviceClass()`, `join()`'s ABP branch,
+and both `SMTC_MODEM_EVENT_JOINED`/`TXDONE` cases in `handleEvents()`),
+`src/WisBlockLoRaWAN.h` / `.cpp` (matching `bool` return, forwarded
+through unchanged otherwise).
+
+### Verification
+
+Checked every existing call site of `setDeviceClass()`
+(`WisBlockLoRaAT.cpp`'s `AT+CLASS=` handler, both example sketches) -
+all call it as a bare statement and discard the return value already,
+so the `void` -> `bool` signature change doesn't break anything. Ran a
+comment/string-aware brace and paren balance check across all four
+edited files (0 imbalance in each) in place of a full Arduino toolchain
+build, which isn't available in this environment.
+
+**Not done**: not verified against real hardware or a real network
+server - same caveat as the rest of this log. If Class C still doesn't
+behave correctly after this fix, the next place to look is
+`src/lbm/smtc_modem_core/lr1mac/src/lr1mac_class_c/lr1mac_class_c.c`
+itself (LBM's actual continuous-RX scheduling for Class C) rather than
+this library's wrapper, since this fix only addresses *requesting* the
+class switch actually reaching LBM - not LBM's own Class C RX scheduling
+logic, which was not modified.
+
+---
+
+## 2026-09-14 - Sub-band pre-selection (AT+MASK / setChannelMask), RUI3-compatible
+
+### The problem
+
+US915, AU915, and CN470/CN470_RP_1_0 define far more uplink/downlink channels
+than a typical 8-channel gateway actually listens on (72 channels/8 sub-bands
+for US915/AU915, 64 or 96 channels/8 or 12 sub-bands for CN470/CN470_RP_1_0).
+Without knowing in advance which sub-band the gateway is on, a joining device
+has to cycle through every sub-band's channels across repeated join attempts
+before it happens to transmit on one the gateway is actually listening to -
+wasting join requests, airtime, and time-to-first-join, all avoidable if the
+application already knows (or can be told) which sub-band to use.
+
+RUI3 solves this with `AT+MASK` / `api.lorawan.mask.set()`: a 16-bit mask,
+one bit per sub-band, applied *before* the join request so it only ever
+transmits on the selected sub-band's channels. This adds the same mechanism
+here, matching RUI3's command name, mask encoding, and API shape exactly (per
+the RUI3 AT Command Manual's `AT+MASK` section and the RUI3 LoRaWAN API's
+`api.lorawan.mask`/`RAKLorawan::mask` - RUI3's own doc page doesn't render the
+`mask` API section directly, but its signature - `bool set(uint16_t* mask)` -
+and encoding are confirmed against RAKwireless's own `RUI3-Best-Practice`
+repo and RAK4630 quick-start guide, both of which show
+`uint16_t maskBuff = 0x0001; api.lorawan.mask.set(&maskBuff);`).
+
+### Why this took real engineering, not just an AT command passthrough
+
+The vendored LBM stack has no existing public API for "restrict channels to
+this sub-band." The closest primitive, `smtc_real_set_channel_enabled()`
+(per-channel on/off), explicitly does **not** support US915/AU915/CN470/
+CN470_RP_1_0 - its own source says so ("// Not supported") for exactly these
+regions, because they use LoRaWAN's `LinkADRReq`-style `ChMaskCntl`/`ChMask`
+mechanism instead of simple per-channel toggles.
+
+The actual usable primitive is `smtc_real_build_channel_mask( real, ch_mask_cntl,
+ch_mask )`, which is the same function the network's own `LinkADRReq` handling
+calls into - this just runs it locally, before joining, instead of waiting
+for the network to do it after joining:
+
+- **US915/AU915**: `ChMaskCntl=5` ("bank of channels" mode) is a direct match
+  for what's needed - bit N of the 16-bit `ChMask` enables/disables the whole
+  8-channel sub-band N+1 (its 8 125kHz channels *and* its one 500kHz wide
+  channel) as a single unit. This lines up bit-for-bit with RUI3's own
+  `AT+MASK` encoding for these regions, so no translation is needed beyond
+  masking to 8 bits. `mask == 0` (RUI3's "ALL" convention) uses `ChMaskCntl=6`
+  instead, which turns every 125kHz channel on and takes the wide-channel
+  mask as its `ChMask` parameter (set to `0x00FF` = all 8 wide channels on).
+- **CN470 / CN470_RP_1_0**: no such shortcut exists - each `ChMaskCntl`
+  value (0-3 for the 64-channel CN470, 0-5 for the 96-channel
+  CN470_RP_1_0) covers a plain 16-channel (2 sub-band) window with a
+  literal 16-bit `ChMask`. Selecting one sub-band means building the right
+  `ChMask` for whichever 16-channel block contains it (0x00FF for the lower
+  half, 0xFF00 for the upper half) and calling `smtc_real_build_channel_mask()`
+  once per block - including the blocks that should end up all-disabled,
+  since each call only touches its own block and previous state could have
+  left other blocks enabled.
+
+### What was added
+
+- `src/lbm/smtc_modem_core/lorawan_api/lorawan_api.c` / `.h` (mid-level API
+  layer, the same one `LoRaWANEngine.cpp` already reaches into for
+  `lorawan_api_next_dr_get()`, since `smtc_modem_api.h` has no equivalent) -
+  new `lorawan_api_set_channel_mask( stack_id, mask )` and
+  `lorawan_api_get_channel_mask( stack_id )`, plus the two region-specific
+  static helpers described above. Region is read via the existing
+  `lr1mac_core_get_region()`; the mask actually applied is remembered in a
+  small per-stack static array since `smtc_real` itself only tracks
+  per-channel enabled bits, not "which mask produced this state." Regions
+  outside the four listed are a documented no-op, matching RUI3's own
+  `AT+MASK` scoping ("only for US915, AU915, LA915, CN470" - LA915 isn't a
+  distinct region in this vendored LBM v4.9.0, so it doesn't apply here).
+- `src/WisBlockLoRaWANTypes.h` - new persisted `channelMask` field (`uint16_t`,
+  default 0 = no restriction) on `WisBlockLoRaWANSettings`.
+- `src/LoRaWANEngine.h` / `.cpp` - new `setChannelMask()`/`getChannelMask()`.
+  Unlike `setDeviceClass()`/`setADR()`, this does **not** require the device
+  to already be joined (it only affects which channels this device itself
+  considers when transmitting) - it's pushed to LBM from `applySettings()`
+  immediately after `smtc_modem_set_region()`, every time settings are
+  (re)applied, specifically so it's in effect *before* the first join
+  attempt rather than needing a post-join retry like the Class C fix above.
+- `src/WisBlockLoRaWAN.h` / `.cpp` - matching `setChannelMask()`/
+  `getChannelMask()` at this layer, following the same
+  `config.lorawan.X` / `ensureLoRaWANEngineStarted()` / `lorawan.X()` pattern
+  as every other setter here.
+- `src/WisBlockLoRaAT.cpp` - new `AT+MASK` command, matching RUI3's exactly:
+  `AT+MASK=?` / `AT+MASK=<4 hex digits>`, same `AT_PARAM_ERROR` behavior on a
+  malformed value. Also added a `MASK=` line to the `AT+CFG?` status dump
+  alongside the existing `REGION=`/`CLASS=`/`ADR=` lines.
+- `README.md` - new `AT+MASK` row in the AT command reference table.
+
+### Usage
+
+```cpp
+loraWan.setRegion(WISBLOCK_REGION_US915);
+loraWan.setChannelMask(0x0001); // sub-band 1 (channels 0-7 + 64) - e.g. The Things Network US915
+loraWan.join();
+```
+
+or via AT command, before `AT+JOIN`:
+
+```
+AT+BAND=5
+AT+MASK=0001
+AT+JOIN
+```
+
+### Verification
+
+`lorawan_api.c` (containing the new mask logic) was checked with
+`gcc -fsyntax-only` using the project's real build flags/include paths and
+all four region defines (`REGION_US_915`, `REGION_AU_915`, `REGION_CN_470`,
+`REGION_CN_470_RP_1_0`) - zero errors. `LoRaWANEngine.cpp/h`,
+`WisBlockLoRaWAN.cpp/h`, and `WisBlockLoRaAT.cpp` were checked with a
+comment/string-aware brace-and-paren balance script (Arduino-target files
+can't be fed through a plain `gcc` syntax check the way the vendored LBM C
+files can, since they need the Arduino core and this board's HAL headers,
+neither of which exist in this environment).
+
+**Not done**: no access to real US915/AU915/CN470 hardware or gateways in
+this environment, so the actual join-time channel selection has not been
+verified against a live network server. The CN470 (non-RP_1_0) 26MHz
+channel-plan variant is a known, called-out limitation (see the code
+comment in `lorawan_api_set_channel_mask_cn_470()`) - sub-band selection has
+no effect in that specific plan, since that region's own
+`region_cn_470_build_channel_mask()` always enables every channel for the
+16-channel block covering channels 48-63 regardless of the mask given, when
+a 26MHz plan is active. The far more common 20MHz A/B plan, and
+CN470_RP_1_0, are both unaffected by this and work as described above.
+
+---
+
+## 2026-09-14 - Sub-band mask bug fix: first join attempt ignored the configured sub-band
+
+### The bug, as reported
+
+With `lora.setChannelMask(0x0002)` (sub-band 2) configured before joining on
+US915, a device log showed the *first* join attempt transmitting on a
+sub-band 1 frequency (902.9 MHz) anyway. It failed, retried, and the second
+attempt happened to land on a sub-band 2 frequency (904.9 MHz) and
+succeeded - but only the second attempt honored the requested mask.
+
+### Root cause
+
+Traced into exactly how LBM's join channel selection actually decides which
+channel to transmit on, since that turned out to be a different code path
+than the one `smtc_real_build_channel_mask()` (added in the previous
+sub-band mask feature) writes to.
+
+`smtc_real_build_channel_mask()` only stages the requested mask into a
+scratch buffer (`unwrapped_channel_mask`). It is **not** what channel
+selection reads. `region_us_915_get_join_next_channel()` (and its AU915/
+CN470/CN470_RP_1_0 equivalents) read a separate, region-owned
+`channel_index_enabled` array - and that array is only ever updated by a
+second, distinct function: `smtc_real_set_channel_mask()`, which copies the
+staged buffer into it. In normal operation, `smtc_real_set_channel_mask()`
+is called by LBM itself while processing an incoming network `LinkADRReq` -
+strictly a post-join event. Nothing in the join path itself ever calls it.
+
+The previous implementation called `smtc_real_build_channel_mask()` and
+stopped there, so the staged sub-band selection never actually reached
+`channel_index_enabled`. That array stayed at its region-init default (every
+channel enabled) for the entire pre-join period, so
+`region_us_915_get_join_next_channel()`'s random pick among "active"
+channels was effectively unrestricted - every join attempt (not just the
+first) was choosing uniformly at random across all 8 US915 sub-bands,
+completely independent of whatever mask had been requested. A join that
+happens to land on the requested sub-band in that state - like the log's
+second attempt - is coincidence (roughly a 1-in-8 chance per attempt for
+US915/AU915), not the mask taking effect.
+
+### Fix
+
+Both `lorawan_api_set_channel_mask_us_au_915()` and
+`lorawan_api_set_channel_mask_cn_470()` (in
+`src/lbm/smtc_modem_core/lorawan_api/lorawan_api.c`) now call
+`smtc_real_set_channel_mask( lr1_mac_obj[stack_id].real )` immediately after
+staging the mask via `smtc_real_build_channel_mask()`, committing it into
+`channel_index_enabled` right away instead of waiting for a post-join
+`LinkADRReq` that, before joining, is never going to come.
+
+For US915/AU915 specifically, this commit function
+(`region_us_915_channel_mask_set_after_join()` /
+`region_au_915`'s equivalent - the "_after_join" in the name refers to when
+LBM itself normally calls it, not any restriction on when it's safe to call)
+also copies the mask into `snapshot_channel_tx_mask`, the array used to
+round-robin channels within a sub-band across retries. Separately,
+`lr1mac_core_join_status_clear()` resets that same snapshot back to
+"everything available" at the start of every join sequence - but that reset
+only affects which *already-enabled* channels get retried in what order
+within a sub-band; it does not re-enable a sub-band our mask has switched
+off. `region_us_915_get_join_next_channel()` ANDs the snapshot against
+`channel_index_enabled` before considering a channel a candidate, so a
+disabled sub-band stays disabled (zero candidates in that block, causing the
+selection loop to move on to the next block) regardless of what state the
+snapshot itself resets to. The commit to `channel_index_enabled` is what
+matters, and it's not touched by that reset - so the fix holds from the very
+first join attempt onward, not just after a retry happens to clear the
+snapshot too.
+
+### Files changed
+
+`src/lbm/smtc_modem_core/lorawan_api/lorawan_api.c` only - both region
+helper functions gained one `smtc_real_set_channel_mask()` call each, plus
+an expanded doc comment on the function group explaining the staging/commit
+split so a future edit doesn't drop this call again by "simplifying" back to
+just the build step.
+
+### Verification
+
+Re-checked with `gcc -fsyntax-only` using the project's real build flags and
+all four region defines - zero errors. Re-derived the fix by reading the
+actual channel-selection code path end to end
+(`region_us_915_get_join_next_channel()` and its US915/AU915/CN470/
+CN470_RP_1_0 counterparts, plus `smtc_real_set_channel_mask()`'s dispatch to
+each region's own commit function) rather than assuming the first
+implementation's `smtc_real_build_channel_mask()` call was sufficient, which
+is exactly the assumption that was wrong the first time.
+
+**Not done**: as with the mask feature itself, not verified against real
+US915/AU915/CN470 hardware or a live gateway in this environment - the fix
+is derived from a precise reading of the vendored LBM channel-selection
+source, not from a repeat hardware test. If sub-band selection still
+misbehaves after this, the next thing to check would be whether
+`applySettings()`'s ordering (region set -> mask set, both before any join
+call) is actually what's running in the failing case, since a mask set
+*after* a join attempt has already started obviously can't affect that
+attempt.
+
+---
+
+## 2026-09-14 - Sub-band mask bug fix #2: mask reset before *every* join attempt, not just before joining
+
+### The bug, as reported (with the previous fix already applied)
+
+Testing the previous fix (`smtc_real_set_channel_mask()` added to
+`lorawan_api_set_channel_mask()`) against real hardware: `setChannelMask(0x0002)`
+called well before `join()`, following the documented order (region, then
+mask, then class/ADR/DR) - and the first join attempt was *still* transmitted
+on a sub-band 1 frequency (902.9 MHz). Second attempt landed on sub-band 2
+(904.9 MHz) and succeeded - the exact same symptom as before, meaning the
+previous fix, while correct as far as it went, did not actually solve the
+reported problem.
+
+### Root cause - deeper than the first fix reached
+
+The first fix correctly identified that `smtc_real_build_channel_mask()`
+alone doesn't commit into `channel_index_enabled` (the array channel
+selection reads) and added the missing `smtc_real_set_channel_mask()` commit
+call - but that commit happens once, at `setChannelMask()`/`applySettings()`
+time, before `join()` is ever called. It didn't yet account for what happens
+*inside* the join sequence itself, between that commit and the actual
+channel pick for each transmitted join request.
+
+Traced `lr1mac_core_update_join_channel()` - called fresh before *every*
+join attempt (the first one and every automatic retry, since LoRaWAN's OTAA
+join procedure is its own internal retry loop inside LBM, not something this
+library's `join()` call re-triggers each time - hence the log's "device is
+already join" warning on the logged retry, which was LBM's own internal
+join task firing again, not a second `join()` call from the application
+actually doing anything). Its very first line is:
+
+```c
+lr1_stack_mac_region_config( lr1_mac_obj );
+```
+
+which calls `smtc_real_config()` -> `region_us_915_config()` (or the AU915/
+CN470/CN470_RP_1_0 equivalent), and *that* function unconditionally marks
+every channel in the region's hardcoded default plan as enabled -
+`SMTC_PUT_BIT8( channel_index_enabled, i, CHANNEL_ENABLED )` for every
+single channel index, no exceptions. This isn't a bug in LBM - by design, a
+join request is supposed to be able to use any default channel unless
+something has restricted it - but it means whatever `channel_index_enabled`
+state the first fix committed gets silently thrown away and reset back to
+"every channel enabled" immediately before every single join channel
+selection, first attempt included. Committing the mask earlier (whether from
+`setChannelMask()` directly, or from `applySettings()` before `join()` is
+ever called) cannot fix this, because the problem isn't *when* the mask gets
+committed once - it's that something resets it again, unconditionally, on a
+per-attempt basis, after that.
+
+### Fix
+
+`lr1mac_core_update_join_channel()` (`src/lbm/smtc_modem_core/lr1mac/src/lr1mac_core.c`)
+now calls `smtc_real_set_channel_mask( lr1_mac_obj->real )` immediately
+after `lr1_stack_mac_region_config()`, on every call - i.e. before every
+single join channel selection, first attempt and every retry alike.
+`smtc_real_set_channel_mask()` re-copies whatever mask was last staged via
+`smtc_real_build_channel_mask()` (in `unwrapped_channel_mask`, a completely
+separate buffer that `region_xxx_config()` never touches and therefore
+survives its reset untouched) back over the default `region_config()` just
+set - undoing the unwanted reset immediately, on every attempt, rather than
+only once before the first one.
+
+This call is unconditional (not gated to only the four sub-band-capable
+regions) and confirmed safe for every other region too: the staged buffer
+each region reads from is always initialized to a sane "all channels
+enabled" default by that region's own `region_xxx_init()` (e.g. EU868's
+`region_eu_868_init()` explicitly does
+`memset( &unwrapped_channel_mask[0], 0xFF, BANK_MAX_EU868 )`), and that init
+always runs at least once - inside `smtc_modem_set_region()` - before
+`lr1mac_core_update_join_channel()` can ever be reached. So for a region
+with no custom mask ever requested, this call re-applies the same
+"everything enabled" state `region_config()` just set - a harmless no-op -
+and for the four regions this library's `setChannelMask()` actually
+supports, it re-applies the real restriction instead.
+
+### Files changed
+
+`src/lbm/smtc_modem_core/lr1mac/src/lr1mac_core.c` only - one function,
+`lr1mac_core_update_join_channel()`, gained one line plus an explanatory
+comment.
+
+### Verification
+
+`gcc -fsyntax-only` against the project's real build flags and all four
+region defines - zero errors. Traced the actual call graph from
+`smtc_modem_join_network()` down through `lorawan_join_add_task()` to
+`lr1mac_core_update_join_channel()` to confirm this function genuinely runs
+before every join attempt (not just the first), matching both this log's
+symptom and the previous, still-unresolved report's symptom exactly -
+including why the "successful" second attempt in both logs landed on the
+requested sub-band by coincidence rather than by the mask actually working
+(1-in-8 odds for a US915 sub-band on a single random attempt), and separately
+confirmed via each region's own `_init()` function that the "safe for every
+region, not just the four we handle" assumption behind making this call
+unconditional actually holds.
+
+**Not done**: still not verified against real hardware in this environment.
+Given that the previous fix looked complete by the same kind of source-level
+reasoning and turned out not to fully resolve the issue, this one should be
+treated as "traced and reasoned through to the actual point where the reset
+happens, per-attempt, not just per-mask-set" rather than as a guaranteed fix
+until it's been tried again against a real US915 (or AU915/CN470) gateway.
+If sub-band selection is *still* not effective after this, the next place to
+look would be whether something else calls `lr1_stack_mac_region_config()`
+through a path other than `lr1mac_core_update_join_channel()` on the way to
+an actual join transmission that wasn't accounted for here.
+
+---
+
+## 2026-09-15 - Class A bug fix: FPending downlinks never drained faster than the app's own send interval
+
+### The bug, as reported
+
+With multiple downlinks queued on the LNS, only the first was ever
+delivered. The downlink log confirmed `f_pending = true` on it (the network
+correctly signaling more were waiting), but the device never sent a prompt
+follow-up uplink to fetch them - it just kept receiving one additional
+downlink per its own regular, application-scheduled uplink (confirmed
+against the device log: downlinks `0x1` through `0x7` arrived one per normal
+`[LOOP] Send` cycle, roughly a minute apart, not back-to-back).
+
+### Root cause
+
+For Class A, a downlink can only ever arrive in RX1/RX2, which only open in
+response to an uplink the device itself sends. When the network has more
+than one downlink queued, it sets the FPending bit on the one it does send,
+signaling "there's more - send another uplink soon so I can give you the
+rest" (LoRaWAN 1.0.4 section 5.1). Nothing about this is automatic on the
+network side; the device has to act on it.
+
+`smtc_modem_get_downlink_data()`'s output struct
+(`smtc_modem_dl_metadata_t`) already carries this bit
+(`meta.fpending_bit`), and LBM's MAC layer already parses it out of the
+downlink's `FCtrl` byte correctly - but `LoRaWANEngine::handleEvents()`'s
+`SMTC_MODEM_EVENT_DOWNDATA` case only ever read `meta.fport`, `meta.rssi`,
+and `meta.snr` from that struct. `fpending_bit` was retrieved and then
+silently discarded, every single time. With no code path ever acting on it,
+the device had no way to know it should ask for more - so it never did,
+and the "next" downlink only ever showed up whenever the application's own,
+completely unrelated periodic send happened to open another RX window.
+
+### Fix
+
+`SMTC_MODEM_EVENT_DOWNDATA` handling in `LoRaWANEngine.cpp` now reads
+`meta.fpending_bit` into the new `WisBlockRxResult::fpending` field (so the
+application can see it too, if it wants to), and - when
+`WisBlockLoRaWANSettings::fetchPendingDownlinks` is true (the new default)
+and the device is Class A - automatically issues an empty, unconfirmed
+uplink via `smtc_modem_request_uplink()` right away, rather than waiting for
+whatever the application's own send cadence happens to be. This drains a
+queue of N pending downlinks at roughly one extra uplink+RX-window cycle
+apart, instead of one per full application send interval.
+
+Two real LBM API constraints had to be handled to make the automatic uplink
+call itself succeed, both found by reading `smtc_modem_request_uplink()`/
+`smtc_modem_send_tx()`'s actual validation rather than assuming:
+
+- `smtc_modem_request_uplink()` rejects a NULL payload pointer outright
+  (`RETURN_INVALID_IF_NULL`), even when the requested length is 0 - so the
+  empty uplink uses a real (just unused) 1-byte static buffer with
+  `payload_length` explicitly 0, not `nullptr`.
+- `smtc_modem_send_tx()` forbids FPort 0 for application uplinks (it's
+  reserved for MAC-only frames) - so if the pending-flagged downlink itself
+  had no application payload (arrived on FPort 0, a MAC-only downlink),
+  the follow-up empty uplink falls back to FPort 1 instead of using
+  `meta.fport` directly and failing.
+
+Scoped to Class A only: Class B/C devices already have a standing receive
+window (ping slots / continuous RXC) and don't need to ask for the next
+downlink with an extra uplink - the network can just send it. Made
+opt-out-able (`fetchPendingDownlinks = false`, `AT+FPENDING=0`) rather than
+unconditional, since this does spend extra airtime/duty-cycle budget per
+pending downlink, which not every application may want to spend
+automatically - `WisBlockRxResult::fpending` is still reported either way,
+so an application that opts out can still see the bit and act on it itself.
+Guarded by `uplinkPending` as a safety net against ever double-queuing,
+though in normal operation this event fires after the TXDONE that already
+cleared it, for the same RX cycle.
+
+### Files changed
+
+`src/WisBlockLoRaWANTypes.h` (new `WisBlockLoRaWANSettings::fetchPendingDownlinks`,
+default true; new `WisBlockRxResult::fpending`), `src/LoRaWANEngine.h`/`.cpp`
+(the fix itself, in the `SMTC_MODEM_EVENT_DOWNDATA` case, plus
+`setFetchPendingDownlinks()`/`getFetchPendingDownlinks()`),
+`src/WisBlockLoRaWAN.h` (matching setter/getter, same
+`config.lorawan.X`/`ensureLoRaWANEngineStarted()`/`lorawan.X()` pattern as
+every other setting here), `src/WisBlockLoRaAT.cpp` (new library-specific
+`AT+FPENDING` command - no RUI3 equivalent to mirror here), `README.md`
+(new AT command table row).
+
+### Verification
+
+Checked `smtc_modem_request_uplink()`'s and `smtc_modem_send_tx()`'s actual
+validation logic in the vendored LBM source (not assumed) to confirm the
+NULL-payload and FPort-0 handling above are real constraints and not
+speculative caution. Comment/string-aware brace-and-paren balance check
+across all five edited files - zero imbalance in each.
+
+**Not done**: not verified against a real device/LNS pair with multiple
+downlinks queued in this environment - the fix is derived from reading
+LBM's downlink metadata plumbing and uplink validation end to end, matching
+the reported symptom and the attached LNS log's confirmed `f_pending=true`,
+but hasn't been re-tested against hardware here.
+
+---
+
+## 2026-09-16 - Regression fix: switching to AS923 after a sub-band mask was set elsewhere sent join on freq:0
+
+### The bug, as reported
+
+After testing on AU915 with a sub-band mask configured (per the previous
+two fixes), switching the region to AS923-3 via `setRegion()` appeared to
+succeed, but the join request was transmitted on `freq:0` and nothing
+followed - no RX1/RX2, no further log output at all.
+
+### Root cause - a real regression from this library's own previous fix
+
+The second sub-band-mask fix (`lr1mac_core_update_join_channel()` calling
+`smtc_real_set_channel_mask()` unconditionally, for every region, before
+every join channel selection) was built on the assumption that doing so is
+always a safe no-op when no custom mask is active, because the staged
+buffer it copies from would already match the "all channels enabled"
+default that `lr1_stack_mac_region_config()` (called immediately before it,
+in the same function) had just set.
+
+That assumption holds for US915/AU915/CN470/CN470_RP_1_0 - fixed channel
+plans where every one of the 64-96 channel slots always has a real, valid,
+spec-hardcoded frequency, so "all channels enabled" is always a
+legitimately usable state. It does **not** hold for AS923 (and, by the same
+code pattern, EU868/IN865/KR920/RU864): `region_as_923_config()` correctly
+sets `channel_index_enabled` to just the region's real default boot
+channels (typically 2), but *separately* blanket-sets a second buffer,
+`unwrapped_channel_mask`, to "every possible channel slot enabled"
+regardless of whether each slot actually has a frequency assigned yet -
+most of AS923's 16 possible channel slots don't, until a join-accept's
+CFList (if the network sends one) populates them. The unconditional
+`smtc_real_set_channel_mask()` call copied that naively-all-enabled
+`unwrapped_channel_mask` straight over the correctly-computed
+`channel_index_enabled`, re-enabling channel slots with a frequency of 0.
+`region_as_923_get_next_channel()` picks randomly among "enabled" channels
+without separately checking the frequency is non-zero, so it could - and,
+per the reported log, did - pick one of those bogus zero-frequency slots
+and hand back `freq:0` for the actual transmission.
+
+This didn't show up during the AS923 testing that produced earlier fixes
+because it only manifests when `unwrapped_channel_mask`'s "all enabled"
+default has previously been legitimately relied on for a *different*,
+fixed-plan region (i.e., a sub-band mask, or even just the "no restriction"
+default, was ever committed for US915/AU915/CN470 in the current session) -
+switching to AS923 afterward carries that same unconditional re-commit
+behavior into a region where it's actively wrong, not just unnecessary.
+
+### Fix
+
+`lr1mac_core_update_join_channel()`'s `smtc_real_set_channel_mask()` call is
+now scoped to exactly the four regions this library's sub-band mask feature
+actually manages (`SMTC_REAL_REGION_US_915`, `_AU_915`, `_CN_470`,
+`_CN_470_RP_1_0`), via a region-type switch using the same
+`lr1mac_core_get_region()` already used elsewhere in this file. Every other
+region (AS923, EU868, IN865, KR920, RU864, ...) now falls through a `default`
+case that does nothing, leaving `region_xxx_config()`'s own frequency-aware
+channel setup completely untouched - exactly as it worked before either
+sub-band-mask fix was introduced.
+
+### Files changed
+
+`src/lbm/smtc_modem_core/lr1mac/src/lr1mac_core.c` only -
+`lr1mac_core_update_join_channel()`'s single unconditional
+`smtc_real_set_channel_mask()` call replaced with a region-gated switch
+statement around the same call.
+
+### Verification
+
+`gcc -fsyntax-only` against the project's real build flags, run three times
+with different subsets of region `#define`s active (all regions; only
+AS923+EU868; only a single fixed-plan region at a time) to confirm the
+`#if`-guarded case labels compile correctly in every combination, not just
+the "all regions" case this environment's normal flag set exercises.
+Comment/string-aware brace-and-paren balance check - zero imbalance.
+Re-derived the fix by reading `region_as_923_config()` and
+`region_as_923_get_next_channel()` in full to confirm the exact mechanism
+(two separately-maintained buffers, one frequency-aware and one not) rather
+than assuming a single shared root cause with the fixed-plan regions.
+
+**Note, not acted on**: `settings.channelMask` itself is a persisted value
+that isn't automatically cleared when `setRegion()` switches to a different
+region - so a mask set for AU915 will still be sitting in
+`WisBlockLoRaWANSettings::channelMask` (and get harmlessly no-op'd by
+`lorawan_api_set_channel_mask()`, per its existing region check) after a
+later switch to, say, US915 again. This didn't need to change to fix the
+reported bug and doing so wasn't requested, but is worth knowing: switching
+between two *mask-capable* regions in the same session carries the
+previous region's mask value over as a starting point, unless
+`setChannelMask()` is called again explicitly after the region change.
+
+**Not done**: not re-verified against real AS923/AU915 hardware in this
+environment - the fix is derived from reading both regions' actual channel-
+management source end to end and matches the reported symptom precisely,
+but hasn't been re-tested on a device.
+
+---
+
+## 2026-09-16 - FPending auto-fetch fix #2: it was starving the application's own scheduled sends
+
+### The bug, as reported
+
+With 7 downlinks enqueued on the LNS: the first uplink after join delivered
+2 downlinks, the next uplink logged an application-level error
+("[LOOP] Start sending failed") and delivered only 1, and this pattern
+repeated until the queue was empty - at which point a single downlink
+worked cleanly again with no error.
+
+### Root cause - a real side effect of the previous FPending fix, not a separate bug
+
+Traced against the attached log line by line. The FPending auto-fetch
+(previous fix: automatically send an empty uplink when a downlink's
+FPending bit is set, so a Class A device drains a queued backlog promptly
+instead of one per the application's own send interval) was firing
+correctly and delivering downlinks quickly, exactly as designed - the "2
+packets on one uplink" the report describes is actually two separate,
+closely-spaced uplinks (the real one, then the auto-fetch immediately
+after), which is the intended behavior.
+
+The actual problem: `LoRaWANEngine::send()`'s existing `uplinkPending` guard
+(added by an earlier fix specifically to stop two uplinks from racing each
+other - see its own doc comment) can't tell the difference between "a real
+application uplink is in flight" and "this library's own internal, empty,
+no-payload auto-fetch uplink is in flight." AS923 (like several regions)
+has real duty-cycle/LBT constraints, so a queued uplink can sit for tens of
+seconds before actually transmitting - confirmed in the log by a 66-second
+gap between an auto-fetch being queued ("INFO: add send task") and it
+actually going out. Every time the application's own regularly-scheduled
+`send()` call happened to land inside that window, it was rejected outright
+by the existing guard, indistinguishable from a genuine double-send race,
+even though the application did nothing wrong.
+
+### Fix
+
+Added a way for `send()` to tell the two cases apart and, in the harmless
+one, defer rather than refuse:
+
+- A new `autoFetchUplinkPending` flag (`LoRaWANEngine.h`) records whether
+  the uplink currently occupying LBM's single slot is this library's own
+  auto-fetch rather than a real application send.
+- A new single-slot `deferredSend` buffer holds at most one application
+  `send()` request that arrives while `autoFetchUplinkPending` is true.
+  `send()` now returns `true` for this case (the request genuinely will be
+  transmitted, just not immediately) instead of `false`. A second `send()`
+  arriving before the first deferred one has gone out still falls through
+  to the original, correct refusal - this remains a single-slot mechanism,
+  not a general uplink queue.
+- `SMTC_MODEM_EVENT_TXDONE` handling now checks, right after clearing
+  `uplinkPending`, whether the just-completed uplink was the auto-fetch and
+  a deferred send is waiting - if so, it's dispatched immediately, since the
+  slot that TXDONE just freed is exactly what it needed.
+- The actual `smtc_modem_request_uplink()` call plus its
+  `uplinkPending`/`lastTxDr`/`lastTxPhyPayloadLen` bookkeeping was factored
+  out of `send()` into a new private `dispatchUplink()`, shared by `send()`
+  itself, the auto-fetch's own call, and the deferred-send replay - so all
+  three paths stay in sync rather than three copies of the same bookkeeping
+  drifting apart over time.
+- One ordering bug caught and fixed while writing this: the TXDONE handler
+  computes `WisBlockTxResult::airtimeMs` from `lastTxDr`/`lastTxPhyPayloadLen`,
+  which `dispatchUplink()` overwrites - so that computation now happens
+  *before* the deferred-send replay's `dispatchUplink()` call, not after, or
+  the reported airtime would have described the just-replayed uplink instead
+  of the auto-fetch uplink this particular TXDONE actually completed.
+
+### Files changed
+
+`src/LoRaWANEngine.h` (new `autoFetchUplinkPending`/`deferredSend` members,
+new private `dispatchUplink()` declaration, updated `send()` doc comment),
+`src/LoRaWANEngine.cpp` (`send()` refactored to use `dispatchUplink()` and
+handle the deferred case; the auto-fetch call site now goes through
+`dispatchUplink()` too and sets `autoFetchUplinkPending`;
+`SMTC_MODEM_EVENT_TXDONE` handling gained the replay logic, with the
+airtime-ordering fix above).
+
+### Verification
+
+Comment/string-aware brace-and-paren balance check on both files - zero
+imbalance. Traced the full event ordering against the attached log
+(auto-fetch queued via "add send task", application's own "[LOOP] Send"
+landing inside the ~66-second duty-cycle/LBT delay before that auto-fetch
+actually transmitted, "[LOOP] Start sending failed" immediately after) to
+confirm this is exactly the collision window the fix closes, and confirmed
+the pattern stops recurring once the downlink queue empties (no more
+auto-fetch uplinks competing for the slot), matching the report's own
+observation.
+
+**Known minor limitation, not addressed**: a `send()` call that gets
+deferred bypasses `setLinkCheckMode()`'s AT+LINKCHECK piggyback logic (which
+normally runs between the `uplinkPending` check and the actual dispatch) -
+if link-check mode 1 (one-shot) is active and a send happens to land in the
+deferred path, that particular LinkCheckReq piggyback is skipped rather
+than carried over to the replay. Low severity (link check mode is opt-in
+and the request would simply be retried on the next mode-1-triggering send),
+but worth knowing.
+
+**Not done**: not re-verified against real AS923 hardware with a multi-
+downlink LNS queue in this environment - the fix is derived from a full
+trace of the attached log against the actual `uplinkPending`/`send()`/
+TXDONE code path, but hasn't been re-tested on a device.
+
+---
+
+## 2026-09-16 - FPending auto-fetch fix #3: the previous fix only handled one collision deep
+
+### The bug, as reported (with fix #2 already applied)
+
+Now only one downlink was fetched per uplink instead of draining faster,
+and a single "[LOOP] Start sending failed" still occurred.
+
+### Root cause - fix #2's deferral was scoped one level too narrowly
+
+Traced the new log's exact event ordering, matching timestamps and payload
+lengths (a 0-byte auto-fetch plus the fixed ~13-byte LoRaWAN overhead
+produces a very recognizable `len 13 bytes` in the trace, distinct from the
+real ~23-byte application payloads) against the code path:
+
+1. A real application send delivers downlink #1 (FPending set) and the
+   auto-fetch is queued right behind it, as designed.
+2. Because this region enforces a real duty-cycle/LBT gap between
+   transmissions (confirmed elsewhere in this project's testing), that
+   auto-fetch sits queued for tens of seconds before actually going out.
+   The application's *own* next regularly-scheduled send lands during that
+   window - exactly the case fix #2 was built for - and gets correctly
+   deferred rather than refused.
+3. When the auto-fetch's TXDONE arrives, the deferred application send is
+   replayed - but replaying it only *queues* it with LBM; LBM's own duty-
+   cycle timer still delays *its* actual transmission by a similar amount.
+4. Meanwhile, downlink #1's own FPending drain attempt is skipped (the slot
+   is occupied by the just-replayed send), so no second auto-fetch gets
+   queued for it - matching the "only one downlink per uplink" symptom.
+5. The application's *next* send after that lands during the replay's own
+   duty-cycle delay - but fix #2 only ever deferred when
+   `autoFetchUplinkPending` was specifically true. By this point the thing
+   occupying the slot was the *replayed application send*, not the
+   auto-fetch, so the old, narrower check refused it outright - producing
+   the one remaining "[LOOP] Start sending failed".
+
+In short: fix #2 correctly solved the first collision but only that one:
+whatever uplink is in flight - auto-fetch, real send, or a replay of an
+earlier deferral - can itself be delayed long enough that the *next* thing
+in line collides too, and the "is this specifically the auto-fetch"
+distinction fix #2 relied on stops matching reality after the first hop.
+
+### Fix
+
+`send()`'s collision guard no longer checks *why* the uplink slot is
+occupied - it now defers unconditionally (returns `true`) whenever a slot
+is available in the single-entry `deferredSend` buffer, regardless of
+whether the in-flight uplink is the auto-fetch, a real application send, or
+an earlier deferred send being replayed. A second `send()` arriving while
+one is *already* deferred still gets the original, unconditional refusal -
+this remains bounded to one level of deferral, not an unbounded queue.
+`SMTC_MODEM_EVENT_TXDONE` handling was simplified to match: it now checks
+`deferredSend.valid` unconditionally (previously gated on
+`autoFetchUplinkPending`) and replays whatever's waiting, regardless of
+what the just-completed uplink was.
+
+`autoFetchUplinkPending` is no longer used to gate deferral at all, but is
+kept for one remaining, narrower purpose: `onTxFinished()` now skips the
+callback specifically for the auto-fetch's own TX completions (an
+application never asked for those empty uplinks and has no reason to hear
+about them) while still firing normally for a real send that merely had to
+wait its turn through one or more deferrals - a small, genuine improvement
+made while already revisiting this code, not a response to a separately
+reported symptom.
+
+The auto-fetch's own firing condition (`!uplinkPending`, in the
+`SMTC_MODEM_EVENT_DOWNDATA` handler) is unchanged: it still just skips
+firing if the slot is busy, rather than using the deferred slot itself.
+Real application data always takes priority over this library's own empty
+keep-alive traffic for that one slot - worst case, a particular downlink's
+prompt fetch is skipped and it waits for the application's own next
+regularly-scheduled send instead, which is the original, pre-feature
+behavior for that one cycle rather than a regression.
+
+### Files changed
+
+`src/LoRaWANEngine.h` (updated `send()`/`autoFetchUplinkPending`/
+`deferredSend` doc comments to describe the unconditional-deferral design),
+`src/LoRaWANEngine.cpp` (`send()`'s guard condition widened from
+`autoFetchUplinkPending && !deferredSend.valid` to just `!deferredSend.valid`;
+`SMTC_MODEM_EVENT_TXDONE`'s replay condition widened to match; added the
+`!wasAutoFetch` guard on the `txFinishedCb` call).
+
+### Verification
+
+Comment/string-aware brace-and-paren balance check on both files - zero
+imbalance. Re-traced the full event sequence in the newly attached log
+against the corrected code path to confirm each collision point (both the
+one fix #2 already handled and the new one it didn't) now resolves via
+deferral rather than refusal.
+
+**Not done**: not re-verified against real AS923 hardware with a multi-
+downlink LNS queue in this environment. Given that fix #2 also looked
+complete by the same kind of log-tracing and turned out to only address
+the first layer of the collision, this one should likewise be treated as
+"reasoned through against the actual reported sequence, generalized rather
+than special-cased" rather than a guaranteed final fix until confirmed
+against hardware again - particularly worth checking whether an
+application whose own send interval is close to this region's minimum
+uplink-to-uplink duty-cycle gap can still, in principle, produce a chain of
+deferrals long enough to eventually hit the single-slot bound and see one
+refusal, since only one level of deferral is held by design.
+
+---
+
+## 2026-09-17 - Two more real bugs found from testing with fetchPendingDownlinks both on and off
+
+Two attached logs, one with the auto-fetch feature on and one off, both
+still showing only 1-2 downlinks drained per uplink instead of the full
+queue, plus a direct report that manually working around the disabled
+auto-fetch ("send an empty uplink myself when fpending is set") wasn't
+possible through this library's public API at all. Both turned out to be
+real, distinct bugs - not the same collision issue fixed three times
+already.
+
+### Bug A: the auto-fetch's own event-ordering assumption was wrong
+
+Every previous fix assumed `SMTC_MODEM_EVENT_TXDONE` for the uplink that
+solicited a downlink is always delivered before `SMTC_MODEM_EVENT_DOWNDATA`
+for that downlink, within the same `handleEvents()` drain - so by the time
+the auto-fetch's `!uplinkPending` check ran, `uplinkPending` would already
+be correctly cleared. Comparing the two attached logs line by line disproved
+that: in the FPENDING-ON log, the very first downlink's auto-fetch never
+fired at all (no "add send task" trace anywhere near it, and no `TX OK` for
+that cycle either), while a later downlink's auto-fetch fired correctly -
+the *same code path*, behaving two different ways in the same run. That's
+only possible if event ordering between TXDONE and DOWNDATA for a given
+cycle isn't guaranteed by LBM, and it clearly isn't: whichever one happens
+to be delivered first determines whether `uplinkPending` is already false
+by the time the auto-fetch's gate runs.
+
+Unlike a real application `send()` (which already had `deferredSend` to
+fall back on), a fetch attempt that lost this race was previously just
+**dropped silently** - not deferred, not retried, gone. That downlink's
+FPending flag would never get acted on again until the application's own
+next regularly-scheduled send happened to come along, which is exactly the
+"only fetches one, then stops" symptom in both logs.
+
+**Fix**: the auto-fetch now falls back to a remembered request
+(`pendingDownlinkFetchRequested` + the port to use) when it can't dispatch
+immediately, exactly mirroring `deferredSend`'s existing pattern. It's
+serviced from `SMTC_MODEM_EVENT_TXDONE` - checked *after* `deferredSend`, so
+real application data still wins the slot if both are waiting - which is
+correct regardless of which order TXDONE and DOWNDATA arrived in for the
+original cycle, since TXDONE is the one unambiguous signal that the slot is
+actually free.
+
+### Bug B: no way to manually send an empty uplink at all
+
+Reported directly: with the auto-fetch disabled (`fetchPendingDownlinks =
+false`), trying to replicate it manually - send an empty uplink to pull the
+next downlink - wasn't possible through `send()`, which rejected `length ==
+0` outright with no way around it. Also reported: FPort 0 specifically
+threw an error.
+
+**Fix**: `send()` no longer rejects `length == 0` - a 0-length uplink is a
+legitimate LoRaWAN operation (it's exactly what this library's own
+auto-fetch has been sending internally all along), and a `nullptr` `data`
+pointer is now accepted specifically when `length == 0` (substituted
+internally with a real, unused buffer, since `smtc_modem_request_uplink()`
+itself still rejects a literal NULL even at length 0) so callers don't need
+to keep a dummy buffer of their own around just to send nothing. `AT+SEND=
+1:` (empty hex after the colon) now works for the same reason -
+`parseHex()` already handled a zero-length request correctly; only `send()`
+itself was refusing it.
+
+FPort 0 specifically **still fails**, and correctly so - that's LoRaWAN's
+own reserved-for-MAC-only-frames rule, enforced by
+`smtc_modem_send_tx()` itself, not a restriction this library was imposing.
+Documented directly in `send()`'s doc comment: use any other valid FPort
+(e.g. whatever the application normally sends on) for a manual empty
+"fetch the next pending downlink" uplink instead of FPort 0.
+
+### Files changed
+
+`src/LoRaWANEngine.h` (new `pendingDownlinkFetchRequested`/
+`pendingDownlinkFetchPort` members), `src/LoRaWANEngine.cpp` (`send()`'s
+length/data guard relaxed; the `SMTC_MODEM_EVENT_DOWNDATA` auto-fetch now
+falls back to the remembered-request path instead of dropping the fetch;
+`SMTC_MODEM_EVENT_TXDONE` services that remembered request, after
+`deferredSend`, when nothing real is waiting there), `README.md` (AT+SEND
+row updated to mention empty-payload support).
+
+### Verification
+
+Comment/string-aware brace-and-paren balance check across all three edited
+files - zero imbalance. Re-traced both attached logs' full event sequences
+against the corrected code paths: the FPENDING-ON log's first downlink
+(previously silently dropped) now resolves via the TXDONE-serviced fallback
+regardless of arrival order; confirmed `AT+SEND=<port>:` (empty hex) reaches
+`send()` with `length == 0` via `parseHex()`'s already-correct zero-length
+handling.
+
+**Not done**: not re-verified against real AS923 hardware with a multi-
+downlink LNS queue in this environment. This is the fourth fix attempt at
+this same underlying feature; given the previous two also looked complete
+by the same kind of log-tracing and each turned out to have a further gap,
+this one should be tested with particular attention to whether the full
+4-packet queue now drains in one pass, not assumed fixed from source review
+alone.
+
+---
+
+## 2026-09-17 - The actual root cause of the entire FPending-drain saga: stale background-task scheduling
+
+### The bug, as reported
+
+Two fresh logs - AS923-3 on ChirpStack, AU915 on The Things Network -
+still showed exactly one downlink drained per uplink, no better (arguably
+worse-looking) than before four rounds of fixes to the queueing/collision
+logic. "Getting worse."
+
+### Root cause - not a queueing bug at all
+
+Every fix so far (fixes #1 through #4 above) focused on making sure a
+follow-up uplink actually gets *queued* with LBM when it should be - and
+each one was solving a real problem in that area. But re-reading these two
+new logs against the actual dispatch code exposed something none of them
+touched: the auto-fetch/deferred uplink *was* being queued correctly (the
+`INFO: add send task` trace confirms it, right when expected) - it just
+then sat there, un-acted-on, for **~50-60 seconds** before LBM actually
+transmitted it. That delay is suspiciously uniform across two different
+regions and two different network servers, which doesn't fit a duty-cycle
+or LBT explanation (AU915 in particular has no such restriction).
+
+The actual cause: `LoRaWANEngine::handleEvents()` calls
+`smtc_modem_run_engine()` once, at the very top, and returns that value
+(`sleep_time_ms`) unconditionally at the end - "how long until I must be
+called again," per LBM's own documented contract. But everything this
+function does in between - including every `dispatchUplink()` call the
+FPending auto-fetch, a deferred send replay, or a deferred fetch replay can
+make - happens *after* that value was already computed. Queuing a brand
+new uplink during event processing doesn't retroactively update it; the
+stale, pre-queueing value is what gets returned regardless.
+
+In loop()-polled mode this is harmless, because the very next `loop()`
+iteration calls `handleEvents()` (and therefore `smtc_modem_run_engine()`)
+again almost immediately regardless of what was returned. But every log in
+this entire investigation has shown `[LoRaWAN] Background task active` at
+startup - meaning `WisBlockLbmTask`'s FreeRTOS event task is in play, and
+*that* task uses this exact return value as how long to sleep before
+calling `smtc_modem_run_engine()` again (see `eventTask()` in
+`wisblock_lbm_task.cpp`). Whatever LBM's own idle/maintenance interval
+happened to be at the top of this call - unrelated to anything this
+function itself just queued - is what the background task kept sleeping
+for, every single time, no matter how correctly the queueing logic itself
+had been fixed. This is why fixes #1 through #4 each looked complete by
+source inspection and log-tracing, and each one turned out not to actually
+fix the reported symptom: they were all correctly fixing real bugs in
+*getting an uplink queued*, but none of them touched *how soon LBM would
+actually be told to act on it*, which turned out to be the actual bottleneck
+the whole time.
+
+### Fix
+
+`handleEvents()` now calls `smtc_modem_run_engine()` a second time, after
+its event-draining loop has finished (and therefore after any
+`dispatchUplink()` calls that loop's own handling made), and returns *that*
+value instead of the stale one from the top of the function. This is
+exactly the "must be called again within its last reported budget"
+contract `smtc_modem_run_engine()` already documents - just invoked
+proactively, right after this function's own actions could have changed
+what that budget should be, rather than only reactively on the next
+external wake-up.
+
+### Files changed
+
+`src/LoRaWANEngine.cpp` only - one additional `smtc_modem_run_engine()`
+call at the end of `handleEvents()`, replacing the stale value it returns.
+
+### Verification
+
+Comment/string-aware brace-and-paren balance check - zero imbalance. Traced
+`nextWaitMs = registeredEventHandler();` in `wisblock_lbm_task.cpp` to
+confirm `handleEvents()`'s return value is used directly as the FreeRTOS
+task's sleep duration, and confirmed every log across this entire
+investigation has shown background task mode active, explaining why the
+same ~50-60s delay pattern was consistent across every fix attempt and
+every region/LNS combination tested.
+
+**Why this one is different from the previous four**: fixes #1-4 were
+verified by tracing whether an uplink *got queued* at the right moment,
+which was always true after each of those fixes - the queueing logic was
+never actually broken in the way each fix assumed. This fix instead traces
+what happens *after* queueing succeeds, which is the piece none of the
+previous diagnosis looked at. That said, given the track record on this
+feature, this should still be verified against real hardware rather than
+assumed correct from source review alone - if the queue still doesn't drain
+promptly after this, the next thing to check would be whether
+`enableBackgroundTask()`'s DIO1-IRQ-driven wake path (the other way the
+event task can wake up before its timeout, per `eventTask()`) is also
+correctly triggered by a freshly-queued uplink, independent of this
+timeout-based path.
+
+---
+
+## 2026-09-17 - RUI3-compatible AT+JOIN parameters: auto-join, reattempt interval, max attempts
+
+### Confirmation
+
+The background-task-scheduling fix from the previous entry was confirmed
+working against real hardware: `as923-3-fpending.txt` (AS923-3, presumably
+against ChirpStack given the region label, though the log header says
+AU915 - region printed as "AU915" but device/channel plan matches AS923's
+918 MHz range, likely a copy/paste label mismatch in the log's own header
+comment, not a functional issue) and `AU915-fpending.txt` both show a full
+downlink queue (7-8 packets) draining in rapid back-to-back uplinks once
+`fetchPendingDownlinks` is on, exactly as intended. This closes out the
+FPending-drain investigation.
+
+### This feature
+
+RUI3's `AT+JOIN=w:x:y:z` / `api.lorawan.join` support four things this
+library's own join handling didn't distinguish before: joining right now
+(unchanged), auto-joining on power-up instead of waiting for an explicit
+command, a configurable interval between retry attempts, and a cap on how
+many times to retry before giving up.
+
+### Design decisions and why
+
+**Auto-join** (`autoJoin`, `AT+JOIN`'s `x` parameter): checked in
+`WisBlockLoRaWAN::ensureLoRaWANEngineStarted()` - the one unambiguous point
+where the LoRaWAN engine actually transitions from not-started to started,
+regardless of which public setter happened to trigger it first
+(`setWorkMode`, `setRegion`, `setOTAAKeys`, an explicit `join()`, ...).
+Hooking in there avoids duplicating the check across every one of those
+call sites.
+
+**Reattempt interval and max attempts** (`AT+JOIN`'s `y`/`z`) needed more
+thought than a simple stored value, because LBM's own join task
+(`lorawan_join_management.c`) already retries automatically, forever, on
+every failure - using its own region-appropriate, spec-compliant backoff
+timing (confirmed by reading `lorawan_join_internal_add_task()`: every
+`SMTC_MODEM_EVENT_JOINFAIL` reschedules itself via
+`lorawan_api_next_join_time_second_get()` unless certification/bypass mode
+is active). That backoff exists for real regulatory reasons and isn't
+something this library should shorten or bypass wholesale - LBM does
+expose `smtc_modem_set_join_duty_cycle_backoff_bypass()`, but its own doc
+comment ties it explicitly to certification mode, not general application
+use, so it was deliberately not used here.
+
+A longer, fixed interval - exactly what "extend the time between attempts
+to save battery" (the user's own stated motivation) asks for - is a
+legitimate choice to make *instead of* LBM's own schedule, though, so:
+when both settings are left at their defaults (8s interval matching RUI3's
+own default, 0 = unlimited attempts), this library's behavior is
+unchanged - LBM's automatic retry runs exactly as it always has. As soon as
+either is set to something else, this library cancels LBM's own
+auto-scheduled next attempt (`smtc_modem_leave_network()` - its own doc
+comment: "...or cancels an ongoing join process") on every
+`SMTC_MODEM_EVENT_JOINFAIL` and drives retries itself instead, via a
+`millis()`-based deadline checked in `handleEvents()`.
+
+Max attempts also uses `smtc_modem_leave_network()` to actually stop
+retrying once the limit is hit, and reports a new terminal state,
+`WISBLOCK_JOIN_GAVE_UP`, from `joinState()` - deliberately *not* by
+changing `joinFailedCb()`'s firing behavior (which still fires on every
+individual failed attempt, as it always has) to avoid silently changing
+behavior for any existing application already relying on that callback.
+An application that cares about the distinction checks `joinState()` from
+inside its existing callback.
+
+**The background-task scheduling lesson from the previous fix applied
+directly here too**: the custom retry timer in `handleEvents()` clamps its
+own returned sleep duration to the remaining wait time whenever a retry is
+pending, for exactly the same reason the FPending auto-fetch needed it -
+otherwise a background-task-mode application could sleep straight past its
+own scheduled retry deadline.
+
+### Files changed
+
+`src/WisBlockLoRaWANTypes.h` (new `autoJoin`/`joinReattemptIntervalS`/
+`maxJoinAttempts` settings; new `WISBLOCK_JOIN_GAVE_UP` state),
+`src/LoRaWANEngine.h`/`.cpp` (the mechanism itself: `join()` resets the
+attempt counter, `stopJoin()` is new, `SMTC_MODEM_EVENT_JOINFAIL` now
+counts attempts and only overrides LBM's own scheduling when asked to,
+`handleEvents()` services and clamps around the custom retry deadline;
+needed a new `<Arduino.h>` include for `millis()`, not previously used in
+this file), `src/WisBlockLoRaWAN.h`/`.cpp` (matching setters/getters,
+`stopJoin()`, the `ensureLoRaWANEngineStarted()` auto-join hook),
+`src/WisBlockLoRaAT.cpp` (`AT+JOIN=w:x:y:z` / `AT+JOIN=?`, alongside the
+existing bare `AT+JOIN`), `README.md`.
+
+### Verification
+
+Comment/string-aware brace-and-paren balance check across all six edited
+files - zero imbalance. Confirmed via `lorawan_join_management.c` and
+`smtc_modem_leave_network()`'s implementation (`modem_supervisor_abort_tasks_in_range()`
++ `lorawan_api_join_status_clear()`) that it correctly cancels a pending
+auto-scheduled join task rather than just resetting join *state* without
+touching the scheduled task.
+
+**Not done**: not tested against real hardware in this environment - in
+particular, the custom reattempt-interval and max-attempts paths (the
+default-value path exercises the same code as before, which the FPending
+investigation already validated live, but the *non-default* path -
+`smtc_modem_leave_network()` mid-retry-cycle plus the `millis()`-driven
+re-join - has not been.

@@ -97,7 +97,7 @@ status_lorawan_t tx_protocol_manager_request( tx_protocol_manager_tx_type_t requ
                                               uint8_t stack_id );
 
 /*! @brief tx_protocol_manager_is_busy indicate if tpm is in used in order to pre process LoRaWan transmission (could be
- * LBT, CSMA , or Relay pre process)
+ * LBT or CSMA pre process)
  * \remark  This function is called  by the modem's upper layer itself, it shouldn't be useful at the application layer
  * @param NONE
  * @return uint32_t indicated time to sleep , if the return value is equal to 0 it is meaning that tpm is ready to

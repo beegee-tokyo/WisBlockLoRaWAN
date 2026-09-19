@@ -38,10 +38,9 @@ void WisBlockLoRaWAN::begin()
 
 	// Deliberately does NOT call lorawan.begin() here - see
 	// ensureLoRaWANEngineStarted()'s doc comment in WisBlockLoRaWAN.h for
-	// why starting the LoRaWAN engine (and, with it, LBM's relay WOR
-	// configuration) unconditionally for every application, P2P-only ones
-	// included, was actively fighting the P2P engine for control of the
-	// radio.
+	// why starting the LoRaWAN engine unconditionally for every application,
+	// P2P-only ones included, was actively fighting the P2P engine for
+	// control of the radio.
 	p2p.begin(config.p2p);
 
 	began = true;
@@ -60,6 +59,15 @@ void WisBlockLoRaWAN::ensureLoRaWANEngineStarted()
 	}
 	lorawanEngineStarted = true;
 	lorawan.begin(config.lorawan);
+	// FIX: RUI3-compatible "auto-join on power-up" - see LoRaWANEngine::setAutoJoin()'s doc
+	// comment. This is the single, unambiguous point where the engine actually transitions
+	// from "not started" to "started", regardless of which public setter happened to trigger
+	// it (setWorkMode, setRegion, setOTAAKeys, join() itself, ...), so it's the right place to
+	// check this rather than duplicating the check across every one of those call sites.
+	if (config.lorawan.autoJoin)
+	{
+		join();
+	}
 }
 
 WisBlockLoRaWAN *WisBlockLoRaWAN::activeInstanceForTask = nullptr;
@@ -161,11 +169,11 @@ bool WisBlockLoRaWAN::setDataRate(uint8_t dataRate)
 	return lorawan.setDataRate(dataRate);
 }
 
-void WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
+bool WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
 {
 	config.lorawan.deviceClass = deviceClass;
 	ensureLoRaWANEngineStarted();
-	lorawan.setDeviceClass(deviceClass);
+	return lorawan.setDeviceClass(deviceClass);
 }
 
 bool WisBlockLoRaWAN::setADR(bool enabled)
@@ -173,6 +181,13 @@ bool WisBlockLoRaWAN::setADR(bool enabled)
 	config.lorawan.adrEnabled = enabled;
 	ensureLoRaWANEngineStarted();
 	return lorawan.setADR(enabled);
+}
+
+bool WisBlockLoRaWAN::setChannelMask(uint16_t mask)
+{
+	config.lorawan.channelMask = mask;
+	ensureLoRaWANEngineStarted();
+	return lorawan.setChannelMask(mask);
 }
 
 void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)
@@ -185,13 +200,6 @@ void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)
 void WisBlockLoRaWAN::setConfirmedUplinks(bool confirmed)
 {
 	config.lorawan.confirmedUplinks = confirmed;
-}
-
-void WisBlockLoRaWAN::setRelayMode(WisBlockRelayMode mode)
-{
-	config.lorawan.relayMode = mode;
-	ensureLoRaWANEngineStarted();
-	lorawan.setRelayMode(mode);
 }
 
 void WisBlockLoRaWAN::join()
