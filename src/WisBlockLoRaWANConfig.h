@@ -13,7 +13,12 @@
 #include <stddef.h> // size_t
 
 #define WISBLOCK_CONFIG_MAGIC 0x57424C52UL // "WBLR"
-#define WISBLOCK_CONFIG_VERSION 1
+// FIX: bumped for the new top-level `alias` field (AT+ALIAS getter/setter) - the CRC check
+// below would likely catch the resulting size/layout change on its own even without this,
+// but bumping the version makes the incompatibility with older saved blobs explicit and
+// intentional rather than incidental. A config saved by an older library version is safely
+// detected as invalid (falls back to factory defaults) either way - see wisblockConfigLoad().
+#define WISBLOCK_CONFIG_VERSION 2
 
 struct WisBlockPersistedConfig
 {
@@ -23,6 +28,20 @@ struct WisBlockPersistedConfig
 
 	WisBlockWorkMode workMode = WISBLOCK_MODE_LORAWAN;
 	bool lowPowerEnabled = true;
+	// RUI3-compatible AT+ALIAS - a free-form, user-settable device label, unrelated to
+	// LoRaWAN/P2P operation. RUI3 caps a *set* value at 16 characters (see
+	// WisBlockLoRaWAN::setAlias()'s doc comment) but this buffer is sized to comfortably fit
+	// the longer factory-default text below, which predates the setter and was never itself
+	// meant to be re-entered verbatim through AT+ALIAS=.
+#ifdef NRF52_SERIES
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK4631";
+#elif defined(ARDUINO_ARCH_ESP32)
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK3312";
+#elif defined(ARDUINO_ARCH_RP2040)
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK11310";
+#else
+	char alias[32] = "";
+#endif
 
 	WisBlockLoRaWANSettings lorawan;
 	WisBlockP2PSettings p2p;

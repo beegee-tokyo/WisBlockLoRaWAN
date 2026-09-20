@@ -596,6 +596,58 @@ uint16_t LoRaWANEngine::getChannelMask() const
 	return lorawan_api_get_channel_mask(kStackId);
 }
 
+bool LoRaWANEngine::setLbtEnabled(bool enabled)
+{
+	return smtc_modem_lbt_set_state(kStackId, enabled) == SMTC_MODEM_RC_OK;
+}
+
+bool LoRaWANEngine::getLbtEnabled() const
+{
+	bool enabled = false;
+	smtc_modem_lbt_get_state(kStackId, &enabled);
+	return enabled;
+}
+
+bool LoRaWANEngine::setLbtThreshold(int16_t thresholdDbm)
+{
+	// See this method's doc comment in LoRaWANEngine.h - threshold and scan time share one
+	// underlying smtc_modem_lbt_set_parameters() call (which also carries an RSSI measurement
+	// bandwidth this library doesn't expose), so the current duration/bandwidth are read back
+	// first rather than risking clobbering either with a stale cached value.
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t currentThresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &currentThresholdDbm, &bwHz);
+	return smtc_modem_lbt_set_parameters(kStackId, durationMs, thresholdDbm, bwHz) == SMTC_MODEM_RC_OK;
+}
+
+int16_t LoRaWANEngine::getLbtThreshold() const
+{
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &thresholdDbm, &bwHz);
+	return thresholdDbm;
+}
+
+bool LoRaWANEngine::setLbtScanTime(uint32_t scanTimeMs)
+{
+	uint32_t currentDurationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &currentDurationMs, &thresholdDbm, &bwHz);
+	return smtc_modem_lbt_set_parameters(kStackId, scanTimeMs, thresholdDbm, bwHz) == SMTC_MODEM_RC_OK;
+}
+
+uint32_t LoRaWANEngine::getLbtScanTime() const
+{
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &thresholdDbm, &bwHz);
+	return durationMs;
+}
+
 void LoRaWANEngine::setJoinReattemptInterval(uint8_t seconds)
 {
 	// RUI3's own AT+JOIN documents this same 7-255s range; clamped rather than rejected,

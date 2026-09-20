@@ -21,6 +21,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 
 | <div style="width:150px">Command</div> | Description                                      |
 | :--- | :--- |
+| _**LoRaWAN**_ | |
 | AT+MODE=_**0/1/2**_ / AT+MODE=?                  | 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (not supported - this library has no FSK P2P mode)                          |
 | AT+MODE=?                      | Query current mode                                 |
 | AT+DEVEUI=_**hex8**_ / AT+DEVEUI=?               | Device EUI                                     |
@@ -31,6 +32,9 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+APPSKEY=_**hex16**_ / AT+APPSKEY=?            | App Session Key (ABP)                          |
 | AT+BAND=_**0..12**_ / AT+BAND=?             | 0 EU433 (unsupported), 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
 | AT+MASK=_**hex4**_ / AT+MASK=?              | Sub-band pre-select (US915/AU915/CN470/CN470_RP_1_0 only) - bit N enables sub-band N+1, 0000 = all channels |
+| AT+LBT=_**0/1**_ / AT+LBT=?                 | Listen Before Talk on/off (support Korea, Japan) - silently auto-enabled where regulatorily mandatory either way |
+| AT+LBTRSSI=_**dBm**_ / AT+LBTRSSI=?         | LBT RSSI threshold in dBm (signed), e.g. -80 |
+| AT+LBTSCANTIME=_**ms**_ / AT+LBTSCANTIME=?  | LBT listen duration in ms before a channel is judged clear |
 | AT+FPENDING=_**0/1**_ / AT+FPENDING=?       | Auto-fetch pending downlinks (Class A) - send an empty uplink when FPending is set, default 1 |
 | AT+DR=_**0..15**_ / AT+DR=?                 | Data rate                                     |
 | AT+CLASS=_**A/B/C**_ / AT+CLASS=?              | Device class                                       |
@@ -44,6 +48,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+LINKCHECK=<0/1/2>                   | 0 = disabled, 1 = request once (on the next uplink), 2 = request automatically on every uplink                               |
 | AT+LINKCHECK=?                 | Query the most recently answered link check's margin (dB) and gateway count, without sending a new request |
 | AT+TIMEREQ                     | Request network time (DeviceTimeReq)               |
+| _**P2P**_ | |
 | AT+P2P=_**freq**_:_**sf**_:_**bw**_:_**cr**_:_**preamble**_:_**txpower**_ | Set LoRa P2P radio params        |
 | AT+CAD=_**0/1**_ / AT+CAD=?                   | Enable/disable CAD before P2P TX                   |
 | AT+RXBOOST=_**0/1**_ / AT+RXBOOST=?               | Enable/disable RX boosted gain (extra ~4-5mA RX current for a few dB sensitivity) |
@@ -52,9 +57,12 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+PRECVDC=_**rxTimeMs**_:_**sleepTimeMs**_ | Put radio into SX1262 hardware RX duty-cycling (chip alternates RX/sleep on its own) |
 | AT+PRECVDC=AUTO                | Same, computed automatically from the currently configured bandwidth/SF/preamble length |
 | AT+PRECVDC=AUTO:_**txPreambleLengthSymbols**_ | Same, computed against a given transmitter preamble length instead of this radio's own - prefer this form |
+| _**Others**_ | |
 | AT+LOWPOWER=_**0/1**_ / AT+LOWPOWER=?             | Enable/disable low power (DIO1 wake) mode           |
 | AT+SAVE                        | Persist current config to flash                    |
 | AT+RESTORE                     | Reload config from flash                           |
 | AT+FACTORY                     | Reset config to factory defaults                   |
 | AT+STATUS                      | Dump current config + join/link status             |
+| AT+VER=?                       | RUI3-format version string (this library's own version, not RUI3 firmware) |
+| AT+ALIAS=_**16char string**_ / AT+ALIAS=?   | Get/set a free-form device label (persisted, max 16 chars) |
 

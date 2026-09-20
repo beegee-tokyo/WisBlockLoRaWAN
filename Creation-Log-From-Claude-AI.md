@@ -2589,3 +2589,189 @@ default-value path exercises the same code as before, which the FPending
 investigation already validated live, but the *non-default* path -
 `smtc_modem_leave_network()` mid-retry-cycle plus the `millis()`-driven
 re-join - has not been.
+
+---
+
+## 2026-09-18 - Library versioning, AT+VER, and an AT+ALIAS setter
+
+Working from a new upload of the library with the user's own additional
+RUI3-compatible AT commands already merged in.
+
+### This change
+
+1. A real, single-source-of-truth version number for this library, distinct
+   from RUI3's own firmware version (`AT+VER` mirrors RUI3's *format*, not
+   a claim to *be* RUI3 firmware - this library is AT-compatible with RUI3,
+   not a redistribution of it).
+2. `AT+VER=?` now builds its response from that version instead of a
+   hardcoded `"1.0.0"` literal, so bumping a release means changing three
+   numbers in one place rather than hunting down every place the string
+   was typed out.
+3. `AT+ALIAS` gained a real setter - it was previously a hardcoded,
+   read-only board-name string with no way to actually change it, despite
+   RUI3's own `AT+ALIAS` being fully get/set (a persisted, user-chosen
+   16-character device label).
+
+### Design decisions
+
+**Version location**: put the three numeric macros
+(`WISBLOCK_LORAWAN_VERSION_MAJOR/MINOR/PATCH`) and a derived
+`WISBLOCK_LORAWAN_VERSION_STRING` (built via the standard stringify-macro
+trick, so the string can never drift out of sync with the numbers) in
+`WisBlockLoRaWAN_all.h`, as asked. Since `WisBlockLoRaAT.cpp` (where
+`AT+VER` lives) didn't previously include that header - only
+`WisBlockLoRaAT.h` -> `WisBlockLoRaWAN.h` - it now also includes
+`WisBlockLoRaWAN_all.h` directly. That's a normal one-way `.cpp`-includes-
+a-convenience-header dependency, not a circular one: `WisBlockLoRaWAN_all.h`
+itself only ever includes *headers*, and a `.cpp` including it doesn't feed
+back into anything that header depends on.
+
+**AT+ALIAS's length limit**: RUI3's own docs say `AT_PARAM_ERROR` is
+returned for a malformed/oversized value, not that it gets silently
+truncated - so `WisBlockLoRaWAN::setAlias()` rejects (returns false, no
+change made) a NULL pointer or a string over 16 characters, and the AT
+handler reports `AT_PARAM_ERROR` for that case, matching RUI3's documented
+behavior rather than quietly cutting a long value short.
+
+**The existing hardcoded default text didn't fit RUI3's own 16-character
+limit** (`"WISBLOCK_BASICMODEM_RAK4631"` is 28 characters) - rather than
+silently shortening text the user might already be relying on for
+identification purposes, the persisted `alias` field's buffer was sized to
+comfortably hold the existing longer defaults (32 bytes), and the 16-
+character limit is enforced only on values coming in through the new
+setter/AT command. The factory-default text itself was left completely
+unchanged.
+
+**Config version bump**: adding a new field to `WisBlockPersistedConfig`
+changes its size and layout. The existing CRC check would likely have
+caught this on its own (an old, shorter saved blob won't produce a matching
+CRC against the new, larger struct), but `WISBLOCK_CONFIG_VERSION` was
+bumped anyway (1 -> 2) to make the incompatibility with configs saved by
+an older library version explicit and intentional rather than incidental.
+Either way, an old saved config is safely detected as invalid and replaced
+with factory defaults (`wisblockConfigLoad()`'s existing fallback path) -
+never misinterpreted.
+
+**A small adjacent gap fixed while already touching this code**: `AT+VER`
+and the alias factory-default only ever handled `NRF52_SERIES` (RAK4631)
+and `ARDUINO_ARCH_ESP32` (RAK3312), despite this library also supporting
+RAK11310 (`ARDUINO_ARCH_RP2040`) elsewhere (see `WisBlockLoRaBoards.h`'s
+own `WISBLOCK_BOARD_NAME` for that board). Added the missing third branch
+to both rather than leaving it as a gap in code being edited for this
+exact purpose anyway - flagged here since it wasn't explicitly requested.
+
+### Files changed
+
+`src/WisBlockLoRaWAN_all.h` (version macros), `src/WisBlockLoRaAT.cpp`
+(`AT+VER=?` uses the version macro plus the new RP2040 branch; `AT+ALIAS=`
+setter added), `src/WisBlockLoRaWAN.h`/`.cpp` (`setAlias()`/`getAlias()`),
+`src/WisBlockLoRaWANConfig.h` (new persisted `alias` field, RP2040 default,
+`WISBLOCK_CONFIG_VERSION` bump), `README.md` (new AT+VER/AT+ALIAS rows -
+neither was previously documented there even though both already existed).
+
+### Verification
+
+Compiled the exact stringify-and-concatenate macro pattern standalone with
+`gcc` to confirm `"RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK4631"`
+resolves to the same literal string (`"RUI_comp_1.0.0_RAK4631"`) the old
+hardcoded version produced, rather than assuming the macro mechanics were
+correct. Comment/string-aware brace-and-paren balance check across all five
+edited files - zero imbalance. Re-normalized `README.md`'s line endings
+after editing it (a `str_replace` on this CRLF file had left a couple of
+lines with a bare `\n`), rather than leaving a mixed-line-ending file.
+
+**Not done**: not tested against real hardware or an actual AT-command
+session in this environment.
+
+---
+
+## 2026-09-20 - LBT (Listen Before Talk): checked, and exposed via API/AT commands
+
+### The check the user asked for
+
+Traced whether the vendored LBM stack actually implements LBT at all, and
+whether this library exposed any control over it.
+
+**LBM itself: fully implemented already, nothing missing at the radio/MAC
+layer.** `smtc_modem_lbt_set_state()`/`_get_state()` and
+`_set_parameters()`/`_get_parameters()` are all present and complete in
+`smtc_modem_api.h`, backed by a real sniff-before-transmit implementation
+(`smtc_lbt.c`) hooked into the radio planner. Per `smtc_modem_lbt_set_state()`'s
+own doc comment, LBT is "silently enabled if the feature is mandatory in a
+region selected with smtc_modem_set_region" - and CSMA
+(`smtc_modem_csma_*`) is the equivalent silent default for regions where
+LBT isn't mandatory. This matches what's already been visible in this
+project's own test logs (`modem_tpm_radio_busy_lbt` traces have appeared
+in earlier AS923 sessions) - LBT-class channel-access behavior has been
+active in testing already, without this library doing anything to enable
+it.
+
+**What was actually missing: this library's own public API/AT command
+surface.** There was no way for an application - or an AT-command user -
+to see LBT's status, turn it on/off explicitly, or adjust its RSSI
+threshold or scan duration. RUI3 exposes exactly this via `AT+LBT` /
+`AT+LBTRSSI` / `AT+LBTSCANTIME` ("support Korea, Japan"); this library had
+no equivalent at all.
+
+**A finding worth knowing, not itself a bug**: every region in this
+vendored LBM tree defines its own "region-appropriate" LBT threshold
+constant (`LBT_THRESHOLD_DBM_KR_920`, `..._AS_923`, etc.) - but none of
+them are ever actually read by anything else in LBM (confirmed: no caller
+anywhere for `smtc_real_get_lbt_threshold_dbm()`, the one function that
+would read them), and every single one of those constants is -80 dBm
+anyway - identical to `smtc_lbt_init()`'s own generic fallback (two of
+them, CN470's variants, are even marked `// TODO value must be checked` in
+Semtech's own source). So this has no practical effect today: selecting
+KR920 or a Japan-targeting AS923 variant does not itself apply any
+region-tuned LBT threshold - whatever the generic default is (or whatever
+the new API/AT calls set) is what actually gets used, regardless of
+region. Deliberately did not invent a "corrected" per-region default to
+apply automatically here - the actual regulatory-correct threshold for a
+given deployment is a certification question this library has no business
+guessing at silently; exposing the control is the right scope for this
+change, and it's now available via the API/AT commands added.
+
+### What was added
+
+`LoRaWANEngine::setLbtEnabled()`/`getLbtEnabled()`,
+`setLbtThreshold()`/`getLbtThreshold()`, `setLbtScanTime()`/`getLbtScanTime()`
+(matching `WisBlockLoRaWAN` wrappers, following this library's established
+pattern of `ensureLoRaWANEngineStarted()` before a state-changing call).
+Threshold and scan time share one underlying LBM call
+(`smtc_modem_lbt_set_parameters()`, which also takes an RSSI measurement
+bandwidth this library doesn't expose - RUI3 doesn't either) - each setter
+reads the current values back from LBM first rather than risking
+clobbering the other one with a stale cached value. `AT+LBT=0/1` /
+`AT+LBT=?`, `AT+LBTRSSI=<dBm>` / `AT+LBTRSSI=?`, and
+`AT+LBTSCANTIME=<ms>` / `AT+LBTSCANTIME=?` added to the AT layer, matching
+this library's existing convention of implementing the `=?` (get) and
+`=value` (set) forms without a bare-`?` short-help response, since no
+other command in this AT set implements that form either.
+
+### Files changed
+
+`src/LoRaWANEngine.h`/`.cpp` (the six new methods),
+`src/WisBlockLoRaWAN.h` (matching wrappers), `src/WisBlockLoRaAT.cpp`
+(three new AT commands), `README.md`.
+
+### Verification
+
+Confirmed via `grep` across the whole vendored LBM tree that
+`smtc_real_get_lbt_threshold_dbm()` genuinely has zero callers (not just
+skimmed past) before relying on that as the basis for the "region
+selection doesn't apply a tuned threshold" finding above, and confirmed
+each region's own threshold constant's actual value rather than assuming
+they differ from the generic default. Comment/string-aware brace-and-paren
+balance check across all four edited files - zero imbalance. Cross-checked
+every `smtc_modem_lbt_*` call's parameter types/order directly against
+their declarations in `smtc_modem_api.h` rather than assuming the
+signatures from memory.
+
+**Not done**: not tested against real hardware or an actual AT-command
+session in this environment - in particular, whether the RSSI/scan-time
+values reported back by `smtc_modem_lbt_get_parameters()` immediately
+after a `set` call reflect that same call (rather than some
+internally-adjusted value - `smtc_lbt_set_parameters()`'s own source adds
+a fixed `LAP_OF_TIME_TO_GET_A_RSSI_VALID` internally to whatever duration
+is requested, though `get_parameters()` appears to subtract it back out
+symmetrically) has not been confirmed live.

@@ -1,6 +1,7 @@
 
 #include <Arduino.h>
 #include "WisBlockLoRaAT.h"
+#include "WisBlockLoRaWAN_all.h" // WISBLOCK_LORAWAN_VERSION_STRING, used by the AT+VER handler
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -554,6 +555,53 @@ void WisBlockLoRaAT::processLine(const char *line)
 		lora->setChannelMask((uint16_t)mask);
 		replyOk();
 	}
+	else if (strcmp(cmd, "+LBT=?") == 0)
+	{
+		port->printf("AT+LBT=");
+		port->println(lora->getLbtEnabled() ? 1 : 0);
+		replyOk();
+	}
+	else if (startsWith(cmd, "+LBT="))
+	{
+		lora->setLbtEnabled(atoi(cmd + 5) != 0);
+		replyOk();
+	}
+	else if (strcmp(cmd, "+LBTRSSI=?") == 0)
+	{
+		port->printf("AT+LBTRSSI=");
+		port->println(lora->getLbtThreshold());
+		replyOk();
+	}
+	else if (startsWith(cmd, "+LBTRSSI="))
+	{
+		char *end = nullptr;
+		long thresholdDbm = strtol(cmd + 9, &end, 10);
+		if (end == cmd + 9)
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setLbtThreshold((int16_t)thresholdDbm);
+		replyOk();
+	}
+	else if (strcmp(cmd, "+LBTSCANTIME=?") == 0)
+	{
+		port->printf("AT+LBTSCANTIME=");
+		port->println(lora->getLbtScanTime());
+		replyOk();
+	}
+	else if (startsWith(cmd, "+LBTSCANTIME="))
+	{
+		char *end = nullptr;
+		unsigned long scanTimeMs = strtoul(cmd + 13, &end, 10);
+		if (end == cmd + 13)
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setLbtScanTime((uint32_t)scanTimeMs);
+		replyOk();
+	}
 	else if (strcmp(cmd, "+DR=?") == 0)
 	{
 		port->printf("AT+DR=");
@@ -1027,19 +1075,26 @@ void WisBlockLoRaAT::processLine(const char *line)
 	else if (strcmp(cmd, "+VER=?") == 0)
 	{
 #ifdef NRF52_SERIES
-		port->println("RUI_comp_1.0.0_RAK4631");
+		port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK4631");
 #elif defined(ARDUINO_ARCH_ESP32)
-		port->println("RUI_comp_1.0.0_RAK3312");
+		port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK3312");
+#elif defined(ARDUINO_ARCH_RP2040)
+		port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK11310");
 #endif
 		replyOk();
 	}
 	else if (strcmp(cmd, "+ALIAS=?") == 0)
 	{
-#ifdef NRF52_SERIES
-		port->println("WISBLOCK_BASICMODEM_RAK4631");
-#elif defined(ARDUINO_ARCH_ESP32)
-		port->println("WISBLOCK_BASICMODEM_RAK3312");
-#endif
+		port->println(lora->getAlias());
+		replyOk();
+	}
+	else if (startsWith(cmd, "+ALIAS="))
+	{
+		if (!lora->setAlias(cmd + 7))
+		{
+			replyError("AT_PARAM_ERROR"); // NULL or longer than RUI3's 16-character limit
+			return;
+		}
 		replyOk();
 	}
 	else

@@ -137,6 +137,47 @@ public:
 	bool setChannelMask(uint16_t mask);
 	uint16_t getChannelMask() const;
 	/**
+	 * RUI3-compatible AT+LBT / AT+LBTRSSI / AT+LBTSCANTIME (support Korea, Japan). The
+	 * underlying Listen-Before-Talk mechanism itself (a sniff-before-transmit check on the
+	 * radio) is already fully implemented in the vendored LBM stack and needs nothing added
+	 * here to function - per smtc_modem_lbt_set_state()'s own doc comment, it is silently
+	 * enabled automatically for any region where it's regulatorily mandatory (LBM's own CSMA
+	 * mechanism is the equivalent silent-default for regions where LBT is not mandatory).
+	 * These calls only expose control over it: turning it on/off explicitly, and adjusting the
+	 * RSSI threshold and scan (listen) duration LBM was otherwise left to its own generic
+	 * defaults for (-80 dBm, ~5ms) - see setLbtThreshold()'s doc comment for why those defaults
+	 * are worth overriding for a real deployment rather than assumed correct as-is.
+	 *
+	 * Safe to call before joining, like setChannelMask() - LBT is a local transmit-gating
+	 * decision this device makes for itself, not something that requires having joined first.
+	 */
+	bool setLbtEnabled(bool enabled);
+	bool getLbtEnabled() const;
+	/**
+	 * FIX/finding worth knowing, not a bug: every region in this vendored LBM tree defines its
+	 * own "region-appropriate" LBT threshold constant (e.g. LBT_THRESHOLD_DBM_KR_920), but none
+	 * of them are ever actually read by anything in LBM itself (confirmed - no caller anywhere
+	 * for smtc_real_get_lbt_threshold_dbm()) - and every single one of those constants is -80
+	 * dBm anyway, identical to smtc_lbt_init()'s own generic fallback, so this has no practical
+	 * effect today regardless. In short: selecting KR920/a Japan-targeting AS923 variant does
+	 * NOT itself apply any region-tuned LBT threshold - whatever LBM's generic default is (or
+	 * whatever this call sets) is what every region actually uses. If your target region's
+	 * certification requires a specific, different threshold, this is the call that needs to
+	 * carry it - nothing in region selection will do it automatically.
+	 *
+	 * dBm, signed - e.g. -80. Threshold and scan time share one underlying LBM call
+	 * (smtc_modem_lbt_set_parameters(), which also takes an RSSI measurement bandwidth this
+	 * library doesn't expose - RUI3 doesn't either, so it stays at LBM's own default), so
+	 * changing one here reads the other back from LBM first rather than risking clobbering it
+	 * with a stale cached value.
+	 */
+	bool setLbtThreshold(int16_t thresholdDbm);
+	int16_t getLbtThreshold() const;
+	/** Listen duration in ms before deciding a channel is clear - LBM's own generic default is
+	 * ~5ms. See setLbtThreshold()'s doc comment for why this and the threshold share one call. */
+	bool setLbtScanTime(uint32_t scanTimeMs);
+	uint32_t getLbtScanTime() const;
+	/**
 	 * FIX (root cause of a confirmed, reproducible bug: setADR(false) with
 	 * a fixed DR "silently" not taking effect - the frame's ADR bit stayed
 	 * 1, the network's own ADR engine kept issuing LinkADRReq, and the

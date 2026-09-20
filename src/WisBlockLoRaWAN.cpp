@@ -132,6 +132,17 @@ void WisBlockLoRaWAN::setWorkMode(WisBlockWorkMode mode)
 	}
 }
 
+bool WisBlockLoRaWAN::setAlias(const char *alias)
+{
+	if (alias == nullptr || strlen(alias) > 16)
+	{
+		return false;
+	}
+	strncpy(config.alias, alias, sizeof(config.alias) - 1);
+	config.alias[sizeof(config.alias) - 1] = '\0';
+	return true;
+}
+
 void WisBlockLoRaWAN::setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16])
 {
 	memcpy(config.lorawan.otaa.devEui, devEui, 8);

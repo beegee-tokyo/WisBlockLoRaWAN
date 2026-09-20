@@ -34,6 +34,19 @@ public:
 	void setWorkMode(WisBlockWorkMode mode);
 	WisBlockWorkMode getWorkMode() const { return config.workMode; }
 
+	// --- Device identity (RUI3-compatible AT+ALIAS) ---------------------
+	/** RUI3's AT+ALIAS: a free-form, user-settable device label, persisted alongside the rest
+	 * of this library's config - unrelated to LoRaWAN/P2P operation, so no engine start is
+	 * needed either way. Matches RUI3's own documented "<string, 16char>" limit for a *set*
+	 * value: rejected (returns false, no change made) for a NULL pointer or a string longer
+	 * than 16 characters, mirroring RUI3's own AT_PARAM_ERROR for a malformed AT+ALIAS= value -
+	 * the AT layer reports that error code, this call just reports success/failure. A longer
+	 * factory-default string is still fine to read back (see WisBlockPersistedConfig::alias's
+	 * doc comment); it just can't be re-entered verbatim through this setter.
+	 */
+	bool setAlias(const char *alias);
+	const char *getAlias() const { return config.alias; }
+
 	// --- LoRaWAN credentials & setup ------------------------------------
 	void setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16]);
 	void setABPKeys(uint32_t devAddr, const uint8_t nwkSKey[16], const uint8_t appSKey[16]);
@@ -58,6 +71,16 @@ public:
 	 * these many-channel regions. Unlike setDeviceClass()/setADR(), safe to call before join(). */
 	bool setChannelMask(uint16_t mask);
 	uint16_t getChannelMask() const { return lorawan.getChannelMask(); }
+	/** RUI3-compatible AT+LBT / AT+LBTRSSI / AT+LBTSCANTIME - see LoRaWANEngine::setLbtEnabled()'s/
+	 * setLbtThreshold()'s doc comments for the full mechanism (support Korea, Japan) and an
+	 * important finding about region selection *not* automatically applying a region-tuned
+	 * threshold - if your target region's certification needs a specific value, set it here. */
+	bool setLbtEnabled(bool enabled) { ensureLoRaWANEngineStarted(); return lorawan.setLbtEnabled(enabled); }
+	bool getLbtEnabled() const { return lorawan.getLbtEnabled(); }
+	bool setLbtThreshold(int16_t thresholdDbm) { ensureLoRaWANEngineStarted(); return lorawan.setLbtThreshold(thresholdDbm); }
+	int16_t getLbtThreshold() const { return lorawan.getLbtThreshold(); }
+	bool setLbtScanTime(uint32_t scanTimeMs) { ensureLoRaWANEngineStarted(); return lorawan.setLbtScanTime(scanTimeMs); }
+	uint32_t getLbtScanTime() const { return lorawan.getLbtScanTime(); }
 	/** See setDataRate()'s doc comment - same underlying mechanism and same meaning for the return value. */
 	bool setADR(bool enabled);
 	void setTxPower(uint8_t txPowerIndex);
