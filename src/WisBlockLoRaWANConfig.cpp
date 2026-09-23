@@ -3,6 +3,7 @@
 #include <string.h>
 
 #define WISBLOCK_CONFIG_FLASH_KEY "wb_cfg"
+#define WISBLOCK_FACTORY_FLASH_KEY "wb_factory"
 
 uint16_t wisblockConfigCrc16(const uint8_t *data, size_t len)
 {
@@ -54,8 +55,31 @@ bool wisblockConfigSave(const WisBlockPersistedConfig &cfgIn)
 	return WisBlockLoRaFlash::write(WISBLOCK_CONFIG_FLASH_KEY, reinterpret_cast<const uint8_t *>(&cfg), sizeof(cfg));
 }
 
-bool wisblockConfigFactoryReset()
+bool wisblockConfigSaveFactory(const WisBlockPersistedConfig &cfgIn)
 {
-	WisBlockPersistedConfig defaults;
-	return wisblockConfigSave(defaults);
+	WisBlockPersistedConfig cfg = cfgIn;
+	cfg.magic = WISBLOCK_CONFIG_MAGIC;
+	cfg.version = WISBLOCK_CONFIG_VERSION;
+	cfg.crc16 = computeCrc(cfg);
+	return WisBlockLoRaFlash::write(WISBLOCK_FACTORY_FLASH_KEY, reinterpret_cast<const uint8_t *>(&cfg), sizeof(cfg));
+}
+
+bool wisblockConfigLoadFactory(WisBlockPersistedConfig &out)
+{
+	WisBlockPersistedConfig fromFlash;
+	bool readOk = WisBlockLoRaFlash::read(WISBLOCK_FACTORY_FLASH_KEY, reinterpret_cast<uint8_t *>(&fromFlash), sizeof(fromFlash));
+
+	if (readOk && fromFlash.magic == WISBLOCK_CONFIG_MAGIC &&
+		fromFlash.version == WISBLOCK_CONFIG_VERSION &&
+		fromFlash.crc16 == computeCrc(fromFlash))
+	{
+		out = fromFlash;
+		return true;
+	}
+
+	// Unlike wisblockConfigLoad() above, deliberately no fallback to
+	// compiled-in defaults here - a caller asking for the factory backup
+	// (restoreFactoryDefaults(), via ATR) needs to know whether one
+	// actually exists rather than silently getting *some* config back.
+	return false;
 }

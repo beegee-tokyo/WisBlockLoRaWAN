@@ -4,7 +4,10 @@
  *
  * The whole config (work mode + LoRaWAN settings + P2P settings) is stored
  * as a single versioned, CRC-checked struct so "AT+SAVE" / "AT+RESTORE" and
- * the equivalent API calls are trivial and atomic.
+ * the equivalent API calls are trivial and atomic. A second, separate copy
+ * of the same struct type lives in its own flash slot as a "factory"
+ * backup - see wisblockConfigSaveFactory()/wisblockConfigLoadFactory()
+ * below, and AT+FACTORY/ATR in WisBlockLoRaAT.cpp.
  */
 #ifndef WISBLOCK_LORAWAN_CONFIG_H
 #define WISBLOCK_LORAWAN_CONFIG_H
@@ -35,14 +38,17 @@ struct WisBlockPersistedConfig
 	// meant to be re-entered verbatim through AT+ALIAS=.
 #ifdef NRF52_SERIES
 	char alias[32] = "WISBLOCK_BASICMODEM_RAK4631";
+	char firmwarever[32] = "WB_BM_RAK4631";
 #elif defined(ARDUINO_ARCH_ESP32)
 	char alias[32] = "WISBLOCK_BASICMODEM_RAK3312";
+	char firmwarever[32] = "WB_BM_RAK3312" ;
 #elif defined(ARDUINO_ARCH_RP2040)
 	char alias[32] = "WISBLOCK_BASICMODEM_RAK11310";
+	char firmwarever[32] = "WB_BM_RAK11310";
 #else
 	char alias[32] = "";
+	char firmwarever[32] = "WB_BM_UNKNOWN";
 #endif
-
 	WisBlockLoRaWANSettings lorawan;
 	WisBlockP2PSettings p2p;
 };
@@ -57,8 +63,25 @@ bool wisblockConfigLoad(WisBlockPersistedConfig &out);
 /** Persists `cfg` to flash. Returns false on write failure. */
 bool wisblockConfigSave(const WisBlockPersistedConfig &cfg);
 
-/** Resets flash-stored config back to factory defaults. */
-bool wisblockConfigFactoryReset();
+/**
+ * Persists `cfg` to a separate "factory" flash slot, distinct from the
+ * regular wisblockConfigSave()/wisblockConfigLoad() "user" slot above - see
+ * AT+FACTORY's doc comment in WisBlockLoRaAT.cpp for the intended
+ * production flow this is part of (this deliberately does NOT touch the
+ * user slot - only the caller decides when the two should be synced, via
+ * wisblockConfigLoadFactory() below). Returns false on write failure.
+ */
+bool wisblockConfigSaveFactory(const WisBlockPersistedConfig &cfg);
+
+/**
+ * Loads the factory-slot config saved by wisblockConfigSaveFactory() into
+ * `out`. Returns false (and leaves `out` untouched) if nothing has ever
+ * been saved there, or the saved blob fails its magic/version/CRC check -
+ * unlike wisblockConfigLoad(), this deliberately does NOT fall back to
+ * compiled-in defaults, since a caller asking for the factory backup needs
+ * to know whether one actually exists (see ATR's doc comment).
+ */
+bool wisblockConfigLoadFactory(WisBlockPersistedConfig &out);
 
 /** Computes the CRC16-CCITT used to validate the stored blob. */
 uint16_t wisblockConfigCrc16(const uint8_t *data, size_t len);

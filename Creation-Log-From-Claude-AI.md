@@ -3024,3 +3024,94 @@ query branch only; write branches and every other handler untouched).
 `WisBlockLoRaWAN.h` API stub used to verify the original rewrite - zero
 errors. Confirmed no other reference to the removed `isSet` local
 remains in the file.
+
+## 2026-09-23 - AT+FACTORY/ATR: separate factory-backup flash slot, correctly implemented; replyError() double-print fix; init()/format() remount fix
+
+### Scope
+
+Three changes, the first the actual ask, the other two prerequisites it surfaced:
+
+1. **AT+FACTORY and ATR, corrected.** AT+FACTORY previously meant "reset config to
+   compiled-in struct defaults" (`WisBlockLoRaWAN::factoryReset()` ->
+   `wisblockConfigFactoryReset()` -> `wisblockConfigSave(WisBlockPersistedConfig())`) - which
+   silently discarded a unit's real DevEUI back to the generic
+   `{0xac,0x1f,0x09,0xff,0xfe,0x00,0x00,0x00}` template the moment it ran. That's not what a
+   "factory reset" command is for in a production flow. Corrected per the intended flow (see
+   the new "Production flow" section in README.md):
+   - A second, independent flash slot ("wb_factory", alongside the existing "wb_cfg" user
+     slot - both the same `WisBlockPersistedConfig` type, same magic/version/CRC scheme, see
+     `wisblockConfigSaveFactory()`/`wisblockConfigLoadFactory()` in `WisBlockLoRaWANConfig.cpp`).
+   - **AT+FACTORY** now snapshots the *current live config* (not compiled-in defaults) into
+     that slot, via the new `WisBlockLoRaWAN::saveFactoryDefaults()`, then resets the device.
+     Meant to run exactly once, in production, right after `AT+DEVEUI=` has set a unit's real
+     DevEUI and before anything else has been changed away from its compiled-in default.
+   - **ATR** (was declared/stubbed with a `\todo` but never registered in
+     `atCommandTable[]` - unreachable dead code) now actually implements "copy the factory
+     backup over the current + saved user config", via the new
+     `WisBlockLoRaWAN::restoreFactoryDefaults()`: loads "wb_factory", applies it live
+     (`applyLoRaWANSettings()`/`applyP2PSettings()`, same as `restoreConfig()`), then saves it
+     into "wb_cfg" too - so `AT+RESTORE`/`restoreConfig()` reload *this* from now on, not a
+     one-off in-RAM change. Deliberately does not reset the device (matches `AT+RESTORE`'s
+     existing no-reset behavior; only `AT+FACTORY` resets, since only it runs in a controlled,
+     one-time production step). Registered as `{"R", &WisBlockLoRaAT::atR}` in
+     `atCommandTable[]` - the missing piece that made the existing `atR()` stub unreachable.
+   - `WisBlockLoRaWAN::factoryReset()` and `wisblockConfigFactoryReset()` removed outright
+     (no callers left outside `AT+FACTORY` itself) rather than left around with changed or
+     stale semantics.
+
+2. **`replyError()` double-print fix.** `reason` is used two different ways across this
+   file's call sites - a protocol status token ("AT_ERROR", "AT_PARAM_ERROR") meant to be the
+   *entire* reply, or a human-readable explanation meant as an *extra* line before the
+   standard "AT_ERROR" sentinel - and `replyError()` treated both identically, always
+   appending a second, hardcoded "AT_ERROR" line after whatever was passed. So
+   `replyError("AT_ERROR")` sent "AT_ERROR" twice (this is what surfaced the bug - visible
+   directly in a user's debug log for an unrelated custom AT command failure), and
+   `replyError("AT_PARAM_ERROR")` sent "AT_PARAM_ERROR" followed by a redundant second
+   "AT_ERROR" line, on every one of the ~70 call sites using either token across this file.
+   Fixed at the source (`replyError()` itself, not each call site): a `reason` starting with
+   `"AT_"` is now printed on its own with nothing appended after it; anything else keeps the
+   previous explanation-line-then-"AT_ERROR" behavior unchanged.
+
+3. **`WisBlockLoRaFlash::init()` format()/remount fix.** If `InternalFS.begin()` fails (a
+   genuinely fresh or corrupted board), `init()` calls `InternalFS.format()` but never called
+   `begin()` again afterward - a freshly-formatted LittleFS volume isn't mounted until
+   `begin()` succeeds, so every `read()`/`write()` that boot would silently fail even though
+   `init()` itself returned `true` either way. Only reachable on that first-boot/corrupted
+   case (a normal boot's `begin()` already succeeds) - but that's exactly the case an
+   in-the-field `AT+FACTORY` on a replacement/repaired unit could hit, so worth closing.
+   `init()` now retries `begin()` once after `format()` and returns `false` if that also
+   fails; both callers (`WisBlockLoRaWAN::begin()`, `wisblock_lbm_port.cpp`) already discard
+   `init()`'s return value, so this is a strict improvement with no call-site changes needed.
+
+Item 3 is unrelated to a separate, still-open flash-write-reliability investigation from an
+earlier session (a save reporting failure while - or, in one case, while genuinely not -
+persisting) - that investigation's own debug instrumentation, added directly to `write()`/
+`read()` in this same file, was left exactly as found; nothing in this entry touches it.
+
+### Files changed
+
+`src/WisBlockLoRaWANConfig.h`/`.cpp` (new `wisblockConfigSaveFactory()`/
+`wisblockConfigLoadFactory()`, `wisblockConfigFactoryReset()` removed), `src/WisBlockLoRaWAN.h`/
+`.cpp` (new `saveFactoryDefaults()`/`restoreFactoryDefaults()`, `factoryReset()` removed; two
+prose comments elsewhere - one in this file, one in `LoRaWANEngine.cpp` - updated to reference
+the new name), `src/WisBlockLoRaAT.cpp` (`atFactory()` rewritten, `atR()` implemented and
+registered in `atCommandTable[]`, `replyError()` fixed), `src/WisBlockLoRaFlash.h` (doc comment
+only), `src/WisBlockLoRaFlash.cpp` (`init()`), `README.md` (AT+FACTORY/ATR/AT+RESTORE
+descriptions corrected, new "Production flow" section).
+
+### Verification
+
+`g++ -fsyntax-only -std=c++17 -Wall`, separately, against: `WisBlockLoRaWANConfig.cpp` (real
+`WisBlockLoRaWANTypes.h`, a hand-written `WisBlockLoRaFlash.h`-shaped stub); `WisBlockLoRaAT.cpp`
+(hand-written `WisBlockLoRaWAN.h` API stub, updated to include `saveFactoryDefaults()`/
+`restoreFactoryDefaults()` in place of the removed `factoryReset()`); `WisBlockLoRaFlash.cpp`'s
+nRF52 path (hand-written `Adafruit_LittleFS`/`InternalFileSystem` stub) - zero errors on all
+three. Grepped the whole tree for `factoryReset`/`wisblockConfigFactoryReset` - no references
+left outside this entry's own rewritten call sites. Confirmed `{"R", &WisBlockLoRaAT::atR}` is
+now present in `atCommandTable[]` (previously absent - the reason `ATR` was unreachable despite
+`atR()` already existing). Brace-balance-checked every file touched.
+
+**Not done**: not tested against real hardware - in particular, the full AT+FACTORY -> reset ->
+ATR sequence, and whether `wisblockConfigSaveFactory()`'s write to the new "wb_factory" key
+succeeds reliably on a real RAK4631, given the separate, still-open flash-write-reliability
+question noted above.

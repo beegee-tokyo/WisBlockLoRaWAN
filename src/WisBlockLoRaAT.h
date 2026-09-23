@@ -243,6 +243,7 @@ private:
 	void atSn(AtOp op, const char *value);
 	void atVer(AtOp op, const char *value);
 	void atAlias(AtOp op, const char *value);
+	void atFirmwareVer(AtOp op, const char *value);
 	void atZ(AtOp op, const char *value);
 	void atR(AtOp op, const char *value);
 	void atBoot(AtOp op, const char *value);

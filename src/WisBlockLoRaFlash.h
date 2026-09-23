@@ -8,8 +8,11 @@
  *
  * Named blobs, not a general filesystem: "give me back the last thing I
  * saved under this key". Used both for our own WisBlockPersistedConfig
- * (key "wb_cfg") and for LBM's own context store, which needs several
- * independent regions - one per modem_context_type_t (key "wb_lbm_<type>").
+ * (key "wb_cfg", plus a second independent copy under "wb_factory" - see
+ * WisBlockLoRaWANConfig.h's wisblockConfigSaveFactory()/
+ * wisblockConfigLoadFactory() - and AT+FACTORY/ATR in WisBlockLoRaAT.cpp)
+ * and for LBM's own context store, which needs several independent
+ * regions - one per modem_context_type_t (key "wb_lbm_<type>").
  */
 #ifndef WISBLOCK_LORA_FLASH_H
 #define WISBLOCK_LORA_FLASH_H

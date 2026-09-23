@@ -61,10 +61,10 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+PRECVDC=AUTO:_**txPreambleLengthSymbols**_ | Same, computed against a given transmitter preamble length instead of this radio's own - prefer this form |
 | _**Others**_ | |
 | AT+LOWPOWER=_**0/1**_ / AT+LOWPOWER=?             | Enable/disable low power (DIO1 wake) mode           |
-| AT+SAVE                        | Persist current config to flash                    |
-| AT+RESTORE                     | Reload config from flash                           |
-| AT+FACTORY                     | Set config to factory defaults                     |
-| ATR                            | Reset config to factory defaults                   |
+| AT+SAVE                        | Persist current config to flash (user config)      |
+| AT+RESTORE                     | Reload user config from flash, discarding unsaved changes |
+| AT+FACTORY                     | Save current config as the factory backup, then reset MCU (see "Production flow" below) |
+| ATR                             | Copy the factory backup over the current + saved user config (does not reset MCU) |
 | AT+STATUS                      | Dump current config + join/link status             |
 | AT+VER=?                       | RUI3-format version string (this library's own version, not RUI3 firmware) |
 | AT+ALIAS=_**16char string**_ / AT+ALIAS=?   | Get/set a free-form device label (persisted, max 16 chars) |
@@ -75,3 +75,30 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+BOOT                      | Force DFU mode (only RAK4631) |
 | _**Custom AT commands**_ | |
 | ATC+_**CMD**_=_**value**_ / ATC+_**CMD**_=? / ATC+_**CMD**_ | Application-defined command, registered with `WisBlockLoRaAT::addCustomATCommand()` - see `WisBlockLoRaAT.h` |
+
+### Production flow: factory defaults vs. user config
+
+Two complete configs are kept on flash, in separate slots - a "factory" backup and the
+regular "user" config (the one AT+SAVE/AT+RESTORE/`saveConfig()`/`restoreConfig()` already
+worked with before AT+FACTORY/ATR existed):
+
+1. Flash firmware. On a genuinely first boot, nothing is saved yet, so the live config is
+   just the compiled-in defaults (region EU868, mode LoRaWAN, join mode OTAA, and the
+   shared default JoinEUI/AppKey already in `WisBlockOTAAKeys` - see `WisBlockLoRaWANTypes.h`).
+2. Set this unit's real, unique `AT+DEVEUI=` (assigned by the LoRa Alliance). Leave
+   everything else alone.
+3. `AT+FACTORY` - snapshots the *current live config* (defaults + this unit's real DevEUI)
+   into the factory slot. This is a one-time production step, not something end users run.
+4. The device resets automatically right after saving.
+5. `ATR` - copies the factory slot over both the live config and the user slot, so the
+   factory state (including the real DevEUI from step 2) becomes what AT+SAVE/AT+RESTORE
+   work with from here on too.
+
+After that, an end user is free to change settings and `AT+SAVE` them as usual. If they end
+up in a broken state, `ATR` at any time restores exactly what was captured in step 3 -
+including the correct DevEUI, never the generic compiled-in one.
+
+`AT+FACTORY` and `ATR` are easy to confuse with the already-existing `AT+RESTORE`/
+`restoreConfig()` - `AT+RESTORE` reloads the *user* slot (undoing only unsaved, in-RAM
+changes since the last `AT+SAVE`); `ATR` reaches further back, to the factory slot from
+step 3, and overwrites the user slot with it too.

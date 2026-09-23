@@ -143,6 +143,17 @@ bool WisBlockLoRaWAN::setAlias(const char *alias)
 	return true;
 }
 
+bool WisBlockLoRaWAN::setFirmwareVer(const char *firmwarever)
+{
+	if (firmwarever == nullptr || strlen(firmwarever) > 32)
+	{
+		return false;
+	}
+	strncpy(config.firmwarever, firmwarever, sizeof(config.firmwarever) - 1);
+	config.firmwarever[sizeof(config.firmwarever) - 1] = '\0';
+	return true;
+}
+
 void WisBlockLoRaWAN::setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16])
 {
 	memcpy(config.lorawan.otaa.devEui, devEui, 8);
@@ -348,13 +359,22 @@ bool WisBlockLoRaWAN::restoreConfig()
 	return ok;
 }
 
-bool WisBlockLoRaWAN::factoryReset()
+bool WisBlockLoRaWAN::saveFactoryDefaults()
 {
-	bool ok = wisblockConfigFactoryReset();
-	wisblockConfigLoad(config);
+	return wisblockConfigSaveFactory(config);
+}
+
+bool WisBlockLoRaWAN::restoreFactoryDefaults()
+{
+	WisBlockPersistedConfig factory;
+	if (!wisblockConfigLoadFactory(factory))
+	{
+		return false; // no factory backup saved yet - see AT+FACTORY
+	}
+	config = factory;
 	applyLoRaWANSettings();
 	applyP2PSettings();
-	return ok;
+	return wisblockConfigSave(config); // also becomes the new *user* config - see ATR's doc comment
 }
 
 void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)
@@ -487,7 +507,7 @@ void WisBlockLoRaWAN::unlockLbm()
 void WisBlockLoRaWAN::applyLoRaWANSettings()
 {
 	// Gated on work mode (not just `began`) so that restoreConfig() /
-	// factoryReset() - which call this unconditionally as part of a
+	// restoreFactoryDefaults() - which call this unconditionally as part of a
 	// blanket config resync, regardless of which mode is active - can't
 	// reintroduce the same problem ensureLoRaWANEngineStarted() exists to
 	// avoid: starting the LoRaWAN engine for an application that's

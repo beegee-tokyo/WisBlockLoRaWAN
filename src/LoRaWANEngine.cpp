@@ -325,7 +325,7 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// library ships actually uses. On a device with a previously-saved
 	// config already on flash this goes unnoticed, since the reloaded
 	// values already match what the sketch would set anyway - but on a
-	// genuinely first boot, or right after factoryReset(), begin() would
+	// genuinely first boot, or right after restoreFactoryDefaults(), begin() would
 	// push whatever blank/default region and all-zero keys the settings
 	// struct starts with, and the *later* setRegion()/setOTAAKeys() calls
 	// would silently never reach LBM at all, right up until the next

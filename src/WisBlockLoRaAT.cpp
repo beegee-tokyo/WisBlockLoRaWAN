@@ -195,8 +195,10 @@ const WisBlockLoRaAT::AtCommandEntry WisBlockLoRaAT::atCommandTable[] = {
 	{"+HWID", &WisBlockLoRaAT::atHwId},
 	{"+SN", &WisBlockLoRaAT::atSn},
 	{"+VER", &WisBlockLoRaAT::atVer},
+	{"+FIRMWAREVER", &WisBlockLoRaAT::atFirmwareVer},
 	{"+ALIAS", &WisBlockLoRaAT::atAlias},
 	{"Z", &WisBlockLoRaAT::atZ},
+	{"R", &WisBlockLoRaAT::atR},
 	{"+BOOT", &WisBlockLoRaAT::atBoot},
 };
 const size_t WisBlockLoRaAT::atCommandTableSize = sizeof(WisBlockLoRaAT::atCommandTable) / sizeof(WisBlockLoRaAT::atCommandTable[0]);
@@ -297,17 +299,32 @@ void WisBlockLoRaAT::replyOk()
 
 void WisBlockLoRaAT::replyError(const char *reason)
 {
+	// `reason` is used two different ways across this file's call sites:
+	//  - a protocol status token ("AT_ERROR", "AT_PARAM_ERROR") is meant to
+	//    BE the entire reply on its own.
+	//  - anything else (e.g. "bad hex, expected 16 chars") is a
+	//    human-readable explanation, meant as an extra line ahead of the
+	//    standard "AT_ERROR" sentinel that terminates every other error
+	//    reply.
+	// FIX: this used to always print `reason` (when given) and then
+	// unconditionally append a second, hardcoded "AT_ERROR" line after it
+	// regardless of which of the two cases above it was - so
+	// replyError("AT_ERROR") sent "AT_ERROR" twice, and
+	// replyError("AT_PARAM_ERROR") sent "AT_PARAM_ERROR" followed by a
+	// redundant second "AT_ERROR" line.
+	if (reason && startsWith(reason, "AT_"))
+	{
+		port->print(reason);
+		port->print("\r\n");
+		port->flush();
+		return;
+	}
 	if (reason)
 	{
 		port->println(reason);
-		port->print("AT_ERROR\r\n");
-		port->flush();
 	}
-	else
-	{
-		port->println("AT_ERROR\r\n");
-		port->flush();
-	}
+	port->print("AT_ERROR\r\n");
+	port->flush();
 }
 
 void WisBlockLoRaAT::handleStatusQuery()
@@ -1496,23 +1513,64 @@ void WisBlockLoRaAT::atRestore(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atFactory(AtOp op, const char *value)
 {
-	/// \todo save current settings as factory default
+	// Run-only action ("AT+FACTORY"), same shape as AT+SAVE/AT+RESTORE/ATZ.
 	if (op != AtOp::Run)
 	{
 		replyError("AT_ERROR");
 		return;
 	}
-	lora->factoryReset() ? replyOk() : replyError("AT_ERROR"); // flash erase failed
+	// Snapshots the CURRENT live configuration - not compiled-in struct
+	// defaults - into a separate "factory" flash slot untouched by ordinary
+	// AT+SAVE/AT+RESTORE traffic (see WisBlockLoRaWAN::saveFactoryDefaults()'s
+	// doc comment). Intended one-time production use, see this library's
+	// README "Production flow" section: flash firmware, set this unit's
+	// unique AT+DEVEUI= (everything else - JoinEUI/AppKey/region/mode/join
+	// mode - is left at its compiled-in default, see WisBlockLoRaWANTypes.h),
+	// then AT+FACTORY. Resets the device afterward so the next boot (and
+	// every ATR from here on) starts from a clean, fully-reinitialized
+	// engine rather than whatever radio/session state was live in this boot.
+	if (!lora->saveFactoryDefaults())
+	{
+		replyError("AT_ERROR"); // flash write failed
+		return;
+	}
+	// Sent *before* resetting - sd_nvic_SystemReset()/esp_restart() below
+	// don't return, so anything printed after them never reaches the host
+	// (unlike atZ()'s/atBoot()'s equivalent calls above, which print their
+	// OK - unreachably - after the reset call instead of before it).
+	replyOk();
+	port->flush();
+#ifdef NRF52_SERIES
+	sd_nvic_SystemReset();
+#endif
+#ifdef ESP32
+	esp_restart();
+#endif
 }
 
 void WisBlockLoRaAT::atR(AtOp op, const char *value)
 {
+	// Run-only action ("ATR"), same shape as AT+SAVE/AT+RESTORE/ATZ above.
 	if (op != AtOp::Run)
 	{
 		replyError("AT_ERROR");
 		return;
 	}
-	/// \todo Get saved factory settings and replace current settings, then reboot device
+	// Copies the factory backup saved by AT+FACTORY back over the regular
+	// *user* config, both in RAM and on flash (restoreFactoryDefaults()
+	// itself calls wisblockConfigSave() as its last step) - the "undo
+	// whatever I've broken" command. Deliberately does NOT reset the device
+	// afterward, matching AT+RESTORE's existing no-reset behavior above:
+	// restoreFactoryDefaults() already reapplies everything live via the
+	// same applyLoRaWANSettings()/applyP2PSettings() calls AT+RESTORE uses.
+	// Only AT+FACTORY resets - it runs once, in a controlled production
+	// step, where a clean reboot is expected/convenient; ATR is meant to be
+	// safe to run anytime a field device looks broken.
+	if (!lora->restoreFactoryDefaults())
+	{
+		replyError("no factory backup saved yet - run AT+FACTORY first");
+		return;
+	}
 	replyOk();
 }
 
@@ -1621,11 +1679,11 @@ void WisBlockLoRaAT::atVer(AtOp op, const char *value)
 		return;
 	}
 #ifdef NRF52_SERIES
-	port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK4631");
+	port->println("AT+VER=RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK4631");
 #elif defined(ARDUINO_ARCH_ESP32)
-	port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK3312");
+	port->println("AT+VER=RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK3312");
 #elif defined(ARDUINO_ARCH_RP2040)
-	port->println("RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK11310");
+	port->println("AT+VER=RUI_comp_" WISBLOCK_LORAWAN_VERSION_STRING "_RAK11310");
 #endif
 	replyOk();
 }
@@ -1634,12 +1692,36 @@ void WisBlockLoRaAT::atAlias(AtOp op, const char *value)
 {
 	if (op == AtOp::Query)
 	{
+		port->printf("AT+ALIAS=");
 		port->println(lora->getAlias());
 		replyOk();
 	}
 	else if (op == AtOp::Write)
 	{
 		if (!lora->setAlias(value))
+		{
+			replyError("AT_PARAM_ERROR"); // NULL or longer than RUI3's 16-character limit
+			return;
+		}
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atFirmwareVer(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+FIRMWAREVER=");
+		port->println(lora->getFirmwareVer());
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		if (!lora->setFirmwareVer(value))
 		{
 			replyError("AT_PARAM_ERROR"); // NULL or longer than RUI3's 16-character limit
 			return;

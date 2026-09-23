@@ -47,6 +47,19 @@ public:
 	bool setAlias(const char *alias);
 	const char *getAlias() const { return config.alias; }
 
+	// --- Device firmware version (RUI3-compatible AT+FIRMWAREVER) ---------------------
+	/** RUI3's AT+FIRMWAREVER: a free-form, user-settable device label, persisted alongside the rest
+	 * of this library's config - unrelated to LoRaWAN/P2P operation, so no engine start is
+	 * needed either way. Matches RUI3's own documented "<string, 32char>" limit for a *set*
+	 * value: rejected (returns false, no change made) for a NULL pointer or a string longer
+	 * than 32 characters, mirroring RUI3's own AT_PARAM_ERROR for a malformed AT+FIRMWAREVER= value -
+	 * the AT layer reports that error code, this call just reports success/failure. A longer
+	 * factory-default string is still fine to read back (see WisBlockPersistedConfig::alias's
+	 * doc comment); it just can't be re-entered verbatim through this setter.
+	 */
+	bool setFirmwareVer(const char *firmwarever);
+	const char *getFirmwareVer() const { return config.firmwarever; }
+
 	// --- LoRaWAN credentials & setup ------------------------------------
 	void setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16]);
 	void setABPKeys(uint32_t devAddr, const uint8_t nwkSKey[16], const uint8_t appSKey[16]);
@@ -202,9 +215,34 @@ public:
 	void sleepRadio();
 
 	// --- Persistence ------------------------------------------------------
+	/** Persists the current live config to the regular *user* flash slot. Returns false on write failure. */
 	bool saveConfig();
+	/**
+	 * Reloads the *user* slot from flash into the current live config,
+	 * discarding any unsaved in-RAM changes since the last saveConfig() -
+	 * see restoreFactoryDefaults() below for reaching further back, to the
+	 * factory backup instead. Returns false (defaults loaded) if nothing
+	 * has ever been saved.
+	 */
 	bool restoreConfig();
-	bool factoryReset();
+	/**
+	 * Snapshots the CURRENT live configuration (not compiled-in struct
+	 * defaults) into a separate "factory" flash slot, untouched by
+	 * ordinary saveConfig()/restoreConfig() traffic - see AT+FACTORY in
+	 * WisBlockLoRaAT.cpp for the intended one-time production flow this is
+	 * part of (set a unique DevEUI, then call this, then reboot).
+	 * Returns false on flash write failure.
+	 */
+	bool saveFactoryDefaults();
+	/**
+	 * Loads the factory-slot config saved by saveFactoryDefaults(), applies
+	 * it as the current live configuration, and persists it into the
+	 * regular user flash slot too - so it's what restoreConfig()/
+	 * AT+RESTORE reload from now on, not just a one-off in-RAM change. See
+	 * ATR in WisBlockLoRaAT.cpp. Returns false (config left untouched) if
+	 * no factory backup has ever been saved.
+	 */
+	bool restoreFactoryDefaults();
 	const WisBlockPersistedConfig &getConfig() const { return config; }
 
 	// --- Low power ----------------------------------------------------

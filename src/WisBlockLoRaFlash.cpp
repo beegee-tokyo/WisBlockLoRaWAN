@@ -31,10 +31,25 @@ namespace WisBlockLoRaFlash
 {
 bool init()
 {
-	if (!InternalFS.begin()){
+	if (!InternalFS.begin())
+	{
 		Serial.println("FS begin failed");
 		Serial.flush();
 		InternalFS.format();
+		// FIX: format() doesn't implicitly remount the filesystem - a
+		// freshly-formatted InternalFS still isn't mounted until begin() is
+		// called again, so every read()/write() this boot would have
+		// silently failed (File::open() on an unmounted volume just fails)
+		// even though this function returned true either way. Only
+		// reachable on a truly fresh/corrupted board (begin() succeeds on
+		// every normal boot) - but that's exactly the first-ever AT+FACTORY
+		// case this feature depends on, so worth getting right.
+		if (!InternalFS.begin())
+		{
+			Serial.println("FS begin failed again after format - internal flash may be faulty");
+			Serial.flush();
+			return false;
+		}
 	}
 	return true;
 }
