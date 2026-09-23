@@ -201,6 +201,13 @@ bool WisBlockLoRaWAN::setChannelMask(uint16_t mask)
 	return lorawan.setChannelMask(mask);
 }
 
+bool WisBlockLoRaWAN::setPingSlotPeriodicity(uint8_t periodicity)
+{
+	config.lorawan.pingSlotPeriodicity = periodicity > 7 ? 7 : periodicity;
+	ensureLoRaWANEngineStarted();
+	return lorawan.setPingSlotPeriodicity(periodicity);
+}
+
 void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)
 {
 	config.lorawan.txPower = txPowerIndex;

@@ -47,6 +47,7 @@ bool read(const char *key, uint8_t *buf, size_t len)
 	File file(InternalFS);
 	if (!file.open(filename, FILE_O_READ))
 	{
+		Serial.printf("Failed to open file or read %s\n", filename);
 		return false;
 	}
 	size_t got = file.read(buf, len);
@@ -59,14 +60,26 @@ bool write(const char *key, const uint8_t *buf, size_t len)
 	char filename[32];
 	buildFilename(key, filename, sizeof(filename));
 
-	InternalFS.remove(filename);
+	// InternalFS.remove(filename);
 	File file(InternalFS);
+
+	// Test open file and close before deleting
+	if (!file.open(filename, FILE_O_READ))
+	{
+		Serial.printf("File to write %s does not exist yet\n", filename);
+	}
+	file.close();
+
+	InternalFS.remove(filename);
+
 	if (!file.open(filename, FILE_O_WRITE))
 	{
+		Serial.printf("Saving to flash failed, can't open file\n");
 		return false;
 	}
 	size_t wrote = file.write(buf, len);
 	file.close();
+	Serial.printf("Saving to flash expected %d written %d\n", len, wrote);
 	return wrote == len;
 }
 

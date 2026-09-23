@@ -245,6 +245,34 @@ public:
 	/** Requests device time; answer arrives later as an SMTC_MODEM_EVENT_LORAWAN_MAC_TIME event. */
 	void requestDeviceTime();
 
+	/**
+	 * RUI3-compatible AT+PGSLOT / Class B unicast ping slot periodicity, 0-7. Matches RUI3's own
+	 * numbering exactly (0 = ~1s period, 7 = 128s, the maximum) - LBM's own
+	 * smtc_modem_class_b_ping_slot_periodicity_t enum already uses this identical ordering, so
+	 * the value passed through unchanged. Also triggers a PingSlotInfoReq MAC command
+	 * (SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO) so the network is actually told about the
+	 * change - setting this locally without informing the network would leave the network
+	 * scheduling downlinks for the old periodicity, breaking Class B reception rather than
+	 * just being a no-op. Values above 7 are clamped rather than rejected, matching this
+	 * library's convention elsewhere for simple numeric range setters.
+	 */
+	bool setPingSlotPeriodicity(uint8_t periodicity);
+	uint8_t getPingSlotPeriodicity() const;
+	/**
+	 * RUI3-compatible AT+BFREQ (read-only): the data rate and frequency (Hz) of the next Class B
+	 * beacon reception opportunity for the current region. Resolved via
+	 * smtc_real_get_beacon_dr()/smtc_real_get_beacon_frequency() using the last valid received
+	 * beacon's own embedded GPS time as the reference instant those functions need (some
+	 * regions, e.g. US915/AU915, hop the beacon frequency over time; most others use one fixed
+	 * frequency and the reference instant doesn't change the answer). Returns 0/0 before any
+	 * beacon has ever been received.
+	 */
+	bool getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const;
+	/** RUI3-compatible AT+BTIME (read-only): seconds since the GPS epoch, taken from the last
+	 * valid received beacon's own embedded time field - not this device's local clock, and not
+	 * updated at all until at least one beacon has actually been received. 0 if none yet. */
+	uint32_t getBeaconTime() const;
+
 	/** Pumps smtc_modem_run_engine() + drains smtc_modem_get_event(). Call every loop().
 	 * Returns the ms budget smtc_modem_run_engine() itself reports before it must be
 	 * called again - required for background task mode (WisBlockLbmTask) to self-schedule

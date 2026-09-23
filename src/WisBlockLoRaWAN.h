@@ -139,6 +139,15 @@ public:
 	void setLinkCheckMode(uint8_t mode) { lorawan.setLinkCheckMode(mode); }
 	uint8_t getLinkCheckMode() const { return lorawan.getLinkCheckMode(); }
 	void requestDeviceTime() { ensureLoRaWANEngineStarted(); lorawan.requestDeviceTime(); }
+	/** RUI3-compatible AT+PGSLOT/AT+BFREQ/AT+BTIME - see LoRaWANEngine::setPingSlotPeriodicity()'s/
+	 * getBeaconFrequencyAndDr()'s/getBeaconTime()'s doc comments. AT+BGW (gateway GPS/NetID/GwID
+	 * from the beacon's GwSpecific field) is not implemented - it needs raw beacon payload
+	 * decoding this library doesn't currently do (see LoRaWANEngine.h's Class B section for
+	 * what is/isn't covered). */
+	bool setPingSlotPeriodicity(uint8_t periodicity);
+	uint8_t getPingSlotPeriodicity() const { return lorawan.getPingSlotPeriodicity(); }
+	bool getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const { return lorawan.getBeaconFrequencyAndDr(frequencyHz, dr); }
+	uint32_t getBeaconTime() const { return lorawan.getBeaconTime(); }
 
 	// --- LoRa P2P setup --------------------------------------------------
 	void setP2PFrequency(uint32_t frequencyHz);

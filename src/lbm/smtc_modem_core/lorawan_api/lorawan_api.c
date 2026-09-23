@@ -1035,6 +1035,24 @@ void lorawan_api_beacon_get_statistics( smtc_beacon_statistics_t* beacon_statist
     PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
     smtc_beacon_sniff_get_statistics( &lr1_beacon_obj[stack_id], beacon_statistics );
 }
+
+uint32_t lorawan_api_get_beacon_epoch_time( uint8_t stack_id )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return lr1_beacon_obj[stack_id].beacon_epoch_time;
+}
+
+uint8_t lorawan_api_get_beacon_dr( uint8_t stack_id )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return smtc_real_get_beacon_dr( lr1_mac_obj[stack_id].real );
+}
+
+uint32_t lorawan_api_get_beacon_frequency( uint8_t stack_id, uint32_t gps_time_s )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return smtc_real_get_beacon_frequency( lr1_mac_obj[stack_id].real, gps_time_s );
+}
 #endif
 
 status_lorawan_t lorawan_api_get_ping_slot_info_req_status( uint8_t stack_id )

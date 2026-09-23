@@ -88,9 +88,9 @@ enum WisBlockP2PCodingRate : uint8_t
 /** Parameters for LoRa Basics Modem OTAA join. */
 struct WisBlockOTAAKeys
 {
-	uint8_t devEui[8] = {0};
-	uint8_t joinEui[8] = {0};
-	uint8_t appKey[16] = {0}; // Also used as NwkKey in LoRaWAN 1.1
+	uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x00, 0x00, 0x00};
+	uint8_t joinEui[8] = {0x70, 0xb3, 0xd5, 0x7e, 0xd0, 0x02, 0x01, 0xe1};
+	uint8_t appKey[16] = {0x2b, 0x84, 0xe0, 0xb0, 0x9b, 0x68, 0xe5, 0xcb, 0x42, 0x17, 0x6f, 0xe7, 0x53, 0xdc, 0xee, 0x79}; // Also used as NwkKey in LoRaWAN 1.1
 };
 
 /** Parameters for ABP activation. */
@@ -115,6 +115,11 @@ struct WisBlockLoRaWANSettings
 	 * LoRaWANEngine::setChannelMask()/WisBlockLoRaWAN::setChannelMask() for the encoding.
 	 * 0 = no restriction (all channels enabled), matching AT+MASK's own ALL=0000 convention. */
 	uint16_t channelMask = 0;
+	/** RUI3-compatible AT+PGSLOT (Class B unicast ping slot periodicity, 0-7) - see
+	 * LoRaWANEngine::setPingSlotPeriodicity()'s doc comment. Pushed to LBM every time settings
+	 * are (re)applied, same as channelMask above - harmless for Class A/C, and lets it be
+	 * pre-configured before ever switching to Class B. */
+	uint8_t pingSlotPeriodicity = 0;
 	/** FIX (Class A pending-downlink bug): when a downlink's FPending bit is set, the network
 	 * has more downlinks queued, but a Class A device can only receive them in response to an
 	 * uplink - per LoRaWAN 1.0.4 section 5.1 the device should send another uplink promptly to

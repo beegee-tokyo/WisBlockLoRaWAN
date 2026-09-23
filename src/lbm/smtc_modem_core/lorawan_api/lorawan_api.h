@@ -944,6 +944,38 @@ void lorawan_api_beacon_sniff_stop( uint8_t stack_id );
  * @param [out] beacon_statistics The beacon statistics
  */
 void lorawan_api_beacon_get_statistics( smtc_beacon_statistics_t* beacon_statistics, uint8_t stack_id );
+
+/**
+ * @brief FIX: RUI3-compatible AT+BFREQ/AT+BTIME need the beacon's own embedded GPS epoch time
+ * (used both to report AT+BTIME directly and to resolve AT+BFREQ's region-dependent frequency
+ * hopping via smtc_real_get_beacon_frequency()'s gps_time_s parameter) - not exposed by
+ * lorawan_api_beacon_get_statistics() above, which only reports the *local* RTC reception
+ * timestamp, not the time value carried inside the beacon payload itself. 0 if no valid beacon
+ * has been received yet.
+ *
+ * @return uint32_t Seconds since the GPS epoch, from the last valid received beacon
+ */
+uint32_t lorawan_api_get_beacon_epoch_time( uint8_t stack_id );
+
+/**
+ * @brief FIX: RUI3-compatible AT+BFREQ needs the beacon DR/frequency for the current region -
+ * exposes smtc_real_get_beacon_dr()/smtc_real_get_beacon_frequency(), which take the internal
+ * smtc_real_t* this layer doesn't otherwise expose to callers above it.
+ *
+ * @return uint8_t The beacon data rate
+ */
+uint8_t lorawan_api_get_beacon_dr( uint8_t stack_id );
+
+/**
+ * @brief See lorawan_api_get_beacon_dr()'s doc comment.
+ *
+ * @param [in] gps_time_s Reference instant (seconds since GPS epoch) - only changes the answer
+ * for regions where the beacon frequency hops over time (e.g. US915/AU915); pass the last
+ * received beacon's own time (lorawan_api_get_beacon_epoch_time()) for a real answer, or any
+ * value for a fixed-frequency region.
+ * @return uint32_t The beacon frequency in Hz
+ */
+uint32_t lorawan_api_get_beacon_frequency( uint8_t stack_id, uint32_t gps_time_s );
 #endif  // ADD_CLASS_B
 
 /**

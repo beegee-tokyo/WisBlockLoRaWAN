@@ -339,6 +339,10 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// lorawan_api_set_channel_mask() itself is a no-op on regions that don't need
 	// this (EU868, AS923, ...), so it's safe to always call unconditionally here.
 	lorawan_api_set_channel_mask(kStackId, settings.channelMask);
+	// See WisBlockLoRaWANSettings::pingSlotPeriodicity's doc comment - harmless for Class A/C,
+	// and this way it's already correct the moment an application does switch to Class B.
+	smtc_modem_class_b_set_ping_slot_periodicity(
+		kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)settings.pingSlotPeriodicity);
 	if (settings.joinMode == WISBLOCK_JOIN_OTAA)
 	{
 		smtc_modem_set_deveui(kStackId, settings.otaa.devEui);
@@ -741,6 +745,41 @@ bool LoRaWANEngine::getLinkCheckResult(WisBlockLinkCheckResult &out) const
 void LoRaWANEngine::requestDeviceTime()
 {
 	smtc_modem_trig_lorawan_mac_request(kStackId, SMTC_MODEM_LORAWAN_MAC_REQ_DEVICE_TIME);
+}
+
+bool LoRaWANEngine::setPingSlotPeriodicity(uint8_t periodicity)
+{
+	if (periodicity > 7)
+	{
+		periodicity = 7;
+	}
+	settings.pingSlotPeriodicity = periodicity;
+	bool ok = smtc_modem_class_b_set_ping_slot_periodicity(
+				  kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)periodicity) == SMTC_MODEM_RC_OK;
+	// See this method's doc comment in LoRaWANEngine.h - the network needs to be told about
+	// this too, not just this device's own local scheduling.
+	smtc_modem_trig_lorawan_mac_request(kStackId, SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO);
+	return ok;
+}
+
+uint8_t LoRaWANEngine::getPingSlotPeriodicity() const
+{
+	smtc_modem_class_b_ping_slot_periodicity_t periodicity = SMTC_MODEM_CLASS_B_PINGSLOT_1_S;
+	smtc_modem_class_b_get_ping_slot_periodicity(kStackId, &periodicity);
+	return (uint8_t)periodicity;
+}
+
+bool LoRaWANEngine::getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const
+{
+	uint32_t epochTimeS = lorawan_api_get_beacon_epoch_time(kStackId);
+	dr = lorawan_api_get_beacon_dr(kStackId);
+	frequencyHz = lorawan_api_get_beacon_frequency(kStackId, epochTimeS);
+	return epochTimeS != 0;
+}
+
+uint32_t LoRaWANEngine::getBeaconTime() const
+{
+	return lorawan_api_get_beacon_epoch_time(kStackId);
 }
 
 uint32_t LoRaWANEngine::handleEvents()

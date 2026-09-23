@@ -441,26 +441,26 @@ extern "C"
 
 	void smtc_modem_hal_crashlog_store(const uint8_t *crash_string, uint8_t crash_string_length)
 	{
-		WisBlockLoRaFlash::write("wb_lbm_crash", crash_string, crash_string_length);
+		// WisBlockLoRaFlash::write("wb_lbm_crash", crash_string, crash_string_length);
 	}
 
 	void smtc_modem_hal_crashlog_restore(uint8_t *crash_string, uint8_t *crash_string_length)
 	{
 		// CRASH_LOG_SIZE is defined in smtc_modem_hal.h (242 bytes).
-		bool ok = WisBlockLoRaFlash::read("wb_lbm_crash", crash_string, CRASH_LOG_SIZE);
-		*crash_string_length = ok ? CRASH_LOG_SIZE : 0;
+		// bool ok = WisBlockLoRaFlash::read("wb_lbm_crash", crash_string, CRASH_LOG_SIZE);
+		// *crash_string_length = ok ? CRASH_LOG_SIZE : 0;
 	}
 
 	void smtc_modem_hal_crashlog_set_status(bool available)
 	{
 		uint8_t flag = available ? 1 : 0;
-		WisBlockLoRaFlash::write("wb_lbm_crash_flag", &flag, 1);
+		// WisBlockLoRaFlash::write("wb_lbm_crash_flag", &flag, 1);
 	}
 
 	bool smtc_modem_hal_crashlog_get_status(void)
 	{
 		uint8_t flag = 0;
-		WisBlockLoRaFlash::read("wb_lbm_crash_flag", &flag, 1);
+		// WisBlockLoRaFlash::read("wb_lbm_crash_flag", &flag, 1);
 		return flag != 0;
 	}
 

@@ -22,8 +22,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | <div style="width:150px">Command</div> | Description                                      |
 | :--- | :--- |
 | _**LoRaWAN**_ | |
-| AT+MODE=_**0/1/2**_ / AT+MODE=?                  | 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (not supported - this library has no FSK P2P mode)                          |
-| AT+MODE=?                      | Query current mode                                 |
+| AT+NWM=_**0/1/2**_ / AT+NWM=?                  | 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (not supported - this library has no FSK P2P mode)                          |
 | AT+DEVEUI=_**hex8**_ / AT+DEVEUI=?               | Device EUI                                     |
 | AT+APPEUI=_**hex8**_ / AT+JOINEUI <br> AT+APPEUI=? / AT+JOINEUI=? | Join EUI                                       |
 | AT+APPKEY=_**hex16**_ / AT+APPKEY=?              | App/Network key (OTAA)                         |
@@ -35,6 +34,9 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+LBT=_**0/1**_ / AT+LBT=?                 | Listen Before Talk on/off (support Korea, Japan) - silently auto-enabled where regulatorily mandatory either way |
 | AT+LBTRSSI=_**dBm**_ / AT+LBTRSSI=?         | LBT RSSI threshold in dBm (signed), e.g. -80 |
 | AT+LBTSCANTIME=_**ms**_ / AT+LBTSCANTIME=?  | LBT listen duration in ms before a channel is judged clear |
+| AT+PGSLOT=_**0-7**_ / AT+PGSLOT=?           | Class B unicast ping slot periodicity (0=~1s ... 7=128s); also sends PingSlotInfoReq |
+| AT+BFREQ=?                                  | Class B beacon DR + frequency for the current region (read-only) |
+| AT+BTIME=?                                  | Class B beacon time, seconds since GPS epoch, from the last received beacon (read-only) |
 | AT+FPENDING=_**0/1**_ / AT+FPENDING=?       | Auto-fetch pending downlinks (Class A) - send an empty uplink when FPending is set, default 1 |
 | AT+DR=_**0..15**_ / AT+DR=?                 | Data rate                                     |
 | AT+CLASS=_**A/B/C**_ / AT+CLASS=?              | Device class                                       |
@@ -61,8 +63,15 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+LOWPOWER=_**0/1**_ / AT+LOWPOWER=?             | Enable/disable low power (DIO1 wake) mode           |
 | AT+SAVE                        | Persist current config to flash                    |
 | AT+RESTORE                     | Reload config from flash                           |
-| AT+FACTORY                     | Reset config to factory defaults                   |
+| AT+FACTORY                     | Set config to factory defaults                     |
+| ATR                            | Reset config to factory defaults                   |
 | AT+STATUS                      | Dump current config + join/link status             |
 | AT+VER=?                       | RUI3-format version string (this library's own version, not RUI3 firmware) |
 | AT+ALIAS=_**16char string**_ / AT+ALIAS=?   | Get/set a free-form device label (persisted, max 16 chars) |
-
+| AT+SN=?                        | Get unique device serial number |                          
+| AT+HWMODEL=?                   | Get HW model (rak4630, rak3112, or rak11310) |
+| AT+HWID=?                      | Get MCU ID (nrf52840, esp32-s3, or rp2040) |
+| ATZ                      | Reset MCU |
+| AT+BOOT                      | Force DFU mode (only RAK4631) |
+| _**Custom AT commands**_ | |
+| ATC+_**CMD**_=_**value**_ / ATC+_**CMD**_=? / ATC+_**CMD**_ | Application-defined command, registered with `WisBlockLoRaAT::addCustomATCommand()` - see `WisBlockLoRaAT.h` |

@@ -30,4 +30,12 @@
 #include "WisBlockLoRaAT.h"
 #include "WisBlockLoRaWAN.h"
 
+#ifdef NRF52_SERIES
+#include <nrf_nvic.h>
+#endif
+#ifdef ESP32
+#include <Preferences.h>
+#include <esp_system.h>
+#endif
+
 #endif // WISBLOCK_LORAWAN_ALL_H

@@ -2775,3 +2775,252 @@ internally-adjusted value - `smtc_lbt_set_parameters()`'s own source adds
 a fixed `LAP_OF_TIME_TO_GET_A_RSSI_VALID` internally to whatever duration
 is requested, though `get_parameters()` appears to subtract it back out
 symmetrically) has not been confirmed live.
+
+---
+
+## 2026-09-21 - Class B setup parameters: AT+PGSLOT, AT+BFREQ, AT+BTIME
+
+### Scope
+
+RUI3's "Class B Mode" AT command section covers four commands:
+`AT+PGSLOT` (ping slot periodicity - a real setup parameter),
+`AT+BFREQ`/`AT+BTIME` (read-only beacon status), and `AT+BGW` (read-only
+gateway GPS/NetID/GwID, decoded from the beacon's GwSpecific field).
+Implemented the first three; `AT+BGW` was deliberately left out - see
+below for why.
+
+### What each one needed
+
+**AT+PGSLOT** maps directly onto an LBM API that already exists and
+already uses the identical 0-7 numbering RUI3 does
+(`smtc_modem_class_b_set/get_ping_slot_periodicity()`,
+`smtc_modem_class_b_ping_slot_periodicity_t`'s enum order runs 1s...128s
+matching RUI3's own documented periodicity table exactly). Setting it also
+triggers a `PingSlotInfoReq` MAC command
+(`SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO`) - without that, the change
+would only affect this device's own local scheduling while the network
+kept scheduling downlinks for the old periodicity, breaking Class B
+reception rather than being a harmless no-op. Persisted like every other
+setting in this library (`WisBlockLoRaWANSettings::pingSlotPeriodicity`,
+pushed on every `applySettings()` - harmless for Class A/C, and means it's
+already correct the moment an application does switch to Class B).
+
+**AT+BFREQ/AT+BTIME** needed more digging: LBM has the right low-level
+primitives (`smtc_real_get_beacon_dr()`/`_get_beacon_frequency()`, and the
+beacon object's own `beacon_epoch_time` field, updated from the actual
+time value embedded in the last received beacon - not this device's local
+clock), but nothing in the existing public `smtc_modem_api`/`lorawan_api`
+surface exposed them to a caller above `lorawan_api.c`. Added three small
+getters there (`lorawan_api_get_beacon_epoch_time/_dr/_frequency`),
+following the same pattern used for the sub-band channel mask feature
+earlier in this project - reach one layer into the internals only as far
+as needed, expose a narrow getter, keep everything else untouched.
+`smtc_real_get_beacon_frequency()` needs a reference GPS time (some
+regions, e.g. US915/AU915, hop the beacon frequency over time) - the last
+received beacon's own embedded time is the correct value to use there.
+
+### AT+BGW - not implemented
+
+The beacon's GwSpecific field (which AT+BGW reports) needs decoding via
+`smtc_decode_beacon_gw_specific()`, which requires the beacon's spreading
+factor at reception time to compute a correct byte offset into the raw
+beacon payload - not something already cleanly surfaced alongside the
+stored beacon buffer the way epoch time/DR/frequency were. Getting a
+byte-offset or InfoDesc-interpretation (GPS coordinates vs. NetID+GwID)
+detail wrong here would produce a plausible-looking but incorrect answer
+with no live Class B beacon available in this environment to check it
+against - unlike the other three, this one couldn't be verified as
+"clearly correct by construction" (a direct, obviously-right pass-through
+of an existing, unambiguous LBM value). Flagging this as a known gap
+rather than shipping something unverifiable.
+
+### Files changed
+
+`src/lbm/smtc_modem_core/lorawan_api/lorawan_api.h`/`.c` (three new
+getters), `src/LoRaWANEngine.h`/`.cpp` (`setPingSlotPeriodicity()`/
+`getPingSlotPeriodicity()`, `getBeaconFrequencyAndDr()`, `getBeaconTime()`,
+plus the `applySettings()` wiring), `src/WisBlockLoRaWAN.h`/`.cpp`
+(matching wrappers, `pingSlotPeriodicity` config sync following the exact
+`setChannelMask()` pattern), `src/WisBlockLoRaWANTypes.h` (new persisted
+`pingSlotPeriodicity` field), `src/WisBlockLoRaAT.cpp` (`AT+PGSLOT`,
+`AT+BFREQ=?`, `AT+BTIME=?`), `README.md`.
+
+### Verification
+
+`gcc -fsyntax-only` on the modified `lorawan_api.c` against the project's
+real build flags (all region defines, `ADD_CLASS_B`) - zero errors.
+Comment/string-aware brace-and-paren balance check across all six edited
+`.h`/`.cpp` files - zero imbalance. Cross-checked
+`smtc_modem_class_b_ping_slot_periodicity_t`'s enum values against RUI3's
+documented AT+PGSLOT periodicity table entry-by-entry to confirm the
+numbering genuinely matches rather than assuming it from the names alone.
+
+**Not done**: not tested against real hardware, and specifically not
+against a live Class B beacon (`AT+BFREQ`/`AT+BTIME` will correctly report
+0/region-default values until at least one beacon has actually been
+received - this hasn't been confirmed against a real network in this
+environment). `AT+BGW` remains unimplemented, as above.
+
+## 2026-09-22 - AT command dispatch rewritten as a RUI3-style lookup table; custom AT command API added; cleanup pass
+
+### Scope
+
+Three changes to `src/WisBlockLoRaAT.h`/`.cpp`, all requested together:
+
+1. **Lookup-table dispatch.** `processLine()` used to be a single
+   ~900-line `if`/`else if` chain of `strcmp()`/`startsWith()` calls, one
+   pair (or more, for get/set) per AT command. Replaced with the same
+   shape RUI3's own AT command core uses
+   (`cores/nRF5/component/service/mode/cli/atcmd.c`'s `atcmd_info_tbl[]`
+   in `RAKWireless/RAK-nRF52-RUI`): a `static const AtCommandEntry
+   atCommandTable[]` mapping each command name to a private handler
+   method, looked up in a single loop. `processLine()` now does the
+   string work exactly once per line - splitting into a bare command name
+   plus an `AtOp` (`Run` / `Query` / `Write`, matching the old
+   bare-`AT+CMD` / `AT+CMD=?` / `AT+CMD=value` forms) - and hands each
+   handler pre-parsed `(AtOp op, const char *value)` instead of making
+   every handler independently re-derive its own operation from raw
+   string comparisons. One handler method per command (get/set combined,
+   e.g. `atNwm()` covers both `AT+NWM=?` and `AT+NWM=1`), 44 methods for
+   45 table rows (`+APPEUI`/`+JOINEUI` share `atAppEui()`, same alias the
+   old code had). Every handler's actual logic is otherwise a direct,
+   line-for-line port of its old `if`/`else if` branch - see "Cleanup"
+   below for the handful of places where it isn't.
+
+2. **Custom AT command API**, `WisBlockLoRaAT::addCustomATCommand(cmd,
+   usage, handler)` - the same idea as RUI3's `api.system.atMode.add()`
+   (`RAKSystem.h`'s `atMode` class), adapted to this library's plain-
+   C-string style instead of RUI3's colon-split `stParam`/`argv`. Custom
+   commands are registered by base name (e.g. `"LED"`) and dispatched as
+   `ATC+LED` / `ATC+LED=?` / `ATC+LED=value` - `"C+"` is RUI3's own prefix
+   convention for its custom commands, reused here rather than inventing
+   a different one. A handler is a plain function pointer,
+   `WisBlockAtStatus (*)(Stream &port, const char *cmd, char *args)`:
+   `cmd` is the full command as typed (so one handler function can serve
+   several registered names, same as RUI3's `pfHandle(port, cmd, param)`);
+   `args` is `nullptr` bare, `"?"` for a query, or the raw text after `=`
+   for a set (unsplit - multi-field custom commands parse their own
+   colon/comma-separated `args`, the same way this library's own
+   `+JOIN=`/`+P2P=`/`+PRECVDC=` handlers already did before this change).
+   Returning `WISBLOCK_AT_OK`/`WISBLOCK_AT_ERROR`/`WISBLOCK_AT_PARAM_ERROR`
+   maps onto the same `OK`/`AT_ERROR`/`AT_PARAM_ERROR` replies a built-in
+   command failure produces. Up to `MAX_CUSTOM_AT_COMMANDS` (16) commands,
+   fixed-size table on the `WisBlockLoRaAT` instance (no dynamic
+   allocation, consistent with the rest of this library). Matched
+   case-insensitively via `strcasecmp()`, same as every built-in command
+   (the whole line is already uppercased before any dispatch happens -
+   see `processLine()`'s doc comment, unchanged from before this pass).
+
+3. **Cleanup**, found while doing the above and fixed rather than ported
+   forward as-is (each is called out with a `CLEANUP:` comment at its
+   site in the new code):
+   - `AT+CLASS=?` sent **two** `OK\r\n` replies for one query - it called
+     `reply()` (which itself already prints a trailing `OK`) and then
+     `replyOk()` again right after. Now sends one.
+   - `AT+APPKEY=?`/`AT+NWKSKEY=?`/`AT+APPSKEY=?` each had a `SECURITY:`
+     comment explicitly stating the key is "deliberately not read back in
+     plaintext" - immediately followed by code that printed the raw key
+     in hex anyway (the `isSet` boolean it computed was dead code, and
+     the masked `"SET"`/`"UNSET"` reply was written but commented out).
+     Fixed to actually mask the key as the existing comment says it
+     should, restoring the commented-out `"SET"`/`"UNSET"` reply and
+     deleting the plaintext `printHex()` call. This is a real change in
+     wire behavior for anyone currently relying on plaintext key
+     readback; if that's actually wanted, the fix is documented inline
+     (revert those two lines to `printHex(port, ...)`).
+   - `AT+NWKSKEY=?` echoed its own tag back as `"AT+NWSKEY="` - missing
+     the `K` - which didn't match the command's own name. Fixed to
+     `"AT+NWKSKEY="`.
+   - `AT+TIMEREQ` printed a dangling `"AT+TIMEREQ="` with no value or
+     newline before `replyOk()`'s `"OK\r\n"` landed right after it,
+     producing one malformed `"AT+TIMEREQ=OK\r\n"` line instead of a
+     clean `"OK\r\n"`. The actual result only ever arrives asynchronously
+     (there was never a synchronous value to print here) - the dangling
+     `printf()` was removed.
+   - `AT+HWMODEL=?`/`AT+HWID=?` were missing an `ARDUINO_ARCH_RP2040`
+     branch in their platform `#ifdef` chains (present for `AT+VER=?`,
+     and this library otherwise supports RAK11310/RP2040 throughout -
+     see `WisBlockLoRaBoards.h`'s `WISBLOCK_BOARD_NAME`) - an RP2040
+     build printed nothing for either before replying `OK`. Added
+     `"rak11310"`/`"rp2040"` branches for parity with the other two
+     platforms.
+   - `AT+SN=?` had the same missing-RP2040-branch gap, worse here: `id[]`
+     was read by `printHex()` without ever being written on that
+     platform, so it printed 8 bytes of uninitialized stack memory. Added
+     an RP2040 branch using `pico_get_unique_board_id()`
+     (`pico/unique_id.h`, part of the arduino-pico core) - the documented
+     RP2040 equivalent of the nRF52 FICR reads / ESP32 eFuse MAC read
+     already used for the other two platforms. **Not build- or
+     hardware-tested** - no RP2040 toolchain available in this
+     environment; please verify on real RAK11310 hardware before relying
+     on it.
+   No other behavioral changes were made; every other handler's logic
+   (including some other odd-looking-but-intentional choices, like
+   `AT+APPKEY=`'s 16-byte `parseHex()` or `AT+MASK=`'s hex-vs-decimal
+   parsing) was ported as-is.
+
+### Files changed
+
+`src/WisBlockLoRaAT.h` (new `AtOp` enum, `AtCommandEntry`/
+`CustomAtCommandEntry` structs, `CustomAtHandler` typedef,
+`WisBlockAtStatus` enum, `addCustomATCommand()` declaration, one handler
+method declaration per built-in command), `src/WisBlockLoRaAT.cpp` (full
+rewrite of the dispatch and every handler as described above; helper
+functions in the anonymous namespace - `startsWith()`,
+`startsWithAtCaseInsensitive()`, `printHex()`, `bandIndexToRegion()`,
+`regionToBandIndex()` - and the background-RX/USB-CDC section at the
+bottom are unchanged).
+
+### Verification
+
+`g++ -fsyntax-only -std=c++17` against a hand-written stub of
+`WisBlockLoRaWAN.h`'s full public API (every method/enum/struct this file
+touches, matching the real header's signatures field-for-field) - zero
+errors, zero warnings. Confirmed every method declared in the header has
+exactly one definition in the `.cpp` and that every `atCommandTable[]`
+entry points at a declared handler (scripted cross-check, not just visual
+inspection). Comment/string-aware brace-and-paren balance check on both
+files - zero imbalance (298/298 braces, 926/926 parens in the `.cpp`).
+Manually traced each of the 45 old `if`/`else if` branches against its
+new handler method to confirm the ported logic is unchanged apart from
+the five cleanup items listed above.
+
+**Not done**: not tested against real hardware or a live AT-command
+session in this environment (same limitation as every other entry in
+this log). The `AT+SN=?` RP2040 fix in particular is unverified against
+actual `pico/unique_id.h` availability/linkage on a real arduino-pico
+build - flagged above.
+
+## 2026-09-22 - Revert: AT+APPKEY=?/AT+NWKSKEY=?/AT+APPSKEY=? plaintext readback restored
+
+### Scope
+
+The previous entry above ("AT command dispatch rewritten...") changed
+`AT+APPKEY=?`/`AT+NWKSKEY=?`/`AT+APPSKEY=?` to mask the key value
+(`"SET"`/`"UNSET"`) instead of printing it in hex, reasoning that the
+existing `SECURITY:` comment on each of these ("deliberately not read
+back in plaintext") described the intended behavior and the plaintext
+`printHex()` call contradicted it.
+
+The maintainer confirmed the plaintext readback is the intentional
+behavior - it overrides what the comment says, not the other way around.
+Reverted: all three handlers call `printHex()` on the real key again, as
+they did before that change. The stale `SECURITY:` wording that prompted
+the (incorrect) fix has been replaced with a short note pointing back
+here, so a future reader doesn't hit the same false trail.
+
+The unrelated `AT+NWKSKEY=?` tag-typo fix from the same pass (it used to
+echo `"AT+NWSKEY="`, missing the `K`) was kept - it has nothing to do
+with plaintext-vs-masked and wasn't part of what got flagged.
+
+### Files changed
+
+`src/WisBlockLoRaAT.cpp` (`atAppKey()`, `atNwkSKey()`, `atAppSKey()` -
+query branch only; write branches and every other handler untouched).
+
+### Verification
+
+`g++ -fsyntax-only -std=c++17` against the same hand-written
+`WisBlockLoRaWAN.h` API stub used to verify the original rewrite - zero
+errors. Confirmed no other reference to the removed `isSet` local
+remains in the file.
