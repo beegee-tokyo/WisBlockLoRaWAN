@@ -48,14 +48,14 @@ public:
 	const char *getAlias() const { return config.alias; }
 
 	// --- Device firmware version (RUI3-compatible AT+FIRMWAREVER) ---------------------
-	/** RUI3's AT+FIRMWAREVER: a free-form, user-settable device label, persisted alongside the rest
-	 * of this library's config - unrelated to LoRaWAN/P2P operation, so no engine start is
-	 * needed either way. Matches RUI3's own documented "<string, 32char>" limit for a *set*
-	 * value: rejected (returns false, no change made) for a NULL pointer or a string longer
-	 * than 32 characters, mirroring RUI3's own AT_PARAM_ERROR for a malformed AT+FIRMWAREVER= value -
-	 * the AT layer reports that error code, this call just reports success/failure. A longer
-	 * factory-default string is still fine to read back (see WisBlockPersistedConfig::alias's
-	 * doc comment); it just can't be re-entered verbatim through this setter.
+	/** RUI3's AT+FIRMWAREVER: a free-form, user-settable device/firmware label, persisted
+	 * alongside the rest of this library's config - unrelated to LoRaWAN/P2P operation, so no
+	 * engine start is needed either way. RUI3 documents this as a "<string, 32char>" limit;
+	 * config.firmwarever is a 32-byte buffer, so the longest value this can actually hold
+	 * (leaving room for the null terminator) is 31 characters - rejected (returns false, no
+	 * change made) for a NULL pointer or anything longer than that, mirroring RUI3's own
+	 * AT_PARAM_ERROR for a malformed AT+FIRMWAREVER= value (the AT layer reports that error
+	 * code; this call just reports success/failure).
 	 */
 	bool setFirmwareVer(const char *firmwarever);
 	const char *getFirmwareVer() const { return config.firmwarever; }
@@ -103,6 +103,9 @@ public:
 	void setFetchPendingDownlinks(bool enabled) { config.lorawan.fetchPendingDownlinks = enabled; ensureLoRaWANEngineStarted(); lorawan.setFetchPendingDownlinks(enabled); }
 	bool getFetchPendingDownlinks() const { return config.lorawan.fetchPendingDownlinks; }
 
+	/** See LoRaWANEngine::join()'s doc comment - in particular, do NOT call this from an
+	 * onJoinFailed() callback when relying on AT+JOIN='s configured retry interval/max
+	 * attempts; the library already retries failed joins on its own. */
 	void join();
 	void stopJoin() { ensureLoRaWANEngineStarted(); lorawan.stopJoin(); }
 	bool isJoined() const { return lorawan.isJoined(); }

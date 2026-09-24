@@ -27,6 +27,24 @@ public:
 	void begin(const WisBlockLoRaWANSettings &settings);
 	void applySettings(const WisBlockLoRaWANSettings &settings);
 
+	/**
+	 * Starts a fresh join attempt cycle. Always resets the internal
+	 * attempt counter back to 0 (see setMaxJoinAttempts()'s doc comment) -
+	 * appropriate for an application- or user-triggered "join now", but
+	 * NOT something to call from inside the onJoinFailed() callback when
+	 * relying on AT+JOIN='s configured retry interval/max attempts: doing
+	 * so both defeats maxJoinAttempts (the counter never reaches it, since
+	 * every failure's callback resets it right back to 0) and races the
+	 * library's own scheduled retry (see handleEvents()'s
+	 * joinRetryScheduled handling), producing shorter, irregular retry
+	 * gaps instead of the configured interval. The library already
+	 * retries on its own after a failure - with the default interval/max
+	 * attempts (8s/unlimited) LBM's own auto-retry handles it; with a
+	 * configured interval/max attempts, handleEvents() schedules and
+	 * fires the next attempt itself, calling smtc_modem_join_network()
+	 * directly rather than through this method, specifically so it
+	 * doesn't reset the counter it's tracking against.
+	 */
 	void join();
 	/** RUI3's AT+JOIN=0:... ("stop joining"). See this method's implementation for what it
 	 * actually cancels - both an in-progress OTAA join and this library's own custom-interval

@@ -68,6 +68,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+STATUS                      | Dump current config + join/link status             |
 | AT+VER=?                       | RUI3-format version string (this library's own version, not RUI3 firmware) |
 | AT+ALIAS=_**16char string**_ / AT+ALIAS=?   | Get/set a free-form device label (persisted, max 16 chars) |
+| AT+FIRMWAREVER=_**31char string**_ / AT+FIRMWAREVER=? | Get/set a free-form firmware version label (persisted, max 31 chars - RUI3 documents this as 32, see `WisBlockLoRaWAN::setFirmwareVer()`'s doc comment) |
 | AT+SN=?                        | Get unique device serial number |                          
 | AT+HWMODEL=?                   | Get HW model (rak4630, rak3112, or rak11310) |
 | AT+HWID=?                      | Get MCU ID (nrf52840, esp32-s3, or rp2040) |

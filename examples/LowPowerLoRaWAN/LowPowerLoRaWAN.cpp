@@ -107,8 +107,28 @@ void onJoined()
 
 void onJoinFailed()
 {
-	Serial.println("[LoRaWAN] Join failed, retrying...");
-	lora.join();
+	// FIX: this used to unconditionally call lora.join() again here on every
+	// single failed attempt - see LoRaWANEngine::join()'s doc comment for
+	// why that's wrong now that AT+JOIN=w:x:y:z can configure a retry
+	// interval/max attempt count: join() always resets the internal attempt
+	// counter back to 0, so calling it from here meant maxJoinAttempts could
+	// never actually be reached (this callback's own join() call kept
+	// resetting it first), and it raced the library's own scheduled retry,
+	// producing shorter, irregular gaps than the configured interval instead
+	// of honoring it. The library already retries on its own after a
+	// failure - nothing to do here except react to a final give-up if
+	// desired.
+	if (lora.joinState() == WISBLOCK_JOIN_GAVE_UP)
+	{
+		Serial.println("[LoRaWAN] Join failed - reached AT+JOIN's configured max attempts, giving up");
+		// \todo application-specific recovery here - e.g. retry after a longer
+		// cooldown, fall back to a different region/channel plan, or signal
+		// the user (LED/display) that this unit needs attention.
+	}
+	else
+	{
+		Serial.println("[LoRaWAN] Join attempt failed, retrying automatically...");
+	}
 	Serial.flush();
 }
 

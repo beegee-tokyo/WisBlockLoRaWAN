@@ -145,7 +145,13 @@ bool WisBlockLoRaWAN::setAlias(const char *alias)
 
 bool WisBlockLoRaWAN::setFirmwareVer(const char *firmwarever)
 {
-	if (firmwarever == nullptr || strlen(firmwarever) > 32)
+	// FIX: was `strlen(firmwarever) > 32` - config.firmwarever is a 32-byte
+	// buffer, so a 32-character string (needing 33 bytes with its null
+	// terminator) passed this check and then got silently truncated to 31
+	// characters by the strncpy() below, despite this function reporting
+	// success. Checked against the buffer's own size instead of a magic 32
+	// literal, so it can't drift out of sync if the buffer is ever resized.
+	if (firmwarever == nullptr || strlen(firmwarever) >= sizeof(config.firmwarever))
 	{
 		return false;
 	}

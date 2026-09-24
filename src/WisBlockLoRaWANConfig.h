@@ -16,12 +16,13 @@
 #include <stddef.h> // size_t
 
 #define WISBLOCK_CONFIG_MAGIC 0x57424C52UL // "WBLR"
-// FIX: bumped for the new top-level `alias` field (AT+ALIAS getter/setter) - the CRC check
-// below would likely catch the resulting size/layout change on its own even without this,
-// but bumping the version makes the incompatibility with older saved blobs explicit and
-// intentional rather than incidental. A config saved by an older library version is safely
-// detected as invalid (falls back to factory defaults) either way - see wisblockConfigLoad().
-#define WISBLOCK_CONFIG_VERSION 2
+// FIX: bumped for the new top-level `firmwarever` field (AT+FIRMWAREVER getter/setter) -
+// previously bumped for `alias` (AT+ALIAS). The CRC check below would likely catch either
+// resulting size/layout change on its own even without this, but bumping the version makes
+// the incompatibility with older saved blobs explicit and intentional rather than incidental.
+// A config saved by an older library version is safely detected as invalid (falls back to
+// factory defaults) either way - see wisblockConfigLoad().
+#define WISBLOCK_CONFIG_VERSION 3
 
 struct WisBlockPersistedConfig
 {
@@ -41,7 +42,7 @@ struct WisBlockPersistedConfig
 	char firmwarever[32] = "WB_BM_RAK4631";
 #elif defined(ARDUINO_ARCH_ESP32)
 	char alias[32] = "WISBLOCK_BASICMODEM_RAK3312";
-	char firmwarever[32] = "WB_BM_RAK3312" ;
+	char firmwarever[32] = "WB_BM_RAK3312";
 #elif defined(ARDUINO_ARCH_RP2040)
 	char alias[32] = "WISBLOCK_BASICMODEM_RAK11310";
 	char firmwarever[32] = "WB_BM_RAK11310";

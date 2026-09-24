@@ -1723,7 +1723,7 @@ void WisBlockLoRaAT::atFirmwareVer(AtOp op, const char *value)
 	{
 		if (!lora->setFirmwareVer(value))
 		{
-			replyError("AT_PARAM_ERROR"); // NULL or longer than RUI3's 16-character limit
+			replyError("AT_PARAM_ERROR"); // NULL or longer than the 31 characters config.firmwarever can hold
 			return;
 		}
 		replyOk();

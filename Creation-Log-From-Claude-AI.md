@@ -3115,3 +3115,97 @@ now present in `atCommandTable[]` (previously absent - the reason `ATR` was unre
 ATR sequence, and whether `wisblockConfigSaveFactory()`'s write to the new "wb_factory" key
 succeeds reliably on a real RAK4631, given the separate, still-open flash-write-reliability
 question noted above.
+
+## 2026-09-24 - AT+FIRMWAREVER API completed (off-by-one fix); AT+JOIN=w:x:y:z root cause found and fixed (example sketch, not the library); flash filesystem corruption noted as resolved by chip erase
+
+### Scope
+
+Three items from the same session, the first two are real fixes, the third is a status note
+with nothing further to do on this library's side right now:
+
+1. **AT+FIRMWAREVER get/set API, completed.** The AT command handler (`atFirmwareVer()`),
+   its table registration, `WisBlockLoRaWAN::setFirmwareVer()`/`getFirmwareVer()`, and the new
+   `WisBlockPersistedConfig::firmwarever` field had all already been added (by the user)
+   before this session - "no API calls yet added" turned out to already be mostly done, minus
+   one real bug: `setFirmwareVer()` checked `strlen(firmwarever) > 32`, but
+   `config.firmwarever` is a 32-byte buffer, so a 32-character string (needing 33 bytes with
+   its null terminator) passed that check and then got silently truncated to 31 characters by
+   the `strncpy()` right after it - while the function still reported success. Fixed to check
+   against `sizeof(config.firmwarever)` directly rather than a magic `32` literal, so it can't
+   drift out of sync with the buffer again. Also: `WISBLOCK_CONFIG_VERSION` bumped 2 -> 3 for
+   the new `firmwarever` field (struct layout changed - same reasoning already documented at
+   that `#define`, previously bumped for `alias`); a copy-pasted stale comment
+   (`// NULL or longer than RUI3's 16-character limit`, left over from `atAlias()`) corrected
+   on the `atFirmwareVer()` call site specifically; a stray space before a semicolon in the
+   ESP32 default-value line removed; README's AT command table given a row for
+   `AT+FIRMWAREVER`, which was missing one entirely.
+
+2. **AT+JOIN=w:x:y:z's actual bug, found via join-fail-log.txt.** Both reported symptoms - (a)
+   `getAutoJoin()` reads back `false`, (b) more than the configured 3 join attempts happen,
+   with gaps shorter than the configured 30s - trace to the **same** root cause, and it's in
+   the example sketch (`examples/LowPowerLoRaWAN/LowPowerLoRaWAN.cpp`'s `onJoinFailed()`), not
+   the library: that callback unconditionally called `lora.join()` again on every single
+   failed attempt. `LoRaWANEngine::join()` always resets the internal attempt counter back to
+   0 (by design - a fresh, explicitly-requested join cycle should start counting over) - so
+   calling it from inside the failure callback meant `joinAttemptCount` could never reach
+   `maxJoinAttempts`, because the callback's own `join()` call reset it back to 0 immediately
+   after every increment. It also raced the library's own internally-scheduled retry
+   (`nextJoinRetryAtMs`/`joinRetryScheduled` in `LoRaWANEngine::handleEvents()`, which calls
+   `smtc_modem_join_network()` directly rather than through `join()` for exactly this reason -
+   so it doesn't reset the counter it's tracking), producing the shorter, irregular gaps
+   (14-34s, not a clean 30s) visible in the attached log. The library's own retry/max-attempts
+   mechanism (see `LoRaWANEngine::setAutoJoin()`'s doc comment) was already correctly
+   implemented and already documented "check `joinState()` for `WISBLOCK_JOIN_GAVE_UP` inside
+   this callback rather than calling `join()` again" - the example just wasn't following its
+   own library's documented contract. Fixed the example to do exactly that instead. Also added
+   doc-comment warnings directly on `LoRaWANEngine::join()` and its `WisBlockLoRaWAN::join()`
+   wrapper (the two places someone would naturally look) pointing at this trap, so the next
+   person doesn't rediscover it the same way.
+
+   Re: symptom (a) specifically (`getAutoJoin()` returning `false`) - grepped every write site
+   of `autoJoin` in the library; the only ones are the explicit setter and the struct's own
+   `= false` default member initializer, nothing resets it silently. The attached log's own
+   `AT+JOIN=?` query response (`AT+JOIN=1:1:30:3`) already shows it reading back `1` (true) at
+   that point in the log, so no separate bug found for (a) - likely observed at a point in the
+   boot sequence before the app's own `AT+JOIN=`/`setAutoJoin(true)` call had run yet (the
+   example's own `setup()` has a `if (!lora.getAutoJoin()) { lora.setAutoJoin(true); ... }`
+   block, so seeing `false` immediately beforehand would be the expected, correct value on a
+   boot where that block hasn't executed yet). Flagged as unresolved/unverified rather than
+   claiming it's fixed - if it still reproduces after retesting with the `onJoinFailed()` fix
+   above, it needs its own follow-up with the exact point in the boot sequence it's checked at.
+
+3. **Flash filesystem corruption**, from the still-open flash-write-reliability question in
+   earlier sessions - confirmed resolved for that specific test module by a full chip erase;
+   reproduced on the original module, not on a different one. Consistent with actual on-chip
+   LittleFS corruption (bad/worn blocks, or a partition left in a bad state by an earlier
+   experiment) rather than a logic bug in `WisBlockLoRaFlash`'s read/write code - nothing to
+   change in this library for this specific case. The debug instrumentation added directly in
+   `WisBlockLoRaFlash.cpp`'s `read()`/`write()` during that investigation is left in place
+   (unconditional, not gated behind a macro) in case it's still wanted for future test modules
+   that exhibit the same symptom.
+
+### Files changed
+
+`src/WisBlockLoRaWAN.cpp` (`setFirmwareVer()`), `src/WisBlockLoRaWAN.h` (`setFirmwareVer()`'s
+doc comment, `join()`'s new doc comment), `src/LoRaWANEngine.h` (`join()`'s new doc comment),
+`src/WisBlockLoRaAT.cpp` (`atFirmwareVer()`'s error-reason comment), `src/WisBlockLoRaWANConfig.h`
+(`WISBLOCK_CONFIG_VERSION` bump + comment, stray-space cleanup), `README.md` (new
+`AT+FIRMWAREVER` row), `examples/LowPowerLoRaWAN/LowPowerLoRaWAN.cpp` (`onJoinFailed()`
+rewritten).
+
+### Verification
+
+`g++ -fsyntax-only -std=c++17 -Wall`, separately, against: `WisBlockLoRaWANConfig.cpp` (real
+`WisBlockLoRaWANTypes.h`, a hand-written `WisBlockLoRaFlash.h`-shaped stub) after the version
+bump; `WisBlockLoRaAT.cpp` (hand-written `WisBlockLoRaWAN.h` API stub, extended with
+`setFirmwareVer()`/`getFirmwareVer()` and a `firmwarever[32]` field) - zero errors on both.
+Brace/paren-balance-checked every file touched; the one file with an imbalanced paren count
+(`LoRaWANEngine.h`, comments only) was confirmed pre-existing (present before this session's
+edits too, by the same delta this session's own addition accounts for) rather than introduced
+here. Grepped for the stale "16-character limit" comment text to confirm only the intended
+`atFirmwareVer()` occurrence was changed, `atAlias()`'s own (correct) occurrence left alone.
+
+**Not done**: not tested against real hardware - in particular, whether `AT+JOIN=1:1:30:3`
+now actually stops at 3 attempts with a genuine ~30s gap once the example's `onJoinFailed()`
+fix is flashed, and whether symptom (a) (`getAutoJoin()` reading `false`) still reproduces at
+all once retested.
