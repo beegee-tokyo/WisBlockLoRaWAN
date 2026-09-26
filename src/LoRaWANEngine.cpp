@@ -1,9 +1,10 @@
 #include "LoRaWANEngine.h"
-#include "LoRaWANRelay.h"
+#include <Arduino.h> // millis() - used for the custom join-reattempt-interval timer
 #include <string.h>
 
 #include "smtc_modem_api.h"	  // vendored: src/lbm/smtc_modem_api/smtc_modem_api.h
 #include "smtc_modem_utilities.h" // vendored: smtc_modem_run_engine(), smtc_modem_init()
+#include "lorawan_api.h"	  // vendored: src/lbm/smtc_modem_core/lorawan_api/lorawan_api.h - lorawan_api_next_dr_get()
 
 namespace
 {
@@ -29,17 +30,40 @@ void onModemEventNotify(void)
 {
 }
 
-// Builds a dr_custom_distribution_data table (SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH
-// = 16 bytes, one weight per possible DR index) with all weight on a single
-// DR - this is the only way v4.9.0 lets you pin a specific data rate when
-// ADR is off; see smtc_modem_adr_set_profile()'s doc comment in
-// smtc_modem_api.h for the "custom data" semantics.
+// FIX (root cause of a persistent, 100%-reproducible bug: setADR(false)
+// with a fixed DR failing every single time with LBM's own
+// "ADR with a bad DataRate value" trace, confirmed by tracing the actual
+// failure into smtc_modem_custom_dr_distribution_to_tab() in the vendored
+// smtc_modem.c): dr_custom_distribution_data is NOT a one-hot table
+// indexed by DR (weight at index N meaning "use DR N") - it's a flat list
+// of SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH (16) literal DR *values*, one per
+// retry-attempt slot, and LBM validates/counts each slot's value directly
+// against the current channel mask (each entry must itself be a
+// currently-allowed DR, not an index into anything). The old
+// implementation here did exactly the one-hot thing the array's name
+// invites you to assume: out[dataRate] = 1, leaving the other 15 of 16
+// slots at value 0 - meaning "15 of 16 attempts should use DR0, 1 attempt
+// should use DR1" was being requested, regardless of what dataRate the
+// caller actually wanted. On any region where dwell time or the channel
+// mask excludes DR0/DR1 (AS923's dwell-time floor is DR2 - see
+// MIN_TX_DR_LIMIT_AS_923 in region_as_923_defs.h), *every* slot fails
+// LBM's validation and the call is rejected outright with
+// SMTC_MODEM_RC_INVALID - independent of the requested DR, independent of
+// the channel mask ever widening, which is why retrying after every
+// uplink (see applyAdrProfile()'s caller in handleEvents()) never helped:
+// there was nothing time-dependent to wait out.
+//
+// Fixed by filling every slot with the literal requested DR value, which
+// is what correctly expresses "always use this DR" to LBM's own
+// validation and runtime selection logic (smtc_real_get_next_tx_dr() in
+// smtc_real.c counts occurrences per DR value across surviving slots to
+// build its actual weighted-random selection table - see
+// Creation-Log-From-Claude-AI.md's note on this for the full trace).
 void buildSingleDrDistribution(uint8_t dataRate, uint8_t out[SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH])
 {
-	memset(out, 0, SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH);
-	if (dataRate < SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH)
+	for (size_t i = 0; i < SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH; i++)
 	{
-		out[dataRate] = 1;
+		out[i] = dataRate;
 	}
 }
 // Explicit WisBlockRegion -> smtc_modem_region_t mapping. NOT a direct cast
@@ -89,12 +113,187 @@ smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 		return SMTC_MODEM_REGION_EU_868;
 	}
 }
+
+// FIX: WisBlockTxResult::airtimeMs has been reporting a hardcoded 0 for
+// every LoRaWAN uplink since onLoRaWANTxFinished()'s TXDONE handler was
+// first written - SMTC_MODEM_EVENT_TXDONE's own event data carries only a
+// status enum (smtc_modem_api.h), no airtime figure, so nothing was ever
+// filling this field in. Computed here instead using the standard LoRa
+// airtime formula (Semtech AN1200.13 - the same one LoRaP2PEngine's
+// computeAirtimeMs() already uses and this project's own hardware traces
+// have confirmed accurate: predicted 102.9ms vs measured 103ms toa for a
+// real SF8/BW125/22-byte PHY frame from a device log captured earlier in
+// this project).
+//
+// Maps a LoRaWAN data rate index to SF/BW for regions with a verified,
+// stable Regional Parameters DR table. Returns false (no computation) for
+// FSK data rates (not a LoRa airtime formula at all) and for US915/AU915's
+// DR8-13 500kHz-channel range and DR5-7 RFU range - less commonly hit by
+// a device's own uplinks, and this project has no hardware trace to
+// verify those specific entries against the way the EU-like table above
+// was verified, so airtimeMs is left at 0 there rather than reporting an
+// unverified number as if it were confirmed.
+bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
+{
+	switch (region)
+	{
+	case WISBLOCK_REGION_EU868:
+	case WISBLOCK_REGION_AS923_1:
+	case WISBLOCK_REGION_AS923_2:
+	case WISBLOCK_REGION_AS923_3:
+	case WISBLOCK_REGION_AS923_4:
+	case WISBLOCK_REGION_RU864:
+		// DR0-DR5 identical across every one of these regions; DR6
+		// (SF7/BW250) is also defined for this specific group. DR7 is FSK.
+		switch (dr)
+		{
+		case 0:
+			sf = 12;
+			bwHz = 125000;
+			return true;
+		case 1:
+			sf = 11;
+			bwHz = 125000;
+			return true;
+		case 2:
+			sf = 10;
+			bwHz = 125000;
+			return true;
+		case 3:
+			sf = 9;
+			bwHz = 125000;
+			return true;
+		case 4:
+			sf = 8;
+			bwHz = 125000;
+			return true;
+		case 5:
+			sf = 7;
+			bwHz = 125000;
+			return true;
+		case 6:
+			sf = 7;
+			bwHz = 250000;
+			return true;
+		default:
+			return false; // DR7 = FSK
+		}
+	case WISBLOCK_REGION_IN865:
+	case WISBLOCK_REGION_KR920:
+	case WISBLOCK_REGION_CN470:
+	case WISBLOCK_REGION_CN470_RP_1_0:
+		// Same DR0-DR5 SF/BW pairs as the group above, but these regions
+		// don't define DR6 (SF7/BW250) the same way - IN865's DR7 is FSK,
+		// KR920/CN470 stop at DR5. Treat anything above DR5 as
+		// unimplemented here rather than guess.
+		switch (dr)
+		{
+		case 0:
+			sf = 12;
+			bwHz = 125000;
+			return true;
+		case 1:
+			sf = 11;
+			bwHz = 125000;
+			return true;
+		case 2:
+			sf = 10;
+			bwHz = 125000;
+			return true;
+		case 3:
+			sf = 9;
+			bwHz = 125000;
+			return true;
+		case 4:
+			sf = 8;
+			bwHz = 125000;
+			return true;
+		case 5:
+			sf = 7;
+			bwHz = 125000;
+			return true;
+		default:
+			return false;
+		}
+	case WISBLOCK_REGION_US915:
+	case WISBLOCK_REGION_AU915:
+		// 125kHz uplink sub-band only (DR0-DR4) - the far more commonly
+		// used range for a device's own uplinks. DR5-7 (RFU) and DR8-13
+		// (500kHz channels) intentionally not implemented - see this
+		// function's own doc comment above.
+		switch (dr)
+		{
+		case 0:
+			sf = 10;
+			bwHz = 125000;
+			return true;
+		case 1:
+			sf = 9;
+			bwHz = 125000;
+			return true;
+		case 2:
+			sf = 8;
+			bwHz = 125000;
+			return true;
+		case 3:
+			sf = 7;
+			bwHz = 125000;
+			return true;
+		case 4:
+			sf = 8;
+			bwHz = 500000;
+			return true;
+		default:
+			return false;
+		}
+	default:
+		return false;
+	}
+}
+
+uint32_t computeLoRaWANAirtimeMs(WisBlockRegion region, uint8_t dr, uint8_t phyPayloadLen)
+{
+	uint8_t sf;
+	uint32_t bwHz;
+	if (!drToSfBw(region, dr, sf, bwHz))
+	{
+		return 0; // FSK, or a region/DR combination not implemented above
+	}
+
+	double tSymMs = (double)(1u << sf) / (double)bwHz * 1000.0;
+	// Low data rate optimization - same 16ms symbol-duration threshold
+	// LoRaP2PEngine::computeLdro() already uses for P2P.
+	uint8_t de = (tSymMs > 16.0) ? 1 : 0;
+
+	constexpr uint8_t kPreambleSymbols = 8; // fixed by the LoRaWAN Regional Parameters spec
+	constexpr uint8_t kCodingRate = 1;		 // 4/5 - the only CR LoRaWAN uses
+	constexpr uint8_t kCrcOn = 1;			 // uplinks always have CRC on
+	constexpr uint8_t kExplicitHeader = 0;	 // LoRaWAN always uses explicit header (H=0 in the formula's own convention)
+
+	double tPreambleMs = (kPreambleSymbols + 4.25) * tSymMs;
+
+	int32_t numerator = 8 * (int32_t)phyPayloadLen - 4 * sf + 28 + 16 * kCrcOn - 20 * kExplicitHeader;
+	int32_t denominator = 4 * (sf - 2 * de);
+	int32_t payloadSymbNb = 8;
+	if (numerator > 0)
+	{
+		payloadSymbNb += ((numerator + denominator - 1) / denominator) * (kCodingRate + 4); // ceil division
+	}
+
+	double tPayloadMs = payloadSymbNb * tSymMs;
+	return (uint32_t)(tPreambleMs + tPayloadMs + 0.5);
+}
 } // namespace
 
 void LoRaWANEngine::begin(const WisBlockLoRaWANSettings &initial)
 {
 	currentJoinState = WISBLOCK_JOIN_IDLE;
 	uplinkPending = false; // fresh smtc_modem_init() below has nothing queued
+	// FIX: see setDeviceClass()'s doc comment - a fresh smtc_modem_init()
+	// always comes up in Class A regardless of what applySettings() (below)
+	// is about to (unsuccessfully, pre-join) ask for, so this always needs
+	// re-applying once the device actually joins.
+	classProfileApplied = false;
 
 	if (!lbmInitialized)
 	{
@@ -104,7 +303,7 @@ void LoRaWANEngine::begin(const WisBlockLoRaWANSettings &initial)
 
 	// Delegates the rest to applySettings() rather than duplicating it here
 	// - see applySettings()'s own doc comment for why it needs to push
-	// region/OTAA credentials too, not just device class/ADR/relay.
+	// region/OTAA credentials too, not just device class/ADR.
 	applySettings(initial);
 }
 
@@ -112,7 +311,7 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 {
 	settings = newSettings;
 
-	// FIX: this used to only touch device class/ADR/relay - region and
+	// FIX: this used to only touch device class/ADR - region and
 	// OTAA credentials were pushed to LBM exactly once, from begin(), and
 	// never again. That's harmless as long as begin() happens to run after
 	// setRegion()/setOTAAKeys() already populated the settings it's
@@ -126,7 +325,7 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// library ships actually uses. On a device with a previously-saved
 	// config already on flash this goes unnoticed, since the reloaded
 	// values already match what the sketch would set anyway - but on a
-	// genuinely first boot, or right after factoryReset(), begin() would
+	// genuinely first boot, or right after restoreFactoryDefaults(), begin() would
 	// push whatever blank/default region and all-zero keys the settings
 	// struct starts with, and the *later* setRegion()/setOTAAKeys() calls
 	// would silently never reach LBM at all, right up until the next
@@ -134,6 +333,16 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// Pushing them here too, every time settings are (re)applied, closes
 	// that gap regardless of call order.
 	smtc_modem_set_region(kStackId, toSmtcModemRegion(settings.region));
+	// FIX: must be pushed before join(), not after like setDeviceClass()/setADR() -
+	// this is exactly the point (see setChannelMask()'s doc comment): picking the
+	// sub-band the join request itself will use, not reconfiguring after the fact.
+	// lorawan_api_set_channel_mask() itself is a no-op on regions that don't need
+	// this (EU868, AS923, ...), so it's safe to always call unconditionally here.
+	lorawan_api_set_channel_mask(kStackId, settings.channelMask);
+	// See WisBlockLoRaWANSettings::pingSlotPeriodicity's doc comment - harmless for Class A/C,
+	// and this way it's already correct the moment an application does switch to Class B.
+	smtc_modem_class_b_set_ping_slot_periodicity(
+		kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)settings.pingSlotPeriodicity);
 	if (settings.joinMode == WISBLOCK_JOIN_OTAA)
 	{
 		smtc_modem_set_deveui(kStackId, settings.otaa.devEui);
@@ -147,14 +356,16 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 
 	setDeviceClass(settings.deviceClass);
 	applyAdrProfile();
-	LoRaWANRelay::configureED(settings.relayEDConfig);
-	LoRaWANRelay::configureServing(settings.relayServingConfig);
-	setRelayMode(settings.relayMode);
 }
 
 void LoRaWANEngine::join()
 {
 	currentJoinState = WISBLOCK_JOIN_IN_PROGRESS;
+	// FIX: see setMaxJoinAttempts()'s doc comment - a fresh join cycle (this call), whether
+	// application- or auto-triggered, always starts the attempt count over; only the internal
+	// retry path in handleEvents() continues counting within the same cycle.
+	joinAttemptCount = 0;
+	joinRetryScheduled = false;
 
 	if (settings.joinMode == WISBLOCK_JOIN_OTAA)
 	{
@@ -176,6 +387,15 @@ void LoRaWANEngine::join()
 		if (rc == SMTC_MODEM_RC_OK)
 		{
 			currentJoinState = WISBLOCK_JOIN_SUCCEEDED;
+			// FIX: see setDeviceClass()'s doc comment - smtc_modem_set_class()
+			// requires JOINED status, which (unlike OTAA) is already true by
+			// the time this synchronous call returns, so this is the right
+			// place to retry it for the ABP path rather than waiting for an
+			// SMTC_MODEM_EVENT_JOINED that ABP never actually raises.
+			if (!classProfileApplied)
+			{
+				setDeviceClass(settings.deviceClass);
+			}
 			if (joinSuccessCb)
 			{
 				joinSuccessCb();
@@ -192,6 +412,16 @@ void LoRaWANEngine::join()
 	}
 }
 
+void LoRaWANEngine::stopJoin()
+{
+	// RUI3's AT+JOIN=0:... ("stop joining"). smtc_modem_leave_network() itself: "Leave an
+	// already joined network or cancels an ongoing join process" - covers both an in-progress
+	// join and this library's own custom-interval retry timer (cleared below) in one call.
+	smtc_modem_leave_network(kStackId);
+	joinRetryScheduled = false;
+	currentJoinState = WISBLOCK_JOIN_IDLE;
+}
+
 bool LoRaWANEngine::isJoined() const
 {
 	smtc_modem_status_mask_t status = 0;
@@ -206,21 +436,76 @@ WisBlockJoinState LoRaWANEngine::joinState() const
 
 bool LoRaWANEngine::send(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed)
 {
-	if (!isJoined() || data == nullptr || length == 0)
+	if (!isJoined())
 	{
 		return false;
 	}
+	// FIX (reported directly: "Can't send manually on fPort 0 an empty
+	// packet. It throws an error" - a workaround attempt for exactly the
+	// FPending-drain issue above, needed when fetchPendingDownlinks is
+	// disabled, or just wanted for manual control). A 0-length uplink is a
+	// legitimate LoRaWAN operation - it's exactly what this library's own
+	// auto-fetch sends - so length == 0 is no longer rejected here. A NULL
+	// data pointer is still rejected when length > 0 (a real payload was
+	// promised but not provided), but is allowed - and substituted with a
+	// real, unused buffer internally, since smtc_modem_request_uplink()
+	// itself rejects a literal NULL even at length 0 - when length == 0,
+	// so callers can simply pass nullptr for an empty uplink rather than
+	// needing to keep a dummy buffer of their own around.
+	//
+	// FPort 0 is a separate, unavoidable restriction, not something this
+	// library imposes: LoRaWAN reserves it for MAC-only frames, and
+	// smtc_modem_send_tx() itself refuses application uplinks on it - this
+	// still fails, correctly, for FPort 0 regardless of length. Use any
+	// other valid FPort (e.g. the same one the application normally sends
+	// on) for a manual empty "fetch the next pending downlink" uplink.
+	if (length > 0 && data == nullptr)
+	{
+		return false;
+	}
+	static const uint8_t kEmptyPayload[1] = {0};
+	if (length == 0)
+	{
+		data = kEmptyPayload;
+	}
 	if (uplinkPending)
 	{
-		// FIX: previously fell through to smtc_modem_request_uplink()
-		// unconditionally here, which LBM happily accepts even with a
-		// send already queued - it just silently discards whichever one
-		// was still pending. Refusing immediately, before ever calling
-		// into LBM, means the caller's false return value now actually
-		// means something actionable ("try again next cycle") instead of
-		// this always returning true right up until the eventual
-		// TXDONE_NOT_SENT arrives several seconds later - and no frame
-		// counter gets burned on an uplink that was never going anywhere.
+		// FIX: see deferredSend's doc comment in LoRaWANEngine.h. Regardless
+		// of *why* the slot is currently occupied - this library's own
+		// FPending auto-fetch, a real application send already in flight,
+		// or an earlier deferred send that's only just now being replayed -
+		// defer this one instead of refusing it outright, as long as
+		// nothing is already waiting in the single deferred slot. It will
+		// actually be transmitted the moment whatever's currently in flight
+		// finishes (see the SMTC_MODEM_EVENT_TXDONE case below), however
+		// many further duty-cycle-limited hops that takes.
+		//
+		// CORRECTION: this used to only defer when the in-flight uplink was
+		// specifically the auto-fetch (autoFetchUplinkPending), on the
+		// theory that two genuine application sends racing each other
+		// should keep failing as before. In practice, on a duty-cycle- or
+		// LBT-constrained region, a single auto-fetch/deferral can itself
+		// take long enough to actually transmit that the application's
+		// *next* regularly-scheduled send lands before it's done too -
+		// confirmed against a real device log where the first collision
+		// deferred correctly, but the application's following send then hit
+		// the old, narrower check (the thing in flight by then was the
+		// *replayed* application send, not the auto-fetch) and was refused
+		// again. Deferring unconditionally here - still only ever one level
+		// deep - closes that gap instead of just moving it one uplink later.
+		if (!deferredSend.valid)
+		{
+			deferredSend.port = port;
+			deferredSend.length = length > sizeof(deferredSend.data) ? sizeof(deferredSend.data) : length;
+			memcpy(deferredSend.data, data, deferredSend.length);
+			deferredSend.confirmed = confirmed;
+			deferredSend.valid = true;
+			return true;
+		}
+		// A second send() arriving before the first deferred one has even
+		// gone out yet - still refused, same as it always was for two
+		// genuine application sends racing each other. This remains a
+		// single deferred slot, not a general uplink queue.
 		return false;
 	}
 
@@ -237,23 +522,146 @@ bool LoRaWANEngine::send(uint8_t port, const uint8_t *data, uint8_t length, bool
 		}
 	}
 
+	return dispatchUplink(port, data, length, confirmed);
+}
+
+bool LoRaWANEngine::dispatchUplink(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed)
+{
 	smtc_modem_return_code_t rc = smtc_modem_request_uplink(kStackId, port, confirmed, data, length);
 	if (rc == SMTC_MODEM_RC_OK)
 	{
 		uplinkPending = true;
+		// FIX: see computeLoRaWANAirtimeMs()'s doc comment above - captured
+		// here, right after this specific uplink was accepted, since the
+		// active DR can legitimately differ between one uplink and the
+		// next (ADR, LinkADRReq, retries). "next" in LBM's own naming
+		// means "the DR about to be used for the upcoming transmission" -
+		// exactly this one. phyPayloadLen is an estimate, not exact:
+		// application length plus the standard 13-byte MHDR+FHDR+FPort+MIC
+		// overhead, assuming no MAC commands happen to be piggybacked in
+		// FOpts on this specific frame (that length isn't knowable from
+		// here) - close enough for an informational airtime figure, not
+		// meant to be byte-perfect.
+		lastTxDr = lorawan_api_next_dr_get(kStackId);
+		uint32_t phyLen = (uint32_t)length + 13;
+		lastTxPhyPayloadLen = (phyLen > 255) ? 255 : (uint8_t)phyLen;
 		return true;
 	}
 	return false;
 }
 
-void LoRaWANEngine::setDeviceClass(WisBlockDeviceClass deviceClass)
+// FIX (root cause of the Class B/C bug where the device visibly requests a
+// class switch but keeps behaving like Class A forever - RX1/RX2 opening
+// with a timeout and closing again after every uplink, with no continuous
+// RXC/ping-slot window ever appearing in between, confirmed against a real
+// device trace): smtc_modem_set_class() (vendored in smtc_modem.c) checks
+// SMTC_MODEM_STATUS_JOINED first and returns SMTC_MODEM_RC_FAIL outright,
+// with the class left unchanged, if the device isn't joined yet - the exact
+// same "must be joined" gate smtc_modem_adr_set_profile() has (see
+// setADR()'s doc comment). setDeviceClass() is called from applySettings(),
+// which runs from begin() - i.e. before join() is ever called - so this
+// call was *guaranteed* to fail every single time on a fresh boot,
+// regardless of which class was actually requested. Unlike the ADR path,
+// this return code used to be discarded entirely, so the failure was
+// completely silent: no trace, no retry, nothing - the device just quietly
+// stayed on Class A no matter what the application asked for.
+// Fixed the same way as setADR(): the return code is now checked and
+// remembered (classProfileApplied), and the request is retried once the
+// device is actually joined - from the SMTC_MODEM_EVENT_JOINED handler and
+// the synchronous ABP-success path in join() - with a TXDONE-time fallback
+// retry mirroring applyAdrProfile()'s, in case that first retry somehow
+// still didn't land.
+bool LoRaWANEngine::setDeviceClass(WisBlockDeviceClass deviceClass)
 {
 	settings.deviceClass = deviceClass;
-	smtc_modem_set_class(kStackId, (smtc_modem_class_t)deviceClass);
+	smtc_modem_return_code_t rc = smtc_modem_set_class(kStackId, (smtc_modem_class_t)deviceClass);
+	classProfileApplied = (rc == SMTC_MODEM_RC_OK);
 	// Class B additionally requires a ping slot periodicity request; see
 	// smtc_modem_class_b_set_ping_slot_periodicity() in smtc_modem_api.h
 	// and the SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO mac request - not
 	// wired up here yet since it needs an app-chosen periodicity value.
+	return classProfileApplied;
+}
+
+bool LoRaWANEngine::setChannelMask(uint16_t mask)
+{
+	settings.channelMask = mask;
+	// Effective immediately (no joined-state gate, unlike setDeviceClass()/setADR() -
+	// see this method's doc comment in LoRaWANEngine.h). lorawan_api_set_channel_mask()
+	// itself has no failure return - it's a no-op on regions that don't support
+	// sub-band selection, matching AT+MASK's documented region scoping - so this
+	// always reports success; getChannelMask() reads back what's actually taken effect.
+	lorawan_api_set_channel_mask(kStackId, mask);
+	return true;
+}
+
+uint16_t LoRaWANEngine::getChannelMask() const
+{
+	return lorawan_api_get_channel_mask(kStackId);
+}
+
+bool LoRaWANEngine::setLbtEnabled(bool enabled)
+{
+	return smtc_modem_lbt_set_state(kStackId, enabled) == SMTC_MODEM_RC_OK;
+}
+
+bool LoRaWANEngine::getLbtEnabled() const
+{
+	bool enabled = false;
+	smtc_modem_lbt_get_state(kStackId, &enabled);
+	return enabled;
+}
+
+bool LoRaWANEngine::setLbtThreshold(int16_t thresholdDbm)
+{
+	// See this method's doc comment in LoRaWANEngine.h - threshold and scan time share one
+	// underlying smtc_modem_lbt_set_parameters() call (which also carries an RSSI measurement
+	// bandwidth this library doesn't expose), so the current duration/bandwidth are read back
+	// first rather than risking clobbering either with a stale cached value.
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t currentThresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &currentThresholdDbm, &bwHz);
+	return smtc_modem_lbt_set_parameters(kStackId, durationMs, thresholdDbm, bwHz) == SMTC_MODEM_RC_OK;
+}
+
+int16_t LoRaWANEngine::getLbtThreshold() const
+{
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &thresholdDbm, &bwHz);
+	return thresholdDbm;
+}
+
+bool LoRaWANEngine::setLbtScanTime(uint32_t scanTimeMs)
+{
+	uint32_t currentDurationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &currentDurationMs, &thresholdDbm, &bwHz);
+	return smtc_modem_lbt_set_parameters(kStackId, scanTimeMs, thresholdDbm, bwHz) == SMTC_MODEM_RC_OK;
+}
+
+uint32_t LoRaWANEngine::getLbtScanTime() const
+{
+	uint32_t durationMs = 0;
+	uint32_t bwHz = 0;
+	int16_t thresholdDbm = 0;
+	smtc_modem_lbt_get_parameters(kStackId, &durationMs, &thresholdDbm, &bwHz);
+	return durationMs;
+}
+
+void LoRaWANEngine::setJoinReattemptInterval(uint8_t seconds)
+{
+	// RUI3's own AT+JOIN documents this same 7-255s range; clamped rather than rejected,
+	// matching setTxPower()/similar setters elsewhere in this file that take "closest valid
+	// value" over an outright failure for a simple numeric range.
+	if (seconds < 7)
+	{
+		seconds = 7;
+	}
+	settings.joinReattemptIntervalS = seconds;
 }
 
 bool LoRaWANEngine::setADR(bool enabled)
@@ -339,30 +747,146 @@ void LoRaWANEngine::requestDeviceTime()
 	smtc_modem_trig_lorawan_mac_request(kStackId, SMTC_MODEM_LORAWAN_MAC_REQ_DEVICE_TIME);
 }
 
-void LoRaWANEngine::setRelayMode(WisBlockRelayMode mode)
+bool LoRaWANEngine::setPingSlotPeriodicity(uint8_t periodicity)
 {
-	settings.relayMode = mode;
-	LoRaWANRelay::configure(mode);
+	if (periodicity > 7)
+	{
+		periodicity = 7;
+	}
+	settings.pingSlotPeriodicity = periodicity;
+	bool ok = smtc_modem_class_b_set_ping_slot_periodicity(
+				  kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)periodicity) == SMTC_MODEM_RC_OK;
+	// See this method's doc comment in LoRaWANEngine.h - the network needs to be told about
+	// this too, not just this device's own local scheduling.
+	smtc_modem_trig_lorawan_mac_request(kStackId, SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO);
+	return ok;
 }
 
-void LoRaWANEngine::configureRelayED(const WisBlockRelayEDConfig &cfg)
+uint8_t LoRaWANEngine::getPingSlotPeriodicity() const
 {
-	LoRaWANRelay::configureED(cfg);
+	smtc_modem_class_b_ping_slot_periodicity_t periodicity = SMTC_MODEM_CLASS_B_PINGSLOT_1_S;
+	smtc_modem_class_b_get_ping_slot_periodicity(kStackId, &periodicity);
+	return (uint8_t)periodicity;
 }
 
-void LoRaWANEngine::configureRelayServing(const WisBlockRelayServingConfig &cfg)
+bool LoRaWANEngine::getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const
 {
-	LoRaWANRelay::configureServing(cfg);
+	uint32_t epochTimeS = lorawan_api_get_beacon_epoch_time(kStackId);
+	dr = lorawan_api_get_beacon_dr(kStackId);
+	frequencyHz = lorawan_api_get_beacon_frequency(kStackId, epochTimeS);
+	return epochTimeS != 0;
 }
 
-bool LoRaWANEngine::addRelayTrustedDevice(const WisBlockRelayTrustedDevice &device)
+uint32_t LoRaWANEngine::getBeaconTime() const
 {
-	return LoRaWANRelay::addTrustedDevice(device);
+	return lorawan_api_get_beacon_epoch_time(kStackId);
 }
 
-bool LoRaWANEngine::removeRelayTrustedDevice(uint8_t index)
+uint32_t LoRaWANEngine::getDevAddr() const
 {
-	return LoRaWANRelay::removeTrustedDevice(index);
+	// See this method's doc comment in the header for why only DevAddr (not
+	// NwkSKey/AppSKey) has a live getter at all. lorawan_api_devaddr_get()
+	// reflects whatever's actually active in the stack right now - correct
+	// for ABP too (its DevAddr is set into the stack via
+	// smtc_modem_debug_connect_with_abp() at connect time - see begin()) -
+	// but only once actually joined/connected; before that it'd return
+	// stale/zeroed internal state rather than "not assigned yet".
+	return isJoined() ? lorawan_api_devaddr_get(kStackId) : settings.abp.devAddr;
+}
+
+bool LoRaWANEngine::setMulticastGroup(uint8_t groupId, WisBlockDeviceClass deviceClass, uint32_t devAddr,
+									   const uint8_t nwkSKey[16], const uint8_t appSKey[16], uint32_t frequencyHz,
+									   uint8_t dataRate, uint8_t periodicity)
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT ||
+		(deviceClass != WISBLOCK_CLASS_B && deviceClass != WISBLOCK_CLASS_C) || nwkSKey == nullptr ||
+		appSKey == nullptr)
+	{
+		return false;
+	}
+
+	if (smtc_modem_multicast_set_grp_config(kStackId, (smtc_modem_mc_grp_id_t)groupId, devAddr, nwkSKey, appSKey) !=
+		SMTC_MODEM_RC_OK)
+	{
+		return false;
+	}
+
+	// Configuring the group and starting its RX session are two separate LBM
+	// calls (smtc_modem_multicast_set_grp_config() above just stores the
+	// keys/address - see this method's doc comment for why both happen
+	// together here, matching RUI3's own single-command AT+ADDMULC). This
+	// second call is what actually requires the device to already be in the
+	// matching class - see SMTC_MODEM_RC_FAIL's "modem is not in class
+	// B/C" case in smtc_modem_api.h.
+	smtc_modem_return_code_t sessionRc;
+	if (deviceClass == WISBLOCK_CLASS_C)
+	{
+		sessionRc = smtc_modem_multicast_class_c_start_session(kStackId, (smtc_modem_mc_grp_id_t)groupId, frequencyHz,
+																 dataRate);
+	}
+	else
+	{
+		sessionRc = smtc_modem_multicast_class_b_start_session(
+			kStackId, (smtc_modem_mc_grp_id_t)groupId, frequencyHz, dataRate,
+			(smtc_modem_class_b_ping_slot_periodicity_t)periodicity);
+	}
+	if (sessionRc != SMTC_MODEM_RC_OK)
+	{
+		return false;
+	}
+
+	WisBlockMulticastGroup &g = multicastGroups[groupId];
+	g.configured = true;
+	g.deviceClass = deviceClass;
+	g.devAddr = devAddr;
+	memcpy(g.nwkSKey, nwkSKey, 16);
+	memcpy(g.appSKey, appSKey, 16);
+	g.frequencyHz = frequencyHz;
+	g.dataRate = dataRate;
+	g.periodicity = periodicity;
+	return true;
+}
+
+bool LoRaWANEngine::removeMulticastGroup(uint8_t groupId)
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT || !multicastGroups[groupId].configured)
+	{
+		return false;
+	}
+	if (multicastGroups[groupId].deviceClass == WISBLOCK_CLASS_C)
+	{
+		smtc_modem_multicast_class_c_stop_session(kStackId, (smtc_modem_mc_grp_id_t)groupId);
+	}
+	else
+	{
+		smtc_modem_multicast_class_b_stop_session(kStackId, (smtc_modem_mc_grp_id_t)groupId);
+	}
+	// No LBM call to "unset" a group's address/keys config on its side - see
+	// setMulticastGroup()'s doc comment; clearing our own record is enough,
+	// a later setMulticastGroup() on this groupId overwrites LBM's copy too.
+	multicastGroups[groupId] = WisBlockMulticastGroup();
+	return true;
+}
+
+const WisBlockMulticastGroup *LoRaWANEngine::getMulticastGroup(uint8_t groupId) const
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT || !multicastGroups[groupId].configured)
+	{
+		return nullptr;
+	}
+	return &multicastGroups[groupId];
+}
+
+int LoRaWANEngine::findMulticastGroupByDevAddr(uint32_t devAddr) const
+{
+	for (uint8_t i = 0; i < WISBLOCK_MULTICAST_GROUP_COUNT; i++)
+	{
+		if (multicastGroups[i].configured && multicastGroups[i].devAddr == devAddr)
+		{
+			return (int)i;
+		}
+	}
+	return -1;
 }
 
 uint32_t LoRaWANEngine::handleEvents()
@@ -393,6 +917,16 @@ uint32_t LoRaWANEngine::handleEvents()
 		{
 		case SMTC_MODEM_EVENT_JOINED:
 			currentJoinState = WISBLOCK_JOIN_SUCCEEDED;
+			// FIX: see setDeviceClass()'s doc comment - this is the actual
+			// moment the device becomes joined for the OTAA path, and thus
+			// the first point at which smtc_modem_set_class() can possibly
+			// succeed. The applySettings()-time call from begin() was
+			// guaranteed to fail (device wasn't joined yet); this retry is
+			// what actually gets Class B/C to take effect.
+			if (!classProfileApplied)
+			{
+				setDeviceClass(settings.deviceClass);
+			}
 			if (joinSuccessCb)
 			{
 				joinSuccessCb();
@@ -400,9 +934,37 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 
 		case SMTC_MODEM_EVENT_JOINFAIL:
-			currentJoinState = WISBLOCK_JOIN_FAILED;
+			// FIX: see setJoinReattemptInterval()'s/setMaxJoinAttempts()'s doc comments.
+			// When both are at their defaults (8s interval, 0 = unlimited attempts), this
+			// is a no-op change from before: LBM's own join task has already scheduled its
+			// own next attempt by the time this event fires, and joinAttemptCount/
+			// maxJoinAttempts never trips at 0. Only takes over scheduling when the
+			// application has actually asked for non-default behavior here.
+			joinAttemptCount++;
+			if (settings.maxJoinAttempts != 0 && joinAttemptCount >= settings.maxJoinAttempts)
+			{
+				currentJoinState = WISBLOCK_JOIN_GAVE_UP;
+				smtc_modem_leave_network(kStackId); // cancels LBM's own auto-scheduled next attempt
+				joinRetryScheduled = false;
+			}
+			else
+			{
+				currentJoinState = WISBLOCK_JOIN_FAILED;
+				if (settings.joinReattemptIntervalS != 8)
+				{
+					// Non-default interval requested - take over scheduling entirely rather
+					// than letting LBM's own auto-retry race with ours.
+					smtc_modem_leave_network(kStackId);
+					nextJoinRetryAtMs = millis() + ( uint32_t ) settings.joinReattemptIntervalS * 1000;
+					joinRetryScheduled = true;
+				}
+				// else: leave LBM's own auto-scheduled retry alone (default interval).
+			}
 			if (joinFailedCb)
 			{
+				// Fires on every individual failed attempt, same as always - check
+				// joinState() from inside this callback for WISBLOCK_JOIN_GAVE_UP to tell
+				// whether this specific failure was the final one.
 				joinFailedCb();
 			}
 			break;
@@ -414,6 +976,49 @@ uint32_t LoRaWANEngine::handleEvents()
 			uplinkPending = false;
 			WisBlockTxResult r;
 			r.success = (event.event_data.txdone.status != SMTC_MODEM_EVENT_TXDONE_NOT_SENT);
+			// FIX: see computeLoRaWANAirtimeMs()'s doc comment - this used
+			// to be left at its default-initialized 0 unconditionally.
+			// Only meaningful on an actual send (NOT_SENT means nothing
+			// went out, so there's no real airtime to report for it).
+			// Computed here, before any deferred-send replay below, since
+			// dispatchUplink() overwrites lastTxDr/lastTxPhyPayloadLen with
+			// the replayed uplink's own values - this figure needs to
+			// describe the uplink this TXDONE actually just completed, not
+			// whatever gets dispatched next.
+			if (r.success)
+			{
+				r.airtimeMs = computeLoRaWANAirtimeMs(settings.region, lastTxDr, lastTxPhyPayloadLen);
+			}
+			// FIX: see deferredSend's doc comment in LoRaWANEngine.h and
+			// send()'s updated doc comment for why this is now
+			// unconditional (any TXDONE frees the single deferred slot,
+			// not just one specifically for the auto-fetch) - a real
+			// application send that had to be deferred is replayed the
+			// moment whatever was ahead of it finishes, however many
+			// duty-cycle-limited hops that took to get here.
+			bool wasAutoFetch = autoFetchUplinkPending;
+			autoFetchUplinkPending = false;
+			if (deferredSend.valid)
+			{
+				deferredSend.valid = false;
+				dispatchUplink(deferredSend.port, deferredSend.data, deferredSend.length, deferredSend.confirmed);
+			}
+			else if (pendingDownlinkFetchRequested)
+			{
+				// FIX: see pendingDownlinkFetchRequested's doc comment in LoRaWANEngine.h -
+				// services a fetch that couldn't be dispatched immediately from
+				// SMTC_MODEM_EVENT_DOWNDATA because the slot wasn't free yet at that moment
+				// (an ordering race, not a real collision - this TXDONE is the proof the
+				// slot is free now). Only reached when nothing real was deferred above,
+				// so application data always wins the slot over this library's own
+				// keep-alive traffic.
+				pendingDownlinkFetchRequested = false;
+				static const uint8_t kEmptyUplinkPayload[1] = {0};
+				if (dispatchUplink(pendingDownlinkFetchPort, kEmptyUplinkPayload, 0, false))
+				{
+					autoFetchUplinkPending = true;
+				}
+			}
 			// FIX: see setADR()'s doc comment for the full mechanism this
 			// closes the loop on. A TXDONE means at least one uplink has
 			// gone out since the last attempt, which is exactly when the
@@ -428,8 +1033,22 @@ uint32_t LoRaWANEngine::handleEvents()
 			{
 				applyAdrProfile();
 			}
-			if (txFinishedCb)
+			// FIX: see setDeviceClass()'s doc comment - belt-and-suspenders
+			// fallback alongside the JOINED/ABP-success retries above, in
+			// case classProfileApplied is still false for some other
+			// reason (e.g. RETURN_BUSY_IF_TEST_MODE) by the time an uplink
+			// actually completes. Harmless no-op once it's already true.
+			if (!classProfileApplied)
 			{
+				setDeviceClass(settings.deviceClass);
+			}
+			if (txFinishedCb && !wasAutoFetch)
+			{
+				// FIX: an application never asked for this library's own
+				// empty FPending auto-fetch uplinks, so it shouldn't see a
+				// TX-finished callback for one either - only for uplinks it
+				// actually requested itself (including one that had to be
+				// deferred and is only completing now).
 				txFinishedCb(r);
 			}
 			break;
@@ -450,6 +1069,66 @@ uint32_t LoRaWANEngine::handleEvents()
 				memcpy(r.data, buffer, r.length);
 				r.rssi = (int16_t)meta.rssi - 64; // rssi field is dBm + 64 per smtc_modem_api.h
 				r.snr = meta.snr;				   // 0.25 dB steps, per smtc_modem_api.h comment
+				r.fpending = meta.fpending_bit != 0;
+
+				// meta.window tells us exactly which RX window this arrived on -
+				// smtc_modem_dl_window_t's *_MC_GRP0..3 values are multicast (Class C's and
+				// Class B's group ranges are each contiguous, so a range check plus the
+				// group's offset from its range's own GRP0 value recovers the group ID
+				// without a 8-way switch); everything else (RX1/RX2/RXC/RXB/RXBEACON/RXR) is
+				// this device's own unicast window.
+				if (meta.window >= SMTC_MODEM_DL_WINDOW_RXC_MC_GRP0 && meta.window <= SMTC_MODEM_DL_WINDOW_RXC_MC_GRP3)
+				{
+					r.isMulticast = true;
+					r.multicastGroupId = (uint8_t)(meta.window - SMTC_MODEM_DL_WINDOW_RXC_MC_GRP0);
+				}
+				else if (meta.window >= SMTC_MODEM_DL_WINDOW_RXB_MC_GRP0 &&
+						 meta.window <= SMTC_MODEM_DL_WINDOW_RXB_MC_GRP3)
+				{
+					r.isMulticast = true;
+					r.multicastGroupId = (uint8_t)(meta.window - SMTC_MODEM_DL_WINDOW_RXB_MC_GRP0);
+				}
+
+				// FIX (Class A pending-downlink bug - confirmed against a real device log plus
+				// the matching LNS downlink log showing f_pending=true): a Class A device can only
+				// receive downlinks in RX1/RX2 after an uplink. If the network has more downlinks
+				// queued, it sets FPending on this one to say so - per LoRaWAN 1.0.4 section 5.1
+				// the device is expected to respond with another uplink soon, not wait for its
+				// next regular scheduled transmission, so the queue drains promptly rather than
+				// one downlink per whatever the application's own send interval happens to be.
+				// See WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment for the opt-out
+				// and why this is Class-A-only.
+				//
+				// !uplinkPending: tries to fetch immediately if the slot happens to be free
+				// already; if not - see pendingDownlinkFetchRequested's doc comment in
+				// LoRaWANEngine.h for why this can legitimately happen even for the very
+				// first attempt, not just a busy retry - the request is remembered instead
+				// of dropped, and serviced from SMTC_MODEM_EVENT_TXDONE the moment the slot
+				// actually does free up. Real application data (deferredSend) still takes
+				// priority there over this remembered fetch if both are waiting.
+				if (r.fpending && settings.fetchPendingDownlinks && settings.deviceClass == WISBLOCK_CLASS_A)
+				{
+					// smtc_modem_request_uplink() rejects a NULL payload pointer even for a
+					// 0-length send (RETURN_INVALID_IF_NULL), so a real (unused) buffer is
+					// needed here despite length being 0. FPort 0 is reserved for MAC-only
+					// frames and smtc_modem_send_tx() forbids it for application uplinks - if
+					// the pending-flagged downlink itself had no application payload (fport 0),
+					// fall back to FPort 1 rather than failing the request outright.
+					uint8_t fetchPort = (meta.fport == 0) ? 1 : meta.fport;
+					if (!uplinkPending)
+					{
+						static const uint8_t kEmptyUplinkPayload[1] = {0};
+						if (dispatchUplink(fetchPort, kEmptyUplinkPayload, 0, false))
+						{
+							autoFetchUplinkPending = true; // see this flag's doc comment in LoRaWANEngine.h
+						}
+					}
+					else
+					{
+						pendingDownlinkFetchRequested = true;
+						pendingDownlinkFetchPort = fetchPort;
+					}
+				}
 			}
 			if (rxFinishedCb)
 			{
@@ -502,6 +1181,68 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 		}
 	} while (pending > 0);
+
+	// FIX (the real root cause behind the whole FPending-drain saga -
+	// confirmed against multiple real device logs across both AS923 and
+	// AU915, on both ChirpStack and TTN, all showing a consistent ~50-60s
+	// delay between a fetch/deferred uplink being queued and it actually
+	// transmitting, regardless of how reliably the queueing itself had
+	// already been fixed): sleep_time_ms above was computed by
+	// smtc_modem_run_engine() at the very top of this function, before any
+	// of the event handling below - including every dispatchUplink() call
+	// this function itself can make (the FPending auto-fetch, a deferred
+	// send being replayed, a deferred fetch being serviced) - had a chance
+	// to queue anything new with LBM. That return value is stale the moment
+	// this function queues a fresh uplink during its own event processing,
+	// but was still being returned unconditionally.
+	//
+	// In loop()-polled mode this never mattered (the doc comment above
+	// already covered why: the next handleEvents() call, and therefore the
+	// next smtc_modem_run_engine() call, was always imminent regardless of
+	// what this function returned). In background task mode
+	// (WisBlockLbmTask), this return value directly becomes how long the
+	// FreeRTOS task sleeps before calling smtc_modem_run_engine() again
+	// (see eventTask() in wisblock_lbm_task.cpp) - so a freshly-queued
+	// uplink would sit completely idle, un-acted-on by LBM, for however
+	// long the *stale* pre-event-processing value happened to be. Every
+	// log across this investigation showed "Background task active" at
+	// startup and a suspiciously consistent delay in that ~50-60s range -
+	// this is why: LBM's own idle/maintenance scheduling interval, computed
+	// before anything new was queued, was what the background task kept
+	// sleeping for, every single time, regardless of how many collision/
+	// ordering fixes were made to the queueing logic itself.
+	//
+	// smtc_modem_run_engine()'s own doc comment says it must be called
+	// again within its last reported budget - it does not say it can only
+	// be called once per external trigger, and re-deriving that budget
+	// after this function's own event handling has possibly changed the
+	// state is exactly the documented "call again" contract, just invoked
+	// proactively rather than waiting for the next external wake-up.
+	sleep_time_ms = smtc_modem_run_engine();
+
+	// FIX: see setJoinReattemptInterval()'s/setMaxJoinAttempts()'s doc comments - services the
+	// custom join-retry timer set up in the SMTC_MODEM_EVENT_JOINFAIL case above, in place of
+	// LBM's own (deliberately cancelled, in that case) auto-retry. Placed after the
+	// smtc_modem_run_engine() refresh above so a retry fired here is accounted for by a
+	// subsequent call, same reasoning as that fix.
+	if (joinRetryScheduled)
+	{
+		int32_t remainingMs = ( int32_t ) ( nextJoinRetryAtMs - millis() );
+		if (remainingMs <= 0)
+		{
+			joinRetryScheduled = false;
+			currentJoinState = WISBLOCK_JOIN_IN_PROGRESS;
+			smtc_modem_join_network(kStackId);
+			sleep_time_ms = smtc_modem_run_engine();
+		}
+		else if (( uint32_t ) remainingMs < sleep_time_ms)
+		{
+			// Background-task-mode correctness (same class of bug as the fix above): don't
+			// let this function report a sleep duration longer than its own pending retry,
+			// or the FreeRTOS task would sleep past the deadline this function itself set.
+			sleep_time_ms = ( uint32_t ) remainingMs;
+		}
+	}
 
 	return sleep_time_ms;
 }

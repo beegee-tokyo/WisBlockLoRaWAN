@@ -4,7 +4,10 @@
  *
  * The whole config (work mode + LoRaWAN settings + P2P settings) is stored
  * as a single versioned, CRC-checked struct so "AT+SAVE" / "AT+RESTORE" and
- * the equivalent API calls are trivial and atomic.
+ * the equivalent API calls are trivial and atomic. A second, separate copy
+ * of the same struct type lives in its own flash slot as a "factory"
+ * backup - see wisblockConfigSaveFactory()/wisblockConfigLoadFactory()
+ * below, and AT+FACTORY/ATR in WisBlockLoRaAT.cpp.
  */
 #ifndef WISBLOCK_LORAWAN_CONFIG_H
 #define WISBLOCK_LORAWAN_CONFIG_H
@@ -13,7 +16,13 @@
 #include <stddef.h> // size_t
 
 #define WISBLOCK_CONFIG_MAGIC 0x57424C52UL // "WBLR"
-#define WISBLOCK_CONFIG_VERSION 1
+// FIX: bumped for the new top-level `firmwarever` field (AT+FIRMWAREVER getter/setter) -
+// previously bumped for `alias` (AT+ALIAS). The CRC check below would likely catch either
+// resulting size/layout change on its own even without this, but bumping the version makes
+// the incompatibility with older saved blobs explicit and intentional rather than incidental.
+// A config saved by an older library version is safely detected as invalid (falls back to
+// factory defaults) either way - see wisblockConfigLoad().
+#define WISBLOCK_CONFIG_VERSION 3
 
 struct WisBlockPersistedConfig
 {
@@ -23,7 +32,24 @@ struct WisBlockPersistedConfig
 
 	WisBlockWorkMode workMode = WISBLOCK_MODE_LORAWAN;
 	bool lowPowerEnabled = true;
-
+	// RUI3-compatible AT+ALIAS - a free-form, user-settable device label, unrelated to
+	// LoRaWAN/P2P operation. RUI3 caps a *set* value at 16 characters (see
+	// WisBlockLoRaWAN::setAlias()'s doc comment) but this buffer is sized to comfortably fit
+	// the longer factory-default text below, which predates the setter and was never itself
+	// meant to be re-entered verbatim through AT+ALIAS=.
+#ifdef NRF52_SERIES
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK4631";
+	char firmwarever[32] = "WB_BM_RAK4631";
+#elif defined(ARDUINO_ARCH_ESP32)
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK3312";
+	char firmwarever[32] = "WB_BM_RAK3312";
+#elif defined(ARDUINO_ARCH_RP2040)
+	char alias[32] = "WISBLOCK_BASICMODEM_RAK11310";
+	char firmwarever[32] = "WB_BM_RAK11310";
+#else
+	char alias[32] = "";
+	char firmwarever[32] = "WB_BM_UNKNOWN";
+#endif
 	WisBlockLoRaWANSettings lorawan;
 	WisBlockP2PSettings p2p;
 };
@@ -38,8 +64,25 @@ bool wisblockConfigLoad(WisBlockPersistedConfig &out);
 /** Persists `cfg` to flash. Returns false on write failure. */
 bool wisblockConfigSave(const WisBlockPersistedConfig &cfg);
 
-/** Resets flash-stored config back to factory defaults. */
-bool wisblockConfigFactoryReset();
+/**
+ * Persists `cfg` to a separate "factory" flash slot, distinct from the
+ * regular wisblockConfigSave()/wisblockConfigLoad() "user" slot above - see
+ * AT+FACTORY's doc comment in WisBlockLoRaAT.cpp for the intended
+ * production flow this is part of (this deliberately does NOT touch the
+ * user slot - only the caller decides when the two should be synced, via
+ * wisblockConfigLoadFactory() below). Returns false on write failure.
+ */
+bool wisblockConfigSaveFactory(const WisBlockPersistedConfig &cfg);
+
+/**
+ * Loads the factory-slot config saved by wisblockConfigSaveFactory() into
+ * `out`. Returns false (and leaves `out` untouched) if nothing has ever
+ * been saved there, or the saved blob fails its magic/version/CRC check -
+ * unlike wisblockConfigLoad(), this deliberately does NOT fall back to
+ * compiled-in defaults, since a caller asking for the factory backup needs
+ * to know whether one actually exists (see ATR's doc comment).
+ */
+bool wisblockConfigLoadFactory(WisBlockPersistedConfig &out);
 
 /** Computes the CRC16-CCITT used to validate the stored blob. */
 uint16_t wisblockConfigCrc16(const uint8_t *data, size_t len);

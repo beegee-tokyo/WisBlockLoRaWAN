@@ -390,6 +390,31 @@ uint8_t lorawan_api_min_tx_dr_get( uint8_t stack_id );
 uint16_t lorawan_api_mask_tx_dr_channel_up_dwell_time_check( uint8_t stack_id );
 
 /**
+ * @brief Restrict join/uplink channels to a specific sub-band, for regions with more channels
+ * than a typical 8-channel gateway supports (US915, AU915, CN470, CN470_RP_1_0). Mirrors RUI3's
+ * AT+MASK / api.lorawan.mask semantics: bit N (0-indexed) enables sub-band N+1 (8 channels each,
+ * numbered from 0); a mask of 0 means no restriction (all channels enabled). No effect on regions
+ * with 8 or fewer channels (EU868, AS923, ...).
+ *
+ * Safe to call before joining - in fact that is the point: pre-selecting the sub-band the
+ * gateway actually listens on avoids wasting join attempts cycling through the wrong ones.
+ *
+ * @param [in] stack_id
+ * @param [in] mask Sub-band bitmask, see above.
+ */
+void lorawan_api_set_channel_mask( uint8_t stack_id, uint16_t mask );
+
+/**
+ * @brief Get the sub-band mask last set via lorawan_api_set_channel_mask() (0 if none set, or if
+ * the current region doesn't support sub-band selection).
+ *
+ * @param [in] stack_id
+ * @return uint16_t
+ */
+uint16_t lorawan_api_get_channel_mask( uint8_t stack_id );
+
+
+/**
  * @brief returns the current state of the MAC layer.
  * @remark  If the MAC is not in the idle state, the user cannot call any methods except the lorawan_api_process()
  *          and the lorawan_api_state_get() functions
@@ -919,6 +944,38 @@ void lorawan_api_beacon_sniff_stop( uint8_t stack_id );
  * @param [out] beacon_statistics The beacon statistics
  */
 void lorawan_api_beacon_get_statistics( smtc_beacon_statistics_t* beacon_statistics, uint8_t stack_id );
+
+/**
+ * @brief FIX: RUI3-compatible AT+BFREQ/AT+BTIME need the beacon's own embedded GPS epoch time
+ * (used both to report AT+BTIME directly and to resolve AT+BFREQ's region-dependent frequency
+ * hopping via smtc_real_get_beacon_frequency()'s gps_time_s parameter) - not exposed by
+ * lorawan_api_beacon_get_statistics() above, which only reports the *local* RTC reception
+ * timestamp, not the time value carried inside the beacon payload itself. 0 if no valid beacon
+ * has been received yet.
+ *
+ * @return uint32_t Seconds since the GPS epoch, from the last valid received beacon
+ */
+uint32_t lorawan_api_get_beacon_epoch_time( uint8_t stack_id );
+
+/**
+ * @brief FIX: RUI3-compatible AT+BFREQ needs the beacon DR/frequency for the current region -
+ * exposes smtc_real_get_beacon_dr()/smtc_real_get_beacon_frequency(), which take the internal
+ * smtc_real_t* this layer doesn't otherwise expose to callers above it.
+ *
+ * @return uint8_t The beacon data rate
+ */
+uint8_t lorawan_api_get_beacon_dr( uint8_t stack_id );
+
+/**
+ * @brief See lorawan_api_get_beacon_dr()'s doc comment.
+ *
+ * @param [in] gps_time_s Reference instant (seconds since GPS epoch) - only changes the answer
+ * for regions where the beacon frequency hops over time (e.g. US915/AU915); pass the last
+ * received beacon's own time (lorawan_api_get_beacon_epoch_time()) for a real answer, or any
+ * value for a fixed-frequency region.
+ * @return uint32_t The beacon frequency in Hz
+ */
+uint32_t lorawan_api_get_beacon_frequency( uint8_t stack_id, uint32_t gps_time_s );
 #endif  // ADD_CLASS_B
 
 /**

@@ -325,44 +325,6 @@ if(LBM_STORE_AND_FORWARD)
     )
 endif()
 
-if(LBM_RELAY_RX)
-    target_compile_definitions(lora_basics_modem_core PRIVATE ADD_RELAY_RX)
-    target_include_directories(lora_basics_modem_core PRIVATE
-        lr1mac/src/relay/common
-        lr1mac/src/relay/relay_rx
-        lr1mac/src/relay/relay_tx
-        modem_services/relay_service
-    )
-    target_sources(lora_basics_modem_core PRIVATE
-        lr1mac/src/relay/common/relay_mac_parser.c
-        lr1mac/src/relay/common/relay_real.c
-        lr1mac/src/relay/common/wake_on_radio_ral.c
-        lr1mac/src/relay/common/wake_on_radio.c
-        lr1mac/src/relay/relay_rx/relay_rx_mac_parser.c
-        lr1mac/src/relay/relay_rx/relay_rx.c
-        modem_services/relay_service/lorawan_relay_rx_service.c
-    )
-endif()
-
-if(LBM_RELAY_TX)
-    target_compile_definitions(lora_basics_modem_core PRIVATE ADD_RELAY_TX)
-    target_include_directories(lora_basics_modem_core PRIVATE
-        lr1mac/src/relay/common
-        lr1mac/src/relay/relay_rx
-        lr1mac/src/relay/relay_tx
-        modem_services/relay_service
-    )
-    target_sources(lora_basics_modem_core PRIVATE
-        lr1mac/src/relay/common/relay_mac_parser.c
-        lr1mac/src/relay/common/relay_real.c
-        lr1mac/src/relay/common/wake_on_radio_ral.c
-        lr1mac/src/relay/common/wake_on_radio.c
-        lr1mac/src/relay/relay_tx/relay_tx_mac_parser.c
-        lr1mac/src/relay/relay_tx/relay_tx.c
-        modem_services/relay_service/lorawan_relay_tx_service.c
-    )
-endif()
-
 if(LBM_BEACON_TX)
     target_compile_definitions(lora_basics_modem_core PRIVATE MODEM_BEACON_APP)
     target_include_directories(lora_basics_modem_core PRIVATE

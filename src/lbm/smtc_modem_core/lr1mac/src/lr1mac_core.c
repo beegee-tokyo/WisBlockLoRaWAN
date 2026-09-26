@@ -47,10 +47,6 @@
 #include "smtc_real_defs_str.h"
 
 #include "lr1mac_config.h"
-
-#if defined( ADD_RELAY_TX )
-#include "relay_tx_api.h"
-#endif
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE MACROS-----------------------------------------------------------
@@ -279,7 +275,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
 
             if( ( lr1_mac_obj->no_rx_windows == 0 ) || ( lr1_mac_obj->join_status != JOINED ) )
             {
-                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX1 );
+                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX1_W );
             }
             else
             {
@@ -303,7 +299,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
         // Intentional fallthrough
 
     //**********************************************************************************
-    //                                   STATE RX1
+    //                                   STATE RX1_W
     //**********************************************************************************
     case LWPSTATE_RX1:
         if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
@@ -315,9 +311,9 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
                 if( lr1_mac_obj->valid_rx_packet == NO_MORE_VALID_RX_PACKET )
                 {
                     lr1_mac_obj->lr1mac_state = LWPSTATE_RX2;
-                    DBG_PRINT_WITH_LINE( "Receive a bad packet on Rx1 for stack_id = %d continue with RX2 ",
+                    DBG_PRINT_WITH_LINE( "Receive a bad packet on Rx1 for stack_id = %d continue with RX2_W ",
                                          lr1_mac_obj->stack_id );
-                    timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2 );
+                    timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2_W );
                 }
                 else
                 {
@@ -330,8 +326,8 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
             else
             {
                 lr1_mac_obj->lr1mac_state = LWPSTATE_RX2;
-                DBG_PRINT_WITH_LINE( "RX1 Timeout for stack_id = %d", lr1_mac_obj->stack_id );
-                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2 );
+                DBG_PRINT_WITH_LINE( "RX1_W Timeout for stack_id = %d", lr1_mac_obj->stack_id );
+                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2_W );
             }
         }
         if( timer_in_past == false )
@@ -345,10 +341,9 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
         // Intentional fallthrough
 
     //**********************************************************************************
-    //                                   STATE RX2
+    //                                   STATE RX2_W
     //**********************************************************************************
     case LWPSTATE_RX2:
-#if !defined( ADD_RELAY_TX )
         if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
         {
             if( lr1_mac_obj->rp_planner_status == RP_STATUS_RX_PACKET )
@@ -368,87 +363,11 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
             }
             else
             {
-                DBG_PRINT_WITH_LINE( "RX2 Timeout for stack_id = %d", lr1_mac_obj->stack_id );
+                DBG_PRINT_WITH_LINE( "RX2_W Timeout for stack_id = %d", lr1_mac_obj->stack_id );
             }
             lr1mac_mac_update( lr1_mac_obj );
         }
         break;
-#else
-        // case LWPSTATE_RX2:
-        if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
-        {
-            bool has_receive_valid_packet = false;
-            if( lr1_mac_obj->rp_planner_status == RP_STATUS_RX_PACKET )
-            {
-                lr1_mac_obj->rx_down_data.rx_metadata.rx_window = RECEIVE_ON_RX2;
-                lr1_mac_obj->valid_rx_packet                    = lr1_stack_mac_rx_frame_decode( lr1_mac_obj );
-                if( lr1_mac_obj->valid_rx_packet == NO_MORE_VALID_RX_PACKET )
-                {
-                    DBG_PRINT_WITH_LINE( "Receive a bad packet on Rx2 for stack_id = %d", lr1_mac_obj->stack_id );
-                }
-                else
-                {
-                    has_receive_valid_packet = true;
-                    DBG_PRINT_WITH_LINE( "Receive a Valid downlink Rx2 for stack_id = %d, rssi: %d dBm, snr: %d dB",
-                                         lr1_mac_obj->stack_id, lr1_mac_obj->rx_down_data.rx_metadata.rx_rssi,
-                                         lr1_mac_obj->rx_down_data.rx_metadata.rx_snr );
-                }
-            }
-            else
-            {
-                DBG_PRINT_WITH_LINE( "RX2 Timeout for stack_id = %d", lr1_mac_obj->stack_id );
-            }
-
-            if( ( has_receive_valid_packet == false ) && ( smtc_relay_tx_is_enable( lr1_mac_obj->stack_id ) == true ) )
-            {
-                lr1_mac_obj->lr1mac_state = LWPSTATE_RXR;
-                timer_in_past             = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RXR );
-            }
-            else
-            {
-                lr1mac_mac_update( lr1_mac_obj );
-            }
-        }
-
-        if( timer_in_past == false )
-        {
-            break;
-        }
-        else
-        {
-            timer_in_past = false;
-        }
-        // Intentional fallthrough
-
-        //**********************************************************************************
-        //                                   STATE RXR
-        //**********************************************************************************
-    case LWPSTATE_RXR:
-        if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
-        {
-            if( lr1_mac_obj->rp_planner_status == RP_STATUS_RX_PACKET )
-            {
-                lr1_mac_obj->rx_down_data.rx_metadata.rx_window = RECEIVE_ON_RXR;
-                lr1_mac_obj->valid_rx_packet                    = lr1_stack_mac_rx_frame_decode( lr1_mac_obj );
-                if( lr1_mac_obj->valid_rx_packet == NO_MORE_VALID_RX_PACKET )
-                {
-                    DBG_PRINT_WITH_LINE( "Receive a bad packet on RxR for Hook Id = %d", myhook_id );
-                }
-                else
-                {
-                    DBG_PRINT_WITH_LINE( "Receive a Valid downlink RxR for stack_id = %d, rssi: %d dBm, snr: %d dB",
-                                         lr1_mac_obj->stack_id, lr1_mac_obj->rx_down_data.rx_metadata.rx_rssi,
-                                         lr1_mac_obj->rx_down_data.rx_metadata.rx_snr );
-                }
-            }
-            else
-            {
-                DBG_PRINT_WITH_LINE( "RXR Timeout for Hook Id = %d", myhook_id );
-            }
-            lr1mac_mac_update( lr1_mac_obj );
-        }
-        break;
-#endif
 
     default:
         SMTC_MODEM_HAL_PANIC( "Illegal state in lorawan process\n" );
@@ -1175,6 +1094,75 @@ uint8_t lr1mac_core_get_no_rx_windows( lr1_stack_mac_t* lr1_mac_obj )
 status_lorawan_t lr1mac_core_update_join_channel( lr1_stack_mac_t* lr1_mac_obj )
 {
     lr1_stack_mac_region_config( lr1_mac_obj );
+
+    // FIX (root cause of a configured sub-band mask - see
+    // lorawan_api_set_channel_mask() in lorawan_api.c - being ignored on
+    // every single join attempt, not just the first, confirmed against two
+    // real device logs): lr1_stack_mac_region_config() above
+    // (smtc_real_config() -> region_xxx_config()) unconditionally
+    // re-enables every channel in the region's hardcoded default plan -
+    // that is its job for a normal, unrestricted join, but it silently
+    // wipes out any application-requested sub-band restriction in the
+    // process, and this function runs before EVERY join attempt (the
+    // initial one and every retry), not just once at startup. Committing
+    // our own applySettings()-time mask sooner (i.e. before join() is ever
+    // called) doesn't help, because it is this per-attempt reset - not a
+    // one-time default at boot - that overwrites it each time.
+    // smtc_real_set_channel_mask() re-copies whatever mask was last staged
+    // via smtc_real_build_channel_mask() (see lorawan_api_set_channel_mask())
+    // back over that default.
+    //
+    // CORRECTION - this used to be an unconditional call for every region,
+    // on the theory that it's a harmless no-op wherever no custom mask was
+    // requested, since the staged buffer would already match the "all
+    // channels enabled" state region_config() just set. That reasoning
+    // holds for US915/AU915/CN470/CN470_RP_1_0 (fixed channel plans - every
+    // channel slot always has a real, valid frequency, hardcoded from the
+    // region spec), but is WRONG for dynamic/CFList-based plans like AS923,
+    // EU868, IN865, KR920, and RU864: region_xxx_config() there sets
+    // "channel_index_enabled" correctly (only the region's real, currently-
+    // valid default boot channels), but separately blanket-sets
+    // "unwrapped_channel_mask" to enable ALL possible channel slots
+    // (0..const_number_of_tx_channel-1) regardless of whether each one
+    // currently has a real frequency assigned - most of them don't, before
+    // a join-accept's CFList (if any) populates them. Committing that
+    // straight over channel_index_enabled - exactly what this call used to
+    // do unconditionally - re-enabled channels with frequency 0, and
+    // region_xxx_get_join_next_channel()/region_xxx_get_next_channel() for
+    // these regions picks randomly among "enabled" channels without
+    // checking the frequency is non-zero, so a join (or any) transmission
+    // could go out on freq:0 - confirmed against a real device log after
+    // switching from AU915 (where a sub-band mask had legitimately been
+    // set) to AS923 without an intervening setChannelMask(0) - the AU915-
+    // era "all channels enabled" default, valid there, got carried over
+    // and reapplied on top of AS923's much smaller, mostly-frequency-0
+    // channel set. Scoping this to just the four regions the mask feature
+    // actually manages avoids the dynamic-plan regions' config entirely.
+    switch( lr1mac_core_get_region( lr1_mac_obj ) )
+    {
+#if defined( REGION_US_915 )
+    case SMTC_REAL_REGION_US_915:
+#endif
+#if defined( REGION_AU_915 )
+    case SMTC_REAL_REGION_AU_915:
+#endif
+#if defined( REGION_CN_470 )
+    case SMTC_REAL_REGION_CN_470:
+#endif
+#if defined( REGION_CN_470_RP_1_0 )
+    case SMTC_REAL_REGION_CN_470_RP_1_0:
+#endif
+#if defined( REGION_US_915 ) || defined( REGION_AU_915 ) || defined( REGION_CN_470 ) || \
+    defined( REGION_CN_470_RP_1_0 )
+        smtc_real_set_channel_mask( lr1_mac_obj->real );
+        break;
+#endif
+    default:
+        // Dynamic/CFList-based plan (AS923, EU868, IN865, KR920, RU864, ...) - leave
+        // region_xxx_config()'s own frequency-aware channel_index_enabled alone; see the
+        // comment above for why re-committing here would be actively wrong for these.
+        break;
+    }
 
     if( ( lr1_mac_obj->adr_mode_select != JOIN_DR_DISTRIBUTION ) &&
         ( lr1_mac_obj->adr_mode_select != JOIN_DR_DISTRIBUTION_LONG_TERM ) )

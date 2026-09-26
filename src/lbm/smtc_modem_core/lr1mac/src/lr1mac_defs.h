@@ -157,10 +157,6 @@ typedef enum lr1mac_states_e
     LWPSTATE_RX1,
     LWPSTATE_RX2,
 
-#if defined( ADD_RELAY_TX )
-    LWPSTATE_RXR,
-#endif
-
     LWPSTATE_TX_WAIT,
     LWPSTATE_INVALID,
     LWPSTATE_ERROR,
@@ -254,7 +250,7 @@ typedef enum cid_from_device_e
     NB_MAC_CMD_ANS
 } cid_from_device_t;
 
-static const uint8_t lr1mac_cmd_mac_ans_size[NB_MAC_CMD_ANS] = {
+static const uint8_t lr1mac_cmd_mac_ans_size[NB_MAC_CMD_ANS] = { [0] = 0, [1] = 0,
     [LINK_CHECK_ANS] = LINK_CHECK_ANS_SIZE,         [LINK_ADR_ANS] = LINK_ADR_ANS_SIZE,
     [DUTY_CYCLE_ANS] = DUTY_CYCLE_ANS_SIZE,         [RXPARRAM_SETUP_ANS] = RXPARRAM_SETUP_ANS_SIZE,
     [DEV_STATUS_ANS] = DEV_STATUS_ANS_SIZE,         [NEW_CHANNEL_ANS] = NEW_CHANNEL_ANS_SIZE,
@@ -332,11 +328,8 @@ typedef enum rx_packet_type_e
 } rx_packet_type_t;
 typedef enum rx_win_type_e
 {
-    RX1 = 0,
-    RX2,
-#if defined( ADD_RELAY_TX )
-    RXR,
-#endif
+    RX1_W = 0,
+    RX2_W,
 } rx_win_type_t;
 
 /**
@@ -434,10 +427,6 @@ typedef enum receive_win_s
     RECEIVE_ON_RXB_MC_GRP3 = 12,
 #endif
     RECEIVE_ON_RXBEACON = 13,
-
-#if defined( ADD_RELAY_TX )
-    RECEIVE_ON_RXR = 14,
-#endif
 } receive_win_t;
 
 typedef struct lr1mac_down_metadata_s

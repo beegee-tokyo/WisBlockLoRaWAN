@@ -8,11 +8,40 @@
  * @copyright Copyright (c) 2026
  * 
  */
+/// \todo This must be defined in library or in platformIO.ini
+// #define NUMBER_OF_STACKS 1
+// #define RP2_103 1
+// #define SX126X 1
+// #define SX1262 1
+// #define REGION_AS_923 1
+// #define REGION_AU_915 1
+// #define REGION_CN_470 1
+// #define REGION_CN_470_RP_1_0 1
+// #define REGION_EU_868 1
+// #define REGION_IN_865 1
+// #define REGION_KR_920 1
+// #define REGION_RU_864 1
+// #define REGION_US_915 1
+// #define ADD_CLASS_B 1
+// #define ADD_CLASS_C 1
+// #define ADD_RELAY_TX 1
+// #define ADD_RELAY_RX 1
+// #define MODEM_HAL_DBG_TRACE 1
+
 #include <Arduino.h>
+#include <SPI.h>
 #include <WisBlockLoRaWAN.h>
 #include <WisBlockLoRaAT.h>
+#include "wisblock_cayenne.h"
+#include "custom_at.h"
+#include <TimeLib.h>
+
 #ifdef NRF52_SERIES
-#include <nrf_nvic.h>
+// #include <nrf_nvic.h>
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+#include <Ticker.h>
+void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 #endif
 
 /** Wake up events, more events can be defined in app.h */
@@ -31,3 +60,5 @@
 #define N_AT_CMD 0b1111111111011111
 #define LORA_JOIN_FIN 0b0000000001000000
 #define N_LORA_JOIN_FIN 0b1111111110111111
+#define LORA_TIME     0b0000000010000000
+#define N_LORA_TIME 0b1111111101111111

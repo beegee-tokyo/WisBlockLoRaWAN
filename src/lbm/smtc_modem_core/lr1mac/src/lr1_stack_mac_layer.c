@@ -50,16 +50,6 @@
 #include "lr1mac_config.h"
 #include "smtc_modem_crypto.h"
 
-#if defined( ADD_RELAY_RX )
-#include "relay_rx_mac_parser.h"
-#include "relay_def.h"
-#endif
-
-#if defined( ADD_RELAY_TX )
-#include "relay_tx_api.h"
-#include "relay_tx_mac_parser.h"
-#include "relay_def.h"
-#endif
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE TYPES -----------------------------------------------------------
@@ -76,11 +66,7 @@
  * --- PRIVATE CONSTANTS -------------------------------------------------------
  */
 #if ( MODEM_HAL_DBG_TRACE == MODEM_HAL_FEATURE_ON )
-#if defined( ADD_RELAY_TX )
-static const char* smtc_name_rx_windows[] = { "RX1", "RX2", "RXR" };
-#else
-static const char* smtc_name_rx_windows[] = { "RX1", "RX2" };
-#endif
+static const char* smtc_name_rx_windows[] = { "RX1_W", "RX2_W" };
 static const char* smtc_name_bw[] = { "BW007", "BW010", "BW015", "BW020", "BW031", "BW041", "BW062",
                                       "BW125", "BW200", "BW250", "BW400", "BW500", "BW800", "BW1600" };
 #endif
@@ -132,7 +118,7 @@ void lr1_stack_mac_init( lr1_stack_mac_t* lr1_mac, lr1mac_activation_mode_t acti
     lr1_mac->dev_nonce                                = 0;
     lr1_mac->adr_mode_select                          = STATIC_ADR_MODE;
     lr1_mac->adr_mode_select_tmp                      = STATIC_ADR_MODE;
-    lr1_mac->current_win                              = RX1;
+    lr1_mac->current_win                              = RX1_W;
     lr1_mac->seconds_since_epoch                      = 0;
     lr1_mac->fractional_second                        = 0;
     lr1_mac->timestamp_last_device_time_ans_s         = 0;
@@ -231,12 +217,6 @@ void lr1_stack_mac_tx_frame_encrypt( lr1_stack_mac_t* lr1_mac )
         tx_fopts_length = lr1_mac->tx_fopts_current_length;
     }
     smtc_se_key_identifier_t enc_key = ( lr1_mac->tx_fport == PORTNWK ) ? SMTC_SE_NWK_S_ENC_KEY : SMTC_SE_APP_S_KEY;
-#if defined( ADD_RELAY_RX )
-    if( lr1_mac->tx_fport == FPORT_RELAY )
-    {
-        enc_key = SMTC_SE_NWK_S_ENC_KEY;
-    }
-#endif
     if( smtc_modem_crypto_payload_encrypt(
             &lr1_mac->tx_payload[FHDROFFSET + lr1_mac->tx_fport_present + tx_fopts_length], lr1_mac->app_payload_size,
             enc_key, lr1_mac->dev_addr, UP_LINK, lr1_mac->fcnt_up,
@@ -532,17 +512,12 @@ void lr1_stack_mac_rx_radio_start( lr1_stack_mac_t* lr1_mac, const rx_win_type_t
 
     switch( type )
     {
-    case RX1:
+    case RX1_W:
         rx_frequency = lr1_mac->rx1_frequency;
         break;
-    case RX2:
+    case RX2_W:
         rx_frequency = lr1_mac->rx2_frequency;
         break;
-#if defined( ADD_RELAY_TX )
-    case RXR:
-        smtc_relay_tx_get_rxr_param( lr1_mac->stack_id, lr1_mac->tx_data_rate, NULL, &rx_frequency );
-        break;
-#endif
     default:
         SMTC_MODEM_HAL_PANIC( "RX windows unknow\n" );
         break;
@@ -639,7 +614,7 @@ void lr1_stack_mac_rx_radio_start( lr1_stack_mac_t* lr1_mac, const rx_win_type_t
         lr1_mac->radio_process_state = RADIOSTATE_RX_ON;
 
         SMTC_MODEM_HAL_TRACE_PRINTF( "\n" );
-        SMTC_MODEM_HAL_TRACE_PRINTF( "  Open Rx%d for Hook Id = %d", type - RX1 + 1, my_hook_id );
+        SMTC_MODEM_HAL_TRACE_PRINTF( "  Open Rx%d for Hook Id = %d", type - RX1_W + 1, my_hook_id );
 
         if( radio_params.pkt_type == RAL_PKT_TYPE_LORA )
         {
@@ -720,20 +695,14 @@ void lr1_stack_mac_rp_callback( lr1_stack_mac_t* lr1_mac )
         uint32_t rx_timestamp_calibration = tcurrent_ms;
         uint32_t rx_delay_ms              = 0;
 
-        if( lr1_mac->current_win == RX1 )
+        if( lr1_mac->current_win == RX1_W )
         {
             rx_delay_ms = lr1_mac->rx1_delay_s;
         }
-        else if( lr1_mac->current_win == RX2 )
+        else if( lr1_mac->current_win == RX2_W )
         {
             rx_delay_ms = lr1_mac->rx1_delay_s + 1;
         }
-#if defined( ADD_RELAY_TX )
-        else if( lr1_mac->current_win == RXR )
-        {
-            rx_delay_ms = RXR_WINDOWS_DELAY_S;
-        }
-#endif
         rx_delay_ms *= 1000;
 
         int32_t error_fine_tune = rx_timestamp_calibration -
@@ -805,23 +774,16 @@ bool lr1_stack_mac_rx_timer_configure( lr1_stack_mac_t* lr1_mac, const rx_win_ty
 
     switch( type )
     {
-    case RX1:
+    case RX1_W:
         delay_ms = lr1_mac->rx1_delay_s;
         lr1_mac->rx_data_rate =
             smtc_real_get_rx1_datarate_config( lr1_mac->real, lr1_mac->tx_data_rate, lr1_mac->rx1_dr_offset );
         break;
 
-    case RX2:
+    case RX2_W:
         delay_ms              = lr1_mac->rx1_delay_s + 1;
         lr1_mac->rx_data_rate = lr1_mac->rx2_data_rate;
         break;
-
-#if defined( ADD_RELAY_TX )
-    case RXR:
-        delay_ms = RXR_WINDOWS_DELAY_S;
-        smtc_relay_tx_get_rxr_param( lr1_mac->stack_id, lr1_mac->tx_data_rate, &lr1_mac->rx_data_rate, NULL );
-        break;
-#endif
 
     default:
         is_type_ok = false;
@@ -857,22 +819,9 @@ bool lr1_stack_mac_rx_timer_configure( lr1_stack_mac_t* lr1_mac, const rx_win_ty
                                   +smtc_modem_hal_get_board_delay_ms( ) +
                                   lr1_mac->fine_tune_board_setting_delay_ms[lr1_mac->rx_data_rate];
 
-#if defined( ADD_RELAY_TX )
-        uint32_t crystal_error = lr1_mac->crystal_error;
-        if( type == RXR )
-        {
-            crystal_error += smtc_relay_tx_get_crystal_error( lr1_mac->stack_id );
-        }
-        smtc_real_get_rx_window_parameters( lr1_mac->real, lr1_mac->rx_data_rate, delay_ms, &lr1_mac->rx_window_symb,
-                                            &lr1_mac->rx_timeout_symb_in_ms, &lr1_mac->rx_timeout_ms, 0,
-                                            crystal_error );
-
-#else
-
         smtc_real_get_rx_window_parameters( lr1_mac->real, lr1_mac->rx_data_rate, delay_ms, &lr1_mac->rx_window_symb,
                                             &lr1_mac->rx_timeout_symb_in_ms, &lr1_mac->rx_timeout_ms, 0,
                                             lr1_mac->crystal_error );
-#endif
         smtc_real_get_rx_start_time_offset_ms( lr1_mac->real, lr1_mac->rx_data_rate, board_delay_ms,
                                                lr1_mac->rx_window_symb, &lr1_mac->rx_offset_ms );
 
@@ -978,7 +927,7 @@ rx_packet_type_t lr1_stack_mac_rx_frame_decode( lr1_stack_mac_t* lr1_mac )
         }
         if( status == OKLORAWAN )
         {
-            // reset retransmission counter if received on RX1 or RX2
+            // reset retransmission counter if received on RX1_W or RX2_W
             lr1_mac->nb_trans_cpt = 1;
 
             // test the ack bit when tx_mtype == CONF_DATA_UP
@@ -989,21 +938,14 @@ rx_packet_type_t lr1_stack_mac_rx_frame_decode( lr1_stack_mac_t* lr1_mac )
 
             // FPending bit
             lr1_mac->rx_down_data.rx_metadata.rx_fpending_bit = ( lr1_mac->rx_fctrl >> DL_FPENDING_BIT ) & 0x01;
-            if( lr1_mac->current_win == RX1 )
+            if( lr1_mac->current_win == RX1_W )
             {
                 lr1_mac->rx_down_data.rx_metadata.rx_frequency_hz = lr1_mac->rx1_frequency;
             }
-            else if( lr1_mac->current_win == RX2 )
+            else if( lr1_mac->current_win == RX2_W )
             {
                 lr1_mac->rx_down_data.rx_metadata.rx_frequency_hz = lr1_mac->rx2_frequency;
             }
-#if defined( ADD_RELAY_TX )
-            else if( lr1_mac->current_win == RXR )
-            {
-                smtc_relay_tx_get_rxr_param( lr1_mac->stack_id, lr1_mac->tx_data_rate, NULL,
-                                             &lr1_mac->rx_down_data.rx_metadata.rx_frequency_hz );
-            }
-#endif
             else
             {
                 SMTC_MODEM_HAL_PANIC( "Rx Window invalid\n" );
@@ -1020,22 +962,7 @@ rx_packet_type_t lr1_stack_mac_rx_frame_decode( lr1_stack_mac_t* lr1_mac )
                 // => set rx_packet_type = NWKRXPACKET
                 // => if ack bit is set to one : notify the upper layer that the stack have received an ack bit
 
-#if defined( ADD_RELAY_RX )
-                bool decode_with_nwk_s_key = false;
-
                 if( lr1_mac->rx_down_data.rx_metadata.rx_fport == 0 )
-                {
-                    decode_with_nwk_s_key = true;
-                }
-
-                if( lr1_mac->rx_down_data.rx_metadata.rx_fport == FPORT_RELAY )
-                {
-                    decode_with_nwk_s_key = true;
-                }
-                if( decode_with_nwk_s_key == true )
-#else
-                if( lr1_mac->rx_down_data.rx_metadata.rx_fport == 0 )
-#endif
                 {  // receive a mac management frame without fopts
                     if( lr1_mac->rx_fopts_length == 0 )
                     {
@@ -1393,38 +1320,10 @@ status_lorawan_t lr1_stack_mac_cmd_parse( lr1_stack_mac_t* lr1_mac )
             beacon_freq_req_parser( lr1_mac );
             break;
 
-#if defined( ADD_RELAY_TX ) || defined( ADD_RELAY_RX )
-        default:
-        {
-            bool mac_is_known_relay_tx = false;
-            bool mac_is_known_relay_rx = false;
-#if defined( ADD_RELAY_TX )
-            mac_is_known_relay_tx = relay_tx_mac_parser( lr1_mac );
-#endif
-#if defined( ADD_RELAY_RX )
-
-            if( ( lr1_mac->rx_down_data.rx_metadata.rx_fport_present == true ) &&
-                ( lr1_mac->rx_down_data.rx_metadata.rx_fport == FPORT_RELAY ) )
-            {
-                mac_is_known_relay_rx = false;  // Don't process data on FPORT 226 as MAC command
-            }
-            else
-            {
-                mac_is_known_relay_rx = relay_rx_mac_parser( lr1_mac );
-            }
-#endif
-            if( ( mac_is_known_relay_tx == false ) && ( mac_is_known_relay_rx == false ) )
-            {
-                lr1_mac->nwk_payload_size = 0;
-            }
-        }
-        break;
-#else
         default:
             lr1_mac->nwk_payload_size = 0;
             SMTC_MODEM_HAL_TRACE_PRINTF( " Unknown mac command %02x\n", cmd_identifier );
             break;
-#endif
         }
     }
 
@@ -2020,7 +1919,7 @@ static void rx_param_setup_parser( lr1_stack_mac_t* lr1_mac )
     if( smtc_real_is_frequency_valid( lr1_mac->real, rx2_frequency_temp ) == ERRORLORAWAN )
     {
         status_ans &= 0x3;
-        SMTC_MODEM_HAL_TRACE_WARNING( "INVALID RX2 FREQUENCY\n" );
+        SMTC_MODEM_HAL_TRACE_WARNING( "INVALID RX2_W FREQUENCY\n" );
     }
 
     // Update the mac parameters if case of no error

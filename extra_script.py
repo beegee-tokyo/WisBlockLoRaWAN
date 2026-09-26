@@ -27,16 +27,28 @@ env.Dir()/CPPPATH, so plain relative paths below resolve correctly with no
 need to compute an absolute base path.
 
 IMPORTANT: this library only vendors the subset of LBM actually needed for
-LoRaWAN Class A/B/C + Relay (TX and RX/serving) + LoRa P2P on SX1262 - the
-scope of the original request. Deliberately NOT vendored/enabled: FUOTA
-(fragmented data block transport, firmware management, multi-package
-access), multicast, application layer clock sync, cloud device management,
-LFU (log file upload), store-and-forward, the beacon-TX *test/demo* service
-(smtc_modem_core/modem_services/beacon_tx_service - a simulated beacon
-transmitter for testing Class B without a real gateway, not needed for
-normal Class B operation), almanac packages and geolocation services
-(LR11xx-only). If you need any of these later: check that feature's guard
-macro in src/lbm/smtc_modem_core/modem_utilities/modem_services_config.h,
+LoRaWAN Class A/B/C + LoRa P2P on SX1262 - the scope of the original
+request, plus manually-provisioned LoRaWAN multicast group RX (Class B/C -
+see WisBlockLoRaWAN::setMulticastGroup()/AT+ADDMULC, and SMTC_MULTICAST
+below). Deliberately NOT vendored/enabled: FUOTA (fragmented data block
+transport, firmware management, multi-package access, and - despite the
+name overlap with the multicast *session* support that IS enabled below -
+the separate Remote Multicast Setup package, i.e. network-triggered/
+over-the-air multicast group provisioning rather than the manual
+AT+ADDMULC-style provisioning this library supports; both the
+Fragmentation and Remote Multicast Setup package source are already
+present under src/lbm/smtc_modem_core/lorawan_packages/, gated behind
+ADD_FUOTA - see modem_services_config.h - but that gate is intentionally
+left off here), application layer clock sync, cloud device management,
+LFU (log file upload), store-and-forward, the LoRaWAN Relay service (both
+TX/end-device and RX/serving roles - relay support has been fully removed
+from this library, see Creation-Log-From-Claude-AI.md), the beacon-TX
+*test/demo* service (smtc_modem_core/modem_services/beacon_tx_service - a
+simulated beacon transmitter for testing Class B without a real gateway,
+not needed for normal Class B operation), almanac packages and
+geolocation services (LR11xx-only). If you need any of these later: check
+that feature's guard macro in
+src/lbm/smtc_modem_core/modem_utilities/modem_services_config.h,
 re-vendor its source directory from upstream SWL2001, add it to
 include_dirs below, and add its -D flag to defines below.
 
@@ -60,13 +72,9 @@ include_dirs = [
     "src/lbm/smtc_modem_core/lr1mac/src",
     "src/lbm/smtc_modem_core/lr1mac/src/lr1mac_class_b",
     "src/lbm/smtc_modem_core/lr1mac/src/lr1mac_class_c",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/common",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/relay_rx",
-    "src/lbm/smtc_modem_core/lr1mac/src/relay/relay_tx",
     "src/lbm/smtc_modem_core/lr1mac/src/services",
     "src/lbm/smtc_modem_core/lr1mac/src/smtc_real/src",
     "src/lbm/smtc_modem_core/modem_services",
-    "src/lbm/smtc_modem_core/modem_services/relay_service",
     "src/lbm/smtc_modem_core/modem_supervisor",
     "src/lbm/smtc_modem_core/modem_utilities",
     "src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src",
@@ -109,10 +117,13 @@ defines = [
     # Device classes - both required per the original spec.
     "ADD_CLASS_B",
     "ADD_CLASS_C",
-    # Relay - both roles required per the original spec. See
-    # LoRaWANRelay.h for the important caveat on the RX/serving side.
-    "ADD_RELAY_TX",
-    "ADD_RELAY_RX",
+    # Multicast group RX sessions (Class B/C) - smtc_modem_multicast_set_grp_config() and
+    # friends are silent no-ops (always return SMTC_MODEM_RC_FAIL) without this - see
+    # WisBlockLoRaWAN::setMulticastGroup()/AT+ADDMULC. This is the core multicast *session*
+    # feature only - NOT the same as the LoRaWAN Remote Multicast Setup package (FUOTA-family,
+    # network-triggered group provisioning), which remains unvendored - see the module doc
+    # comment above.
+    "SMTC_MULTICAST",
     # LBM's own debug trace macro (smtc_modem_hal_print_trace calls are
     # gated by this in some LBM internals, not just our own port). 0 = off.
     # Flip to 1 here (or override via your own platformio.ini build_flags)

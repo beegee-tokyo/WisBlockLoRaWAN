@@ -24,13 +24,33 @@ void buildFilename(const char *key, char *out, size_t outLen)
 
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
+#include <Arduino.h>
 using namespace Adafruit_LittleFS_Namespace;
 
 namespace WisBlockLoRaFlash
 {
 bool init()
 {
-	InternalFS.begin();
+	if (!InternalFS.begin())
+	{
+		// Serial.println("FS begin failed");
+		// Serial.flush();
+		InternalFS.format();
+		// FIX: format() doesn't implicitly remount the filesystem - a
+		// freshly-formatted InternalFS still isn't mounted until begin() is
+		// called again, so every read()/write() this boot would have
+		// silently failed (File::open() on an unmounted volume just fails)
+		// even though this function returned true either way. Only
+		// reachable on a truly fresh/corrupted board (begin() succeeds on
+		// every normal boot) - but that's exactly the first-ever AT+FACTORY
+		// case this feature depends on, so worth getting right.
+		if (!InternalFS.begin())
+		{
+			// Serial.println("FS begin failed again after format - internal flash may be faulty");
+			// Serial.flush();
+			return false;
+		}
+	}
 	return true;
 }
 
@@ -42,6 +62,7 @@ bool read(const char *key, uint8_t *buf, size_t len)
 	File file(InternalFS);
 	if (!file.open(filename, FILE_O_READ))
 	{
+		// Serial.printf("Failed to open file or read %s\n", filename);
 		return false;
 	}
 	size_t got = file.read(buf, len);
@@ -54,14 +75,26 @@ bool write(const char *key, const uint8_t *buf, size_t len)
 	char filename[32];
 	buildFilename(key, filename, sizeof(filename));
 
-	InternalFS.remove(filename);
+	// InternalFS.remove(filename);
 	File file(InternalFS);
+
+	// Test open file and close before deleting
+	if (!file.open(filename, FILE_O_READ))
+	{
+		// Serial.printf("File to write %s does not exist yet\n", filename);
+	}
+	file.close();
+
+	InternalFS.remove(filename);
+
 	if (!file.open(filename, FILE_O_WRITE))
 	{
+		// Serial.printf("Saving to flash failed, can't open file\n");
 		return false;
 	}
 	size_t wrote = file.write(buf, len);
 	file.close();
+	// Serial.printf("Saving to flash expected %d written %d\n", len, wrote);
 	return wrote == len;
 }
 

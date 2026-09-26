@@ -1,7 +1,7 @@
 {
   "name": "WisBlockLoRaWAN",
   "version": "0.1.0",
-  "description": "Unified LoRaWAN (Class A/B/C, Relay) and LoRa P2P library for RAKwireless WisBlock boards using Semtech SX1262 + LoRa Basics Modem.",
+  "description": "Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boards using Semtech SX1262 + LoRa Basics Modem.",
   "keywords": ["lorawan", "lora", "wisblock", "rak4631", "rak3312", "rak11310", "sx1262", "semtech", "lbm", "rak4630", "rak3112", "rak11300"],
   "repository": {
     "type": "git",

@@ -87,6 +87,11 @@ static struct
 
 lorawan_down_metadata_t lorawan_down_metadata;
 
+// FIX: remembers the last sub-band mask requested via lorawan_api_set_channel_mask()
+// so lorawan_api_get_channel_mask() has something to report - smtc_real itself only
+// tracks per-channel enabled bits, not "which mask produced this state".
+static uint16_t channel_mask_by_stack[NUMBER_OF_STACKS] = { 0 };
+
 #define lr1_mac_obj lr1mac_core_context.lr1_mac_obj
 
 #define real_obj lr1mac_core_context.real_obj
@@ -411,6 +416,156 @@ uint16_t lorawan_api_mask_tx_dr_channel_up_dwell_time_check( uint8_t stack_id )
 {
     PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
     return smtc_real_mask_tx_dr_channel_up_dwell_time_check( lr1_mac_obj[stack_id].real );
+}
+
+/*
+ * FIX: sub-band pre-selection for US915/AU915/CN470/CN470_RP_1_0 (mirrors RUI3's
+ * AT+MASK / api.lorawan.mask). These regions expose far more channels than a
+ * typical 8-channel gateway supports, so without this the device has to try
+ * (and fail) joining on every sub-band in turn before it stumbles onto the one
+ * the gateway actually listens on - wasting join attempts and airtime. Letting
+ * the application pre-select the sub-band before the first join request avoids
+ * that entirely.
+ *
+ * mask bit N (0-indexed) enables sub-band N+1 (channels 8*N..8*N+7, plus for
+ * US915/AU915 the one wide 500kHz channel that goes with that sub-band).
+ * mask == 0 means "no restriction" - all channels enabled, matching AT+MASK's
+ * own ALL=0000 convention.
+ *
+ * Implemented via the same ChMaskCntl/ChMask primitives LoRaWAN's own
+ * LinkADRReq uses to select channels server-side (smtc_real_build_channel_mask()
+ * -> region_xxx_build_channel_mask()) - this just runs that mechanism locally,
+ * before joining, instead of waiting for the network to do it after joining.
+ *
+ * FIX: smtc_real_build_channel_mask() alone only stages the requested mask
+ * into a scratch buffer (unwrapped_channel_mask); it is NOT what channel
+ * selection actually reads, either for normal uplinks or for join attempts
+ * (region_xxx_get_join_next_channel() reads a separate, region-owned
+ * "channel_index_enabled" array, plus - for US915/AU915 - a further
+ * "snapshot_channel_tx_mask" used to round-robin channels within a sub-band
+ * across retries). The staged mask only ever reaches that array via
+ * smtc_real_set_channel_mask(), which in normal operation is called by LBM
+ * itself while processing a network LinkADRReq post-join - never before or
+ * during joining. Without also calling it here ourselves, a mask set before
+ * join() has no effect on join channel selection whatsoever: the very first
+ * (and every subsequent, until a real post-join LinkADRReq happens to commit
+ * something) join attempt picks a channel at random from the region's full,
+ * unrestricted default channel set - see region_xxx_get_join_next_channel()'s
+ * random pick among "active" channels. A join that appears to "succeed on
+ * the right sub-band" in that state is coincidence, not the requested mask
+ * taking effect - with 8-12 sub-bands to choose from at random, it will just
+ * as often not. Calling smtc_real_set_channel_mask() below is what actually
+ * commits the staged mask into that array (and, for US915/AU915, into the
+ * retry snapshot too - see region_us_915_channel_mask_set_after_join()/
+ * region_au_915's equivalent), which is what makes it take effect starting
+ * with the very next join attempt.
+ */
+static status_channel_t lorawan_api_set_channel_mask_us_au_915( uint8_t stack_id, uint16_t mask )
+{
+    status_channel_t status;
+    if( mask == 0 )
+    {
+        // ChMaskCntl=6: all 125kHz channels ON; ChMask param (here 0x00FF) sets
+        // the 8 wide (500kHz) channels, one bit each - set them all ON too.
+        status = smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 6, 0x00FF );
+    }
+    else
+    {
+        // ChMaskCntl=5: "bank of channels" mode - bit N of ChMask enables/disables
+        // the whole 8-channel sub-band N+1 (its 8 125kHz channels and its one
+        // 500kHz wide channel) as a unit. This lines up bit-for-bit with our own
+        // sub-band mask, and with RUI3's AT+MASK encoding for these regions.
+        status = smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 5, mask & 0x00FF );
+    }
+    // FIX: commit the staged mask - see this function group's doc comment above.
+    smtc_real_set_channel_mask( lr1_mac_obj[stack_id].real );
+    return status;
+}
+
+static status_channel_t lorawan_api_set_channel_mask_cn_470( uint8_t stack_id, uint16_t mask,
+                                                              uint8_t number_of_16ch_blocks )
+{
+    // CN470/CN470_RP_1_0 have no "bank of 8" shortcut like US915/AU915's
+    // ChMaskCntl=5 - each ChMaskCntl block covers a 16-channel (2 sub-band)
+    // window and takes a plain 16-bit ChMask, so each block needs its own
+    // call built from the 2 relevant sub-band bits.
+    // NOTE: the older CN470 (non-RP_1_0) region additionally supports 26MHz
+    // channel plans where block 3 always means "enable everything" regardless
+    // of the ChMask given - sub-band selection has no effect in that specific
+    // plan. The much more common 20MHz A/B plan (and CN470_RP_1_0) both honor
+    // the mask normally.
+    status_channel_t status;
+    if( mask == 0 )
+    {
+        status = smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, number_of_16ch_blocks, 0x0000 );
+    }
+    else
+    {
+        status = OKCHANNEL;
+        for( uint8_t block = 0; block < number_of_16ch_blocks; block++ )
+        {
+            uint16_t block_mask = 0;
+            if( ( mask & ( 1u << ( block * 2 ) ) ) != 0 )
+            {
+                block_mask |= 0x00FF; // lower sub-band of this 16-channel block
+            }
+            if( ( mask & ( 1u << ( block * 2 + 1 ) ) ) != 0 )
+            {
+                block_mask |= 0xFF00; // upper sub-band of this 16-channel block
+            }
+            status_channel_t block_status =
+                smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, block, block_mask );
+            if( block_status != OKCHANNEL )
+            {
+                status = block_status;
+            }
+        }
+    }
+    // FIX: commit the staged mask - see this function group's doc comment above.
+    smtc_real_set_channel_mask( lr1_mac_obj[stack_id].real );
+    return status;
+}
+
+void lorawan_api_set_channel_mask( uint8_t stack_id, uint16_t mask )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+
+    switch( lr1mac_core_get_region( &lr1_mac_obj[stack_id] ) )
+    {
+#if defined( REGION_US_915 )
+    case SMTC_REAL_REGION_US_915:
+        lorawan_api_set_channel_mask_us_au_915( stack_id, mask );
+        break;
+#endif
+#if defined( REGION_AU_915 )
+    case SMTC_REAL_REGION_AU_915:
+        lorawan_api_set_channel_mask_us_au_915( stack_id, mask );
+        break;
+#endif
+#if defined( REGION_CN_470 )
+    case SMTC_REAL_REGION_CN_470:
+        lorawan_api_set_channel_mask_cn_470( stack_id, mask, 4 ); // 64 channels = 4 blocks of 16
+        break;
+#endif
+#if defined( REGION_CN_470_RP_1_0 )
+    case SMTC_REAL_REGION_CN_470_RP_1_0:
+        lorawan_api_set_channel_mask_cn_470( stack_id, mask, 6 ); // 96 channels = 6 blocks of 16
+        break;
+#endif
+    default:
+        // Not a multi-sub-band region (EU868, AS923, ...): AT+MASK / this call
+        // is a documented no-op here, matching RUI3's own
+        // "(only for US915, AU915, LA915, CN470)" scoping.
+        return;
+    }
+
+    channel_mask_by_stack[stack_id] = mask;
+}
+
+uint16_t lorawan_api_get_channel_mask( uint8_t stack_id )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return channel_mask_by_stack[stack_id];
 }
 
 uint8_t lorawan_api_min_tx_dr_get( uint8_t stack_id )
@@ -879,6 +1034,24 @@ void lorawan_api_beacon_get_statistics( smtc_beacon_statistics_t* beacon_statist
 {
     PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
     smtc_beacon_sniff_get_statistics( &lr1_beacon_obj[stack_id], beacon_statistics );
+}
+
+uint32_t lorawan_api_get_beacon_epoch_time( uint8_t stack_id )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return lr1_beacon_obj[stack_id].beacon_epoch_time;
+}
+
+uint8_t lorawan_api_get_beacon_dr( uint8_t stack_id )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return smtc_real_get_beacon_dr( lr1_mac_obj[stack_id].real );
+}
+
+uint32_t lorawan_api_get_beacon_frequency( uint8_t stack_id, uint32_t gps_time_s )
+{
+    PANIC_IF_STACK_ID_TOO_HIGH( stack_id );
+    return smtc_real_get_beacon_frequency( lr1_mac_obj[stack_id].real, gps_time_s );
 }
 #endif
 

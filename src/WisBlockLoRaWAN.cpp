@@ -38,10 +38,9 @@ void WisBlockLoRaWAN::begin()
 
 	// Deliberately does NOT call lorawan.begin() here - see
 	// ensureLoRaWANEngineStarted()'s doc comment in WisBlockLoRaWAN.h for
-	// why starting the LoRaWAN engine (and, with it, LBM's relay WOR
-	// configuration) unconditionally for every application, P2P-only ones
-	// included, was actively fighting the P2P engine for control of the
-	// radio.
+	// why starting the LoRaWAN engine unconditionally for every application,
+	// P2P-only ones included, was actively fighting the P2P engine for
+	// control of the radio.
 	p2p.begin(config.p2p);
 
 	began = true;
@@ -60,6 +59,15 @@ void WisBlockLoRaWAN::ensureLoRaWANEngineStarted()
 	}
 	lorawanEngineStarted = true;
 	lorawan.begin(config.lorawan);
+	// FIX: RUI3-compatible "auto-join on power-up" - see LoRaWANEngine::setAutoJoin()'s doc
+	// comment. This is the single, unambiguous point where the engine actually transitions
+	// from "not started" to "started", regardless of which public setter happened to trigger
+	// it (setWorkMode, setRegion, setOTAAKeys, join() itself, ...), so it's the right place to
+	// check this rather than duplicating the check across every one of those call sites.
+	if (config.lorawan.autoJoin)
+	{
+		join();
+	}
 }
 
 WisBlockLoRaWAN *WisBlockLoRaWAN::activeInstanceForTask = nullptr;
@@ -124,6 +132,34 @@ void WisBlockLoRaWAN::setWorkMode(WisBlockWorkMode mode)
 	}
 }
 
+bool WisBlockLoRaWAN::setAlias(const char *alias)
+{
+	if (alias == nullptr || strlen(alias) > 16)
+	{
+		return false;
+	}
+	strncpy(config.alias, alias, sizeof(config.alias) - 1);
+	config.alias[sizeof(config.alias) - 1] = '\0';
+	return true;
+}
+
+bool WisBlockLoRaWAN::setFirmwareVer(const char *firmwarever)
+{
+	// FIX: was `strlen(firmwarever) > 32` - config.firmwarever is a 32-byte
+	// buffer, so a 32-character string (needing 33 bytes with its null
+	// terminator) passed this check and then got silently truncated to 31
+	// characters by the strncpy() below, despite this function reporting
+	// success. Checked against the buffer's own size instead of a magic 32
+	// literal, so it can't drift out of sync if the buffer is ever resized.
+	if (firmwarever == nullptr || strlen(firmwarever) >= sizeof(config.firmwarever))
+	{
+		return false;
+	}
+	strncpy(config.firmwarever, firmwarever, sizeof(config.firmwarever) - 1);
+	config.firmwarever[sizeof(config.firmwarever) - 1] = '\0';
+	return true;
+}
+
 void WisBlockLoRaWAN::setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16])
 {
 	memcpy(config.lorawan.otaa.devEui, devEui, 8);
@@ -148,10 +184,21 @@ void WisBlockLoRaWAN::setJoinMode(WisBlockJoinMode mode)
 	applyLoRaWANSettings();
 }
 
-void WisBlockLoRaWAN::setRegion(WisBlockRegion region)
+bool WisBlockLoRaWAN::setRegion(WisBlockRUI3Band band)
 {
+	WisBlockRegion region;
+	if (!wisblockRUI3BandToRegion(band, region))
+	{
+		return false;
+	}
 	config.lorawan.region = region;
 	applyLoRaWANSettings();
+	return true;
+}
+
+WisBlockRUI3Band WisBlockLoRaWAN::getRegion() const
+{
+	return wisblockRegionToRUI3Band(config.lorawan.region);
 }
 
 bool WisBlockLoRaWAN::setDataRate(uint8_t dataRate)
@@ -161,11 +208,11 @@ bool WisBlockLoRaWAN::setDataRate(uint8_t dataRate)
 	return lorawan.setDataRate(dataRate);
 }
 
-void WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
+bool WisBlockLoRaWAN::setDeviceClass(WisBlockDeviceClass deviceClass)
 {
 	config.lorawan.deviceClass = deviceClass;
 	ensureLoRaWANEngineStarted();
-	lorawan.setDeviceClass(deviceClass);
+	return lorawan.setDeviceClass(deviceClass);
 }
 
 bool WisBlockLoRaWAN::setADR(bool enabled)
@@ -173,6 +220,20 @@ bool WisBlockLoRaWAN::setADR(bool enabled)
 	config.lorawan.adrEnabled = enabled;
 	ensureLoRaWANEngineStarted();
 	return lorawan.setADR(enabled);
+}
+
+bool WisBlockLoRaWAN::setChannelMask(uint16_t mask)
+{
+	config.lorawan.channelMask = mask;
+	ensureLoRaWANEngineStarted();
+	return lorawan.setChannelMask(mask);
+}
+
+bool WisBlockLoRaWAN::setPingSlotPeriodicity(uint8_t periodicity)
+{
+	config.lorawan.pingSlotPeriodicity = periodicity > 7 ? 7 : periodicity;
+	ensureLoRaWANEngineStarted();
+	return lorawan.setPingSlotPeriodicity(periodicity);
 }
 
 void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)
@@ -185,13 +246,6 @@ void WisBlockLoRaWAN::setTxPower(uint8_t txPowerIndex)
 void WisBlockLoRaWAN::setConfirmedUplinks(bool confirmed)
 {
 	config.lorawan.confirmedUplinks = confirmed;
-}
-
-void WisBlockLoRaWAN::setRelayMode(WisBlockRelayMode mode)
-{
-	config.lorawan.relayMode = mode;
-	ensureLoRaWANEngineStarted();
-	lorawan.setRelayMode(mode);
 }
 
 void WisBlockLoRaWAN::join()
@@ -322,13 +376,22 @@ bool WisBlockLoRaWAN::restoreConfig()
 	return ok;
 }
 
-bool WisBlockLoRaWAN::factoryReset()
+bool WisBlockLoRaWAN::saveFactoryDefaults()
 {
-	bool ok = wisblockConfigFactoryReset();
-	wisblockConfigLoad(config);
+	return wisblockConfigSaveFactory(config);
+}
+
+bool WisBlockLoRaWAN::restoreFactoryDefaults()
+{
+	WisBlockPersistedConfig factory;
+	if (!wisblockConfigLoadFactory(factory))
+	{
+		return false; // no factory backup saved yet - see AT+FACTORY
+	}
+	config = factory;
 	applyLoRaWANSettings();
 	applyP2PSettings();
-	return ok;
+	return wisblockConfigSave(config); // also becomes the new *user* config - see ATR's doc comment
 }
 
 void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)
@@ -461,7 +524,7 @@ void WisBlockLoRaWAN::unlockLbm()
 void WisBlockLoRaWAN::applyLoRaWANSettings()
 {
 	// Gated on work mode (not just `began`) so that restoreConfig() /
-	// factoryReset() - which call this unconditionally as part of a
+	// restoreFactoryDefaults() - which call this unconditionally as part of a
 	// blanket config resync, regardless of which mode is active - can't
 	// reintroduce the same problem ensureLoRaWANEngineStarted() exists to
 	// avoid: starting the LoRaWAN engine for an application that's

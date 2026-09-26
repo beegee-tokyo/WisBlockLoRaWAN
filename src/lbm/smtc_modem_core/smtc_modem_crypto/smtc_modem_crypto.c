@@ -430,15 +430,6 @@ smtc_modem_crypto_return_code_t smtc_modem_crypto_derive_multicast_session_keys(
     return SMTC_MODEM_CRYPTO_RC_SUCCESS;
 }
 
-smtc_modem_crypto_return_code_t smtc_modem_crypto_derive_relay_session_keys( uint32_t dev_addr, uint8_t stack_id )
-{
-    if( smtc_secure_element_derive_relay_session_keys( dev_addr, stack_id ) != SMTC_SE_RC_SUCCESS )
-    {
-        return SMTC_MODEM_CRYPTO_RC_ERROR_SECURE_ELEMENT;
-    }
-    return SMTC_MODEM_CRYPTO_RC_SUCCESS;
-}
-
 smtc_modem_crypto_return_code_t smtc_modem_crypto_get_class_b_rand( uint32_t beacon_epoch_time, uint32_t dev_addr,
                                                                     uint8_t rand[16], uint8_t stack_id )
 {

@@ -142,9 +142,6 @@ typedef enum smtc_se_key_identifier_e
     SMTC_SE_MC_KEY_3,                            //!< Multicast root key index 3
     SMTC_SE_MC_APP_S_KEY_3,                      //!< Multicast Application session key index 3
     SMTC_SE_MC_NWK_S_KEY_3,                      //!< Multicast Network session key index 3
-    SMTC_SE_RELAY_ROOT_WOR_S_KEY,                //!< Relay Root Session Key
-    SMTC_SE_RELAY_WOR_S_INT_KEY,                 //!< Relay WOR Integrity Session Key
-    SMTC_SE_RELAY_WOR_S_ENC_KEY,                 //!< Relay WOR Encryption Session Key
     SMTC_SE_DATA_BLOCK_INT_KEY,                  //!< Fragmented data block Transport DataBlockIntKey
     SMTC_SE_SLOT_RAND_ZERO_KEY,                  //!< Zero key for slot randomization in class B
     SMTC_SE_NO_KEY,                              //!< No Key
@@ -227,15 +224,6 @@ smtc_se_return_code_t smtc_secure_element_aes_encrypt( const uint8_t* buffer, ui
 smtc_se_return_code_t smtc_secure_element_derive_and_store_key( uint8_t* input, smtc_se_key_identifier_t rootkey_id,
                                                                 smtc_se_key_identifier_t targetkey_id,
                                                                 uint8_t                  stack_id );
-
-/**
- * @brief Derives Relay WOR session keys and store them
- *
- * @param [in] dev_addr Device address (4 bytes)
- * @param [in] stack_id The Stack Identifier
- * @return Secure element return code as defined in @ref smtc_se_return_code_t
- */
-smtc_se_return_code_t smtc_secure_element_derive_relay_session_keys( uint32_t dev_addr, uint8_t stack_id );
 
 /**
  * @brief Process join_accept message.

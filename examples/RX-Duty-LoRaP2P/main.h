@@ -24,8 +24,6 @@
 // #define REGION_US_915 1
 // #define ADD_CLASS_B 1
 // #define ADD_CLASS_C 1
-// #define ADD_RELAY_TX 1
-// #define ADD_RELAY_RX 1
 // #define MODEM_HAL_DBG_TRACE 1
 
 #include <Arduino.h>

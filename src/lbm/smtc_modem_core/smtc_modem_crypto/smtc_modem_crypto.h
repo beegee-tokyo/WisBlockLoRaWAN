@@ -243,14 +243,6 @@ smtc_modem_crypto_return_code_t smtc_modem_crypto_derive_multicast_session_keys(
                                                                                  uint32_t mc_addr, uint8_t stack_id );
 
 /**
- * @brief Derives Relay WOR session keys ( RelayRootWorSKey, RelayWorSKey and RelayWorSIntKey ) from NwkSEncKey
- *
- * @param [in] dev_addr Device address (4 bytes)
- * @return smtc_modem_crypto_return_code_t
- */
-smtc_modem_crypto_return_code_t smtc_modem_crypto_derive_relay_session_keys( uint32_t dev_addr, uint8_t stack_id );
-
-/**
  * @brief Get the class B ping slot rand number that will be used to compute PingPeriod Offset
  *
  * @param [in] beacon_epoch_time The beacon epoch time
