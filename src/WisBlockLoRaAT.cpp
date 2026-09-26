@@ -1902,7 +1902,7 @@ void WisBlockLoRaAT::onBackgroundRxData()
 	g_task_event_type |= 0b0000000000100000; // #define AT_CMD
 	if (g_task_sem != NULL)
 	{
-#ifdef ESP32ARDUINO_ARCH_ESP32
+#ifdef ARDUINO_ARCH_ESP32
 		xSemaphoreGiveFromISR(g_task_sem, &xHigherPriorityTaskWoken);
 #endif
 #ifdef NRF52_SERIES

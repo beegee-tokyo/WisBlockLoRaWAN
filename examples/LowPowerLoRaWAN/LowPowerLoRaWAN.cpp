@@ -280,12 +280,12 @@ void setup()
 	// 	Serial.printf("[Setup] Current band selection %d\n", cfg.lorawan.region);
 
 	// 	uint16_t mask = 0xFFFF;
-	// 	if (idx == WISBLOCK_REGION_AU915) // WISBLOCK_REGION_AU915
+	// 	if (idx == WISBLOCK_RUI3_BAND_AU915) // WISBLOCK_REGION_AU915
 	// 	{
 	// 		// sub-band 1 (channels 0-7 + 64) - e.g. The Things Network AU915 recommended subband
 	// 		mask = 0x0001;
 	// 	}
-	// 	if (idx == WISBLOCK_REGION_US915) // WISBLOCK_REGION_US915
+	// 	if (idx == WISBLOCK_RUI3_BAND_US915) // WISBLOCK_REGION_US915
 	// 	{
 	// 		// sub-band 2 (channels 8-15 + 65) - e.g. The Things Network US915 recommended subband
 	// 		mask = 0x0002;
