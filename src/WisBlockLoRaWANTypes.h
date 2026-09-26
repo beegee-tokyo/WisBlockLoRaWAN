@@ -37,6 +37,55 @@ enum WisBlockRegion : uint8_t
 	WISBLOCK_REGION_WW2G4 = 12, /* 2.4 GHz worldwide, if radio variant supports it */
 };
 
+/**
+ * LoRaWAN region, using RUI3's AT+BAND numbering (see the RUI3 AT command manual) rather than
+ * WisBlockRegion's own SWL2001/LBM-mirroring order - this is the enumeration
+ * WisBlockLoRaWAN::setRegion()/getRegion() and AT+BAND use, precisely so callers never have to
+ * juggle two different "which region is this" numberings for the same setting.
+ *
+ * RUI3's EU433 (0) and LA915 (12) are part of RUI3's documented numbering but have no
+ * WisBlockRegion equivalent at all in this vendored LBM build (its main.h doesn't define
+ * REGION_EU_433 or REGION_LA_915) - wisblockRUI3BandToRegion() returns false for them rather than
+ * silently picking something else, and setRegion()/AT+BAND reject them the same way.
+ */
+enum WisBlockRUI3Band : uint8_t
+{
+	WISBLOCK_RUI3_BAND_EU433 = 0,
+	WISBLOCK_RUI3_BAND_CN470 = 1,
+	WISBLOCK_RUI3_BAND_RU864 = 2,
+	WISBLOCK_RUI3_BAND_IN865 = 3,
+	WISBLOCK_RUI3_BAND_EU868 = 4,
+	WISBLOCK_RUI3_BAND_US915 = 5,
+	WISBLOCK_RUI3_BAND_AU915 = 6,
+	WISBLOCK_RUI3_BAND_KR920 = 7,
+	WISBLOCK_RUI3_BAND_AS923_1 = 8,
+	WISBLOCK_RUI3_BAND_AS923_2 = 9,
+	WISBLOCK_RUI3_BAND_AS923_3 = 10,
+	WISBLOCK_RUI3_BAND_AS923_4 = 11,
+	WISBLOCK_RUI3_BAND_LA915 = 12,
+	/** Returned by wisblockRegionToRUI3Band()/getRegion() when the current WisBlockRegion has no
+	 * RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4 -
+	 * library-specific regions beyond RUI3's set). Never a valid value to pass to setRegion(). */
+	WISBLOCK_RUI3_BAND_UNKNOWN = 0xFF,
+};
+
+/**
+ * Converts a RUI3 AT+BAND index (WisBlockRUI3Band, as used by WisBlockLoRaWAN::setRegion() and
+ * AT+BAND) to this library's internal SWL2001/LBM-mirroring WisBlockRegion enum.
+ * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_EU433,
+ * WISBLOCK_RUI3_BAND_LA915, WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion
+ * equivalent in this vendored LBM build.
+ */
+bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);
+
+/**
+ * Inverse of wisblockRUI3BandToRegion() - converts this library's internal WisBlockRegion enum to
+ * the RUI3 AT+BAND numbering (WisBlockRUI3Band) used by WisBlockLoRaWAN::getRegion() and AT+BAND.
+ * @return WISBLOCK_RUI3_BAND_UNKNOWN for WisBlockRegion values with no RUI3 band index
+ * (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4).
+ */
+WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region);
+
 enum WisBlockDeviceClass : uint8_t
 {
 	WISBLOCK_CLASS_A = 0,

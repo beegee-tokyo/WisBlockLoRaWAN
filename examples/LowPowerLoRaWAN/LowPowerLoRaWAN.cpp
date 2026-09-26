@@ -9,8 +9,6 @@
 WisBlockLoRaWAN lora;
 WisBlockLoRaAT at_serial;
 
-int regionToBandIndex(WisBlockRegion region);
-
 // Custom settings
 CustomAtSettings custom_settings;
 
@@ -276,7 +274,7 @@ void setup()
 	// Serial.println("[LoRaWAN] setup");
 	// 	lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
 	// 	lora.setOTAAKeys(devEui, joinEui, appKey);
-	// 	lora.setRegion(WISBLOCK_REGION_AS923_3);
+	// 	lora.setRegion(WISBLOCK_RUI3_BAND_AS923_3); // RUI3 AT+BAND numbering - see WisBlockRUI3Band
 	// 	const WisBlockPersistedConfig &cfg = lora.getConfig();
 	// 	int idx = cfg.lorawan.region;
 	// 	Serial.printf("[Setup] Current band selection %d\n", cfg.lorawan.region);

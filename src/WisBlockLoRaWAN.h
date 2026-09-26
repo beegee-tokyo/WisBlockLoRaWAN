@@ -64,7 +64,24 @@ public:
 	void setOTAAKeys(const uint8_t devEui[8], const uint8_t joinEui[8], const uint8_t appKey[16]);
 	void setABPKeys(uint32_t devAddr, const uint8_t nwkSKey[16], const uint8_t appSKey[16]);
 	void setJoinMode(WisBlockJoinMode mode);
-	void setRegion(WisBlockRegion region);
+	/**
+	 * Sets the LoRaWAN region using RUI3's AT+BAND numbering (WisBlockRUI3Band) - the same
+	 * enumeration AT+BAND itself uses, rather than the SWL2001/LBM-mirroring WisBlockRegion enum
+	 * used internally and stored in getConfig().lorawan.region. Converts internally to
+	 * WisBlockRegion before applying, via wisblockRUI3BandToRegion() - see its doc comment and
+	 * WisBlockRUI3Band's for why these two numberings exist.
+	 * @return false (no change made) for WISBLOCK_RUI3_BAND_EU433, WISBLOCK_RUI3_BAND_LA915, or
+	 * any other band with no WisBlockRegion equivalent in this vendored LBM build.
+	 */
+	bool setRegion(WisBlockRUI3Band band);
+	/**
+	 * Inverse of setRegion() - returns the currently configured region using RUI3's AT+BAND
+	 * numbering (WisBlockRUI3Band), via wisblockRegionToRUI3Band().
+	 * @return WISBLOCK_RUI3_BAND_UNKNOWN if the current region (getConfig().lorawan.region) has
+	 * no RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4) - read
+	 * getConfig().lorawan.region directly for those.
+	 */
+	WisBlockRUI3Band getRegion() const;
 	/**
 	 * Returns true if this DR is actually active on the radio right now.
 	 * A false return doesn't mean the request was rejected outright - see

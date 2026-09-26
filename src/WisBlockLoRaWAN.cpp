@@ -184,10 +184,21 @@ void WisBlockLoRaWAN::setJoinMode(WisBlockJoinMode mode)
 	applyLoRaWANSettings();
 }
 
-void WisBlockLoRaWAN::setRegion(WisBlockRegion region)
+bool WisBlockLoRaWAN::setRegion(WisBlockRUI3Band band)
 {
+	WisBlockRegion region;
+	if (!wisblockRUI3BandToRegion(band, region))
+	{
+		return false;
+	}
 	config.lorawan.region = region;
 	applyLoRaWANSettings();
+	return true;
+}
+
+WisBlockRUI3Band WisBlockLoRaWAN::getRegion() const
+{
+	return wisblockRegionToRUI3Band(config.lorawan.region);
 }
 
 bool WisBlockLoRaWAN::setDataRate(uint8_t dataRate)

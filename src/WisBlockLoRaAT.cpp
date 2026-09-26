@@ -54,90 +54,6 @@ namespace
 		port->flush();
 	}
 
-	// AT+BAND uses RUI3's region numbering (see the RUI3 AT command
-	// manual), which doesn't match WisBlockRegion's own enum values or
-	// order - this library predates the RUI3-compatibility pass and
-	// numbered regions in whatever order they were originally added.
-	// RUI3's EU433 (0) and LA915 (12) have no WisBlockRegion equivalent at
-	// all - this vendored LBM build's main.h doesn't define REGION_EU_433
-	// or REGION_LA_915, so those region tables were never compiled in;
-	// setBandIndexToRegion() returns false for them rather than silently
-	// picking something else.
-	bool bandIndexToRegion(int index, WisBlockRegion &outRegion)
-	{
-		switch (index)
-		{
-		case 1:
-			outRegion = WISBLOCK_REGION_CN470;
-			return true;
-		case 2:
-			outRegion = WISBLOCK_REGION_RU864;
-			return true;
-		case 3:
-			outRegion = WISBLOCK_REGION_IN865;
-			return true;
-		case 4:
-			outRegion = WISBLOCK_REGION_EU868;
-			return true;
-		case 5:
-			outRegion = WISBLOCK_REGION_US915;
-			return true;
-		case 6:
-			outRegion = WISBLOCK_REGION_AU915;
-			return true;
-		case 7:
-			outRegion = WISBLOCK_REGION_KR920;
-			return true;
-		case 8:
-			outRegion = WISBLOCK_REGION_AS923_1;
-			return true;
-		case 9:
-			outRegion = WISBLOCK_REGION_AS923_2;
-			return true;
-		case 10:
-			outRegion = WISBLOCK_REGION_AS923_3;
-			return true;
-		case 11:
-			outRegion = WISBLOCK_REGION_AS923_4;
-			return true;
-		default: // 0 (EU433), 12 (LA915), and anything else out of range
-			return false;
-		}
-	}
-
-	// Inverse of bandIndexToRegion() - returns -1 for WisBlockRegion values
-	// with no RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0,
-	// WISBLOCK_REGION_WW2G4 - library-specific regions beyond RUI3's set).
-	int regionToBandIndex(WisBlockRegion region)
-	{
-		switch (region)
-		{
-		case WISBLOCK_REGION_EU868:
-			return 4;
-		case WISBLOCK_REGION_US915:
-			return 5;
-		case WISBLOCK_REGION_AU915:
-			return 6;
-		case WISBLOCK_REGION_AS923_1:
-			return 8;
-		case WISBLOCK_REGION_AS923_2:
-			return 9;
-		case WISBLOCK_REGION_AS923_3:
-			return 10;
-		case WISBLOCK_REGION_AS923_4:
-			return 11;
-		case WISBLOCK_REGION_KR920:
-			return 7;
-		case WISBLOCK_REGION_IN865:
-			return 3;
-		case WISBLOCK_REGION_RU864:
-			return 2;
-		case WISBLOCK_REGION_CN470:
-			return 1;
-		default:
-			return -1;
-		}
-	}
 } // namespace
 
 WisBlockLoRaAT *WisBlockLoRaAT::activeInstanceForRx = nullptr;
@@ -764,25 +680,23 @@ void WisBlockLoRaAT::atBand(AtOp op, const char *value)
 {
 	if (op == AtOp::Query)
 	{
-		int idx = regionToBandIndex(lora->getConfig().lorawan.region);
-		if (idx < 0)
+		WisBlockRUI3Band band = lora->getRegion();
+		if (band == WISBLOCK_RUI3_BAND_UNKNOWN)
 		{
 			replyError("current region has no RUI3 band index");
 			return;
 		}
 		port->printf("AT+BAND=");
-		port->println(idx);
+		port->println((int)band);
 		replyOk();
 	}
 	else if (op == AtOp::Write)
 	{
-		WisBlockRegion region;
-		if (!bandIndexToRegion(atoi(value), region))
+		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(atoi(value))))
 		{
 			replyError("unsupported band index - EU433/LA915 not built into this LBM vendoring");
 			return;
 		}
-		lora->setRegion(region);
 		replyOk();
 	}
 	else

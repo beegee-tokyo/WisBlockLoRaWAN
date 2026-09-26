@@ -63,7 +63,7 @@ void setup()
 	lora.begin();
 	lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
 	lora.setOTAAKeys(devEui, joinEui, appKey);
-	lora.setRegion(WISBLOCK_REGION_EU868);
+	lora.setRegion(WISBLOCK_RUI3_BAND_EU868); // RUI3 AT+BAND numbering - see WisBlockRUI3Band
 	lora.setDeviceClass(WISBLOCK_CLASS_A);
 	lora.setADR(true);
 	lora.setConfirmedUplinks(false);
