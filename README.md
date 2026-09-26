@@ -26,7 +26,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+DEVEUI=_**hex8**_ / AT+DEVEUI=?               | Device EUI                                     |
 | AT+APPEUI=_**hex8**_ / AT+JOINEUI <br> AT+APPEUI=? / AT+JOINEUI=? | Join EUI                                       |
 | AT+APPKEY=_**hex16**_ / AT+APPKEY=?              | App/Network key (OTAA)                         |
-| AT+DEVADDR=_**hex4**_ / AT+DEVADDR=?             | Device Address (ABP)                           |
+| AT+DEVADDR=_**hex4**_ / AT+DEVADDR=?             | Device Address - settable for ABP; for OTAA, AT+DEVADDR=? reports the live network-assigned address once joined (empty/0 before that - see `LoRaWANEngine::getDevAddr()`'s doc comment) |
 | AT+NWKSKEY=_**hex16**_ / AT+NWKSKEY=?            | Network Session Key (ABP)                      |
 | AT+APPSKEY=_**hex16**_ / AT+APPSKEY=?            | App Session Key (ABP)                          |
 | AT+BAND=_**0..12**_ / AT+BAND=?             | 0 EU433 (unsupported), 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
@@ -69,6 +69,10 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+VER=?                       | RUI3-format version string (this library's own version, not RUI3 firmware) |
 | AT+ALIAS=_**16char string**_ / AT+ALIAS=?   | Get/set a free-form device label (persisted, max 16 chars) |
 | AT+FIRMWAREVER=_**31char string**_ / AT+FIRMWAREVER=? | Get/set a free-form firmware version label (persisted, max 31 chars - RUI3 documents this as 32, see `WisBlockLoRaWAN::setFirmwareVer()`'s doc comment) |
+| _**LoRaWAN multicast (Class B/C)**_ | |
+| AT+ADDMULC=_**[Class]:[DevAddr]:[NwkSKey]:[AppSKey]:[Frequency]:[Datarate]:[Periodicity]**_ | Configure a multicast group and start its RX session (keyed by DevAddr - re-running with an existing DevAddr updates that group; up to 4 groups at once) - see `WisBlockLoRaWAN::setMulticastGroup()` |
+| AT+RMVMULC=_**hex4 DevAddr**_ | Stop and remove a multicast group by its DevAddr |
+| AT+LSTMULC=? | List configured multicast groups, one `Class:DevAddr:NwkSKey:AppSKey:Frequency:Datarate` line each (keys shown in plaintext, matching RUI3) |
 | AT+SN=?                        | Get unique device serial number |                          
 | AT+HWMODEL=?                   | Get HW model (rak4630, rak3112, or rak11310) |
 | AT+HWID=?                      | Get MCU ID (nrf52840, esp32-s3, or rp2040) |

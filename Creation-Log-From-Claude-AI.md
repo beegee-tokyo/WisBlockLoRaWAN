@@ -3209,3 +3209,108 @@ here. Grepped for the stale "16-character limit" comment text to confirm only th
 now actually stops at 3 attempts with a genuine ~30s gap once the example's `onJoinFailed()`
 fix is flashed, and whether symptom (a) (`getAutoJoin()` reading `false`) still reproduces at
 all once retested.
+
+## 2026-09-25 - AT+DEVADDR=? now reports the live post-join address; LoRaWAN multicast groups (AT+ADDMULC/AT+RMVMULC/AT+LSTMULC + API); unicast/multicast flag on WisBlockRxResult; Remote Multicast Setup investigated
+
+### Scope
+
+Three items, in the order asked:
+
+1. **DevAddr empty after OTAA join, fixed.** `AT+DEVADDR=?` used to read
+   `config.lorawan.abp.devAddr` directly - correct for ABP (that field IS the configured
+   address), but that field is never touched by an OTAA join, so it stayed at its 0 default
+   forever on an OTAA device. New `LoRaWANEngine::getDevAddr()` (wrapped by
+   `WisBlockLoRaWAN::getDevAddr()`) returns the *live* address instead - `lorawan_api_devaddr_get()`
+   once actually joined (works for both OTAA and ABP, since ABP's address is pushed into the
+   stack via `smtc_modem_debug_connect_with_abp()` at connect time too), falling back to the
+   configured ABP value before that. `atDevAddr()`'s query branch switched to it.
+
+   NwkSKey/AppSKey were also asked for, but genuinely can't be added the same way: there is no
+   getter anywhere in LoRa Basics Modem's API surface - public (`smtc_modem_api.h`) or internal
+   (`lorawan_api.h`, the secure-element headers) - for a device's own OTAA-derived unicast
+   session keys. That's by design, the same write-only-key-material reasoning already
+   documented on `WisBlockOTAAKeys::appKey` - unlike DevAddr, there's no live-query escape
+   hatch for these two. Importantly, this turns out not to block item 2 at all: a *multicast*
+   group's NwkSKey/AppSKey (McNwkSKey/McAppSKey) are a completely separate key pair from the
+   device's own unicast session keys, not derived from them - they're supplied by the network
+   operator as direct input to AT+ADDMULC below, the same way RUI3's own AT+ADDMULC works.
+
+2. **LoRaWAN multicast, RUI3-compatible.** New `WisBlockMulticastGroup` struct
+   (`WisBlockLoRaWANTypes.h`) plus group-ID-keyed API on `LoRaWANEngine`/`WisBlockLoRaWAN`
+   (`setMulticastGroup()`, `removeMulticastGroup()`, `getMulticastGroup()`,
+   `findMulticastGroupByDevAddr()`) wrapping LBM's `smtc_modem_multicast_set_grp_config()` +
+   `smtc_modem_multicast_class_{b,c}_{start,stop}_session()`. `AT+ADDMULC`/`AT+RMVMULC`/
+   `AT+LSTMULC` (`atAddMulc()`/`atRmvMulc()`/`atLstMulc()` in `WisBlockLoRaAT.cpp`, registered
+   in `atCommandTable[]`) build RUI3's DevAddr-keyed convenience (auto-assign/look up a group
+   by DevAddr, since RUI3's AT commands have no explicit group-index parameter) on top of that
+   group-ID-keyed API - up to 4 groups at once, a LoRa Basics Modem limit. `AT+LSTMULC=?`
+   echoes NwkSKey/AppSKey back in plaintext, matching RUI3's own documented example output and
+   this library's established AT+APPKEY=?/AT+NWKSKEY=?/AT+APPSKEY=? convention (see the
+   2026-09-22 entries above for that convention's own back-and-forth). Groups are RAM-only,
+   not persisted by AT+SAVE/AT+RESTORE - see WisBlockMulticastGroup's doc comment for why.
+
+   This required flipping `SMTC_MULTICAST` on in `extra_script.py`'s build defines - every
+   `smtc_modem_multicast_*` function is compiled as a silent `return SMTC_MODEM_RC_FAIL` stub
+   without it (confirmed by reading `smtc_modem.c`'s `#endif // SMTC_MULTICAST` guards
+   directly), so none of this would have done anything at all otherwise. This is a distinct
+   gate from `ADD_FUOTA` (item 3) - flipping it does NOT enable Remote Multicast Setup;
+   `extra_script.py`'s own doc comment, which previously listed bare "multicast" among the
+   features deliberately left disabled, is corrected to reflect that split.
+
+   `WisBlockRxResult` gained `isMulticast`/`multicastGroupId` fields, populated in the
+   `SMTC_MODEM_EVENT_DOWNDATA` handler from `smtc_modem_dl_metadata_t::window` -
+   `SMTC_MODEM_DL_WINDOW_RXC_MC_GRP0..3`/`RXB_MC_GRP0..3` are multicast (LBM tells us exactly
+   which of the 4 groups on every downlink), anything else (RX1/RX2/RXC/RXB/RXBEACON/RXR) is
+   this device's own unicast window.
+
+3. **Remote Multicast Setup, investigated (not implemented - wasn't asked to be, this session).**
+   Both the Fragmentation and Remote Multicast Setup package source
+   (`src/lbm/smtc_modem_core/lorawan_packages/`) are already present in the vendored LBM tree,
+   but their registration in `modem_services_config.h` is gated behind `ADD_FUOTA`, which is
+   not defined anywhere in this build (confirmed by grepping the whole tree) - so neither is
+   currently compiled in, independent of the `SMTC_MULTICAST` gate item 2 turns on. Manually
+   provisioning a multicast group via AT+ADDMULC (item 2) works today; a network server
+   provisioning one over the air via the LoRaWAN Alliance's Remote Multicast Setup package
+   (TS005) does not, and enabling it is a materially bigger lift than flipping one macro - the
+   package needs `ADD_FUOTA`, its own set of source files added to `include_dirs`, and (per
+   its own header, not yet reviewed in any depth here) likely additional plumbing this session
+   didn't get into. `extra_script.py`'s doc comment now spells this distinction out explicitly
+   for whoever picks this up next.
+
+### Files changed
+
+`src/WisBlockLoRaWANTypes.h` (`WisBlockMulticastGroup`, `WISBLOCK_MULTICAST_GROUP_COUNT`,
+`WisBlockRxResult::isMulticast`/`multicastGroupId`), `src/LoRaWANEngine.h`/`.cpp`
+(`getDevAddr()`, `setMulticastGroup()`/`removeMulticastGroup()`/`getMulticastGroup()`/
+`findMulticastGroupByDevAddr()`, `multicastGroups[]`, `SMTC_MODEM_EVENT_DOWNDATA` handler
+updated), `src/WisBlockLoRaWAN.h` (thin wrappers for all of the above), `src/WisBlockLoRaAT.h`/
+`.cpp` (`atDevAddr()` updated, `atAddMulc()`/`atRmvMulc()`/`atLstMulc()` added and registered),
+`extra_script.py` (`SMTC_MULTICAST` added to `defines`, module doc comment corrected),
+`README.md` (AT+DEVADDR row updated, new multicast command rows).
+
+### Verification
+
+Every new LBM function call (`smtc_modem_multicast_set_grp_config()`,
+`smtc_modem_multicast_class_{b,c}_{start,stop}_session()`, `lorawan_api_devaddr_get()`) and
+every new enum/constant reference (`smtc_modem_mc_grp_id_t`'s 0-3 values,
+`smtc_modem_class_b_ping_slot_periodicity_t`, `SMTC_MODEM_KEY_LENGTH == 16`, the full
+`smtc_modem_dl_window_t` enum) cross-checked by line-for-line diff against their real
+declarations in the vendored `src/lbm/smtc_modem_api/smtc_modem_api.h`/
+`src/lbm/smtc_modem_core/lorawan_api/lorawan_api.h` - names, parameter order, and types all
+confirmed to match exactly. A full build of `LoRaWANEngine.cpp` itself wasn't attempted - it
+needs a complete radio/MCU HAL this environment can't provide - but `LoRaWANEngine.h` was
+syntax-checked standalone (`g++ -fsyntax-only -std=c++17 -Wall`) against the real
+`WisBlockLoRaWANTypes.h`, and `WisBlockLoRaAT.cpp` against a hand-written `WisBlockLoRaWAN.h`
+API stub extended with the full new multicast/DevAddr surface - zero errors on both. Grepped
+the whole `src/lbm/` tree for `SMTC_MULTICAST` to confirm it gates nothing outside
+`smtc_modem.c`'s public wrapper functions (the underlying Class B/C RX engines handle
+multicast frames structurally, already enabled via `ADD_CLASS_B`/`ADD_CLASS_C` - no other
+files needed changes for this). Brace/paren-balance-checked every file touched; the one file
+with an imbalanced paren count (`LoRaWANEngine.h`, comments only) reconfirmed pre-existing (see
+the 2026-09-24 entry above, which found the same thing) rather than introduced here.
+
+**Not done**: not tested against real hardware - in particular, an actual multicast downlink
+has never been received through this code path, so `isMulticast`/`multicastGroupId`'s
+population logic (correct per the header's documented enum values) is unverified against a
+real network server actually sending one. Remote Multicast Setup (item 3) is investigated and
+documented, not implemented.

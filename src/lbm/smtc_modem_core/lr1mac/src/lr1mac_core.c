@@ -275,7 +275,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
 
             if( ( lr1_mac_obj->no_rx_windows == 0 ) || ( lr1_mac_obj->join_status != JOINED ) )
             {
-                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX1 );
+                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX1_W );
             }
             else
             {
@@ -299,7 +299,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
         // Intentional fallthrough
 
     //**********************************************************************************
-    //                                   STATE RX1
+    //                                   STATE RX1_W
     //**********************************************************************************
     case LWPSTATE_RX1:
         if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
@@ -311,9 +311,9 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
                 if( lr1_mac_obj->valid_rx_packet == NO_MORE_VALID_RX_PACKET )
                 {
                     lr1_mac_obj->lr1mac_state = LWPSTATE_RX2;
-                    DBG_PRINT_WITH_LINE( "Receive a bad packet on Rx1 for stack_id = %d continue with RX2 ",
+                    DBG_PRINT_WITH_LINE( "Receive a bad packet on Rx1 for stack_id = %d continue with RX2_W ",
                                          lr1_mac_obj->stack_id );
-                    timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2 );
+                    timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2_W );
                 }
                 else
                 {
@@ -326,8 +326,8 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
             else
             {
                 lr1_mac_obj->lr1mac_state = LWPSTATE_RX2;
-                DBG_PRINT_WITH_LINE( "RX1 Timeout for stack_id = %d", lr1_mac_obj->stack_id );
-                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2 );
+                DBG_PRINT_WITH_LINE( "RX1_W Timeout for stack_id = %d", lr1_mac_obj->stack_id );
+                timer_in_past = lr1_stack_mac_rx_timer_configure( lr1_mac_obj, RX2_W );
             }
         }
         if( timer_in_past == false )
@@ -341,7 +341,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
         // Intentional fallthrough
 
     //**********************************************************************************
-    //                                   STATE RX2
+    //                                   STATE RX2_W
     //**********************************************************************************
     case LWPSTATE_RX2:
         if( lr1_mac_obj->radio_process_state == RADIOSTATE_RX_FINISHED )
@@ -363,7 +363,7 @@ lr1mac_states_t lr1mac_core_process( lr1_stack_mac_t* lr1_mac_obj )
             }
             else
             {
-                DBG_PRINT_WITH_LINE( "RX2 Timeout for stack_id = %d", lr1_mac_obj->stack_id );
+                DBG_PRINT_WITH_LINE( "RX2_W Timeout for stack_id = %d", lr1_mac_obj->stack_id );
             }
             lr1mac_mac_update( lr1_mac_obj );
         }

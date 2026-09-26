@@ -28,9 +28,18 @@ need to compute an absolute base path.
 
 IMPORTANT: this library only vendors the subset of LBM actually needed for
 LoRaWAN Class A/B/C + LoRa P2P on SX1262 - the scope of the original
-request. Deliberately NOT vendored/enabled: FUOTA
-(fragmented data block transport, firmware management, multi-package
-access), multicast, application layer clock sync, cloud device management,
+request, plus manually-provisioned LoRaWAN multicast group RX (Class B/C -
+see WisBlockLoRaWAN::setMulticastGroup()/AT+ADDMULC, and SMTC_MULTICAST
+below). Deliberately NOT vendored/enabled: FUOTA (fragmented data block
+transport, firmware management, multi-package access, and - despite the
+name overlap with the multicast *session* support that IS enabled below -
+the separate Remote Multicast Setup package, i.e. network-triggered/
+over-the-air multicast group provisioning rather than the manual
+AT+ADDMULC-style provisioning this library supports; both the
+Fragmentation and Remote Multicast Setup package source are already
+present under src/lbm/smtc_modem_core/lorawan_packages/, gated behind
+ADD_FUOTA - see modem_services_config.h - but that gate is intentionally
+left off here), application layer clock sync, cloud device management,
 LFU (log file upload), store-and-forward, the LoRaWAN Relay service (both
 TX/end-device and RX/serving roles - relay support has been fully removed
 from this library, see Creation-Log-From-Claude-AI.md), the beacon-TX
@@ -108,6 +117,13 @@ defines = [
     # Device classes - both required per the original spec.
     "ADD_CLASS_B",
     "ADD_CLASS_C",
+    # Multicast group RX sessions (Class B/C) - smtc_modem_multicast_set_grp_config() and
+    # friends are silent no-ops (always return SMTC_MODEM_RC_FAIL) without this - see
+    # WisBlockLoRaWAN::setMulticastGroup()/AT+ADDMULC. This is the core multicast *session*
+    # feature only - NOT the same as the LoRaWAN Remote Multicast Setup package (FUOTA-family,
+    # network-triggered group provisioning), which remains unvendored - see the module doc
+    # comment above.
+    "SMTC_MULTICAST",
     # LBM's own debug trace macro (smtc_modem_hal_print_trace calls are
     # gated by this in some LBM internals, not just our own port). 0 = off.
     # Flip to 1 here (or override via your own platformio.ini build_flags)

@@ -197,6 +197,9 @@ const WisBlockLoRaAT::AtCommandEntry WisBlockLoRaAT::atCommandTable[] = {
 	{"+VER", &WisBlockLoRaAT::atVer},
 	{"+FIRMWAREVER", &WisBlockLoRaAT::atFirmwareVer},
 	{"+ALIAS", &WisBlockLoRaAT::atAlias},
+	{"+ADDMULC", &WisBlockLoRaAT::atAddMulc},
+	{"+RMVMULC", &WisBlockLoRaAT::atRmvMulc},
+	{"+LSTMULC", &WisBlockLoRaAT::atLstMulc},
 	{"Z", &WisBlockLoRaAT::atZ},
 	{"R", &WisBlockLoRaAT::atR},
 	{"+BOOT", &WisBlockLoRaAT::atBoot},
@@ -666,7 +669,12 @@ void WisBlockLoRaAT::atDevAddr(AtOp op, const char *value)
 {
 	if (op == AtOp::Query)
 	{
-		uint32_t addr = lora->getConfig().lorawan.abp.devAddr;
+		// FIX: was lora->getConfig().lorawan.abp.devAddr, which only ever holds
+		// what setABPKeys()/AT+DEVADDR= itself last configured - correct for
+		// ABP, but always the stale ABP default (0) after an OTAA join, since
+		// OTAA never touches that field. getDevAddr() reflects the actual
+		// live DevAddr in both cases - see its doc comment in LoRaWANEngine.h.
+		uint32_t addr = lora->getDevAddr();
 		uint8_t bytes[4] = {(uint8_t)(addr >> 24), (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
 		port->printf("AT+DEVADDR=");
 		printHex(port, bytes, 4);
@@ -1732,6 +1740,187 @@ void WisBlockLoRaAT::atFirmwareVer(AtOp op, const char *value)
 	{
 		replyError("AT_ERROR");
 	}
+}
+
+void WisBlockLoRaAT::atAddMulc(AtOp op, const char *value)
+{
+	// Write-only, same as RUI3's AT+ADDMULC.
+	if (op != AtOp::Write)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	// AT+ADDMULC=[Class]:[DevAddr]:[NwkSKey]:[AppSKey]:[Frequency]:[Datarate]:[Periodicity]
+	char buf[160];
+	strncpy(buf, value, sizeof(buf) - 1);
+	buf[sizeof(buf) - 1] = '\0';
+
+	char *tok = strtok(buf, ":");
+	if (!tok || tok[1] != '\0' || (tok[0] != 'B' && tok[0] != 'b' && tok[0] != 'C' && tok[0] != 'c'))
+	{
+		replyError("AT_PARAM_ERROR"); // Class must be exactly "B" or "C"
+		return;
+	}
+	WisBlockDeviceClass devClass = (tok[0] == 'B' || tok[0] == 'b') ? WISBLOCK_CLASS_B : WISBLOCK_CLASS_C;
+
+	tok = strtok(nullptr, ":");
+	uint8_t addrBytes[4];
+	if (!tok || !parseHex(tok, addrBytes, 4))
+	{
+		replyError("AT_PARAM_ERROR"); // bad DevAddr hex, expected 8 chars
+		return;
+	}
+	uint32_t devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
+						((uint32_t)addrBytes[2] << 8) | addrBytes[3];
+
+	tok = strtok(nullptr, ":");
+	uint8_t nwkSKey[16];
+	if (!tok || !parseHex(tok, nwkSKey, 16))
+	{
+		replyError("AT_PARAM_ERROR"); // bad NwkSKey hex, expected 32 chars
+		return;
+	}
+
+	tok = strtok(nullptr, ":");
+	uint8_t appSKey[16];
+	if (!tok || !parseHex(tok, appSKey, 16))
+	{
+		replyError("AT_PARAM_ERROR"); // bad AppSKey hex, expected 32 chars
+		return;
+	}
+
+	tok = strtok(nullptr, ":");
+	if (!tok)
+	{
+		replyError("AT_PARAM_ERROR");
+		return;
+	}
+	uint32_t freq = strtoul(tok, nullptr, 10);
+
+	tok = strtok(nullptr, ":");
+	if (!tok)
+	{
+		replyError("AT_PARAM_ERROR");
+		return;
+	}
+	uint8_t dr = (uint8_t)atoi(tok);
+
+	tok = strtok(nullptr, ":");
+	if (!tok)
+	{
+		replyError("AT_PARAM_ERROR"); // Periodicity required even for Class C - see setMulticastGroup()'s doc comment
+		return;
+	}
+	uint8_t periodicity = (uint8_t)atoi(tok);
+
+	// RUI3's AT+ADDMULC has no separate "group index" parameter - it's keyed
+	// by DevAddr instead (see AT+RMVMULC/AT+LSTMULC below). Reuse a slot
+	// already configured with this exact DevAddr (an update), otherwise
+	// claim the first free one - up to WISBLOCK_MULTICAST_GROUP_COUNT (4)
+	// groups, a LoRa Basics Modem limit (see setMulticastGroup()'s doc
+	// comment for the group-ID-keyed API this DevAddr-keyed convenience
+	// layer is built on).
+	int groupId = lora->findMulticastGroupByDevAddr(devAddr);
+	if (groupId < 0)
+	{
+		for (uint8_t i = 0; i < WISBLOCK_MULTICAST_GROUP_COUNT; i++)
+		{
+			if (!lora->getMulticastGroup(i))
+			{
+				groupId = (int)i;
+				break;
+			}
+		}
+	}
+	if (groupId < 0)
+	{
+		replyError("all 4 multicast groups already in use - AT+RMVMULC one first"); // -> AT_ERROR
+		return;
+	}
+
+	if (!lora->setMulticastGroup((uint8_t)groupId, devClass, devAddr, nwkSKey, appSKey, freq, dr, periodicity))
+	{
+		// e.g. device not currently in the matching class (see setDeviceClass()) - AT+CLASS=
+		// first - or LBM rejected freq/dr for the current region.
+		replyError("AT_ERROR");
+		return;
+	}
+	replyOk();
+}
+
+void WisBlockLoRaAT::atRmvMulc(AtOp op, const char *value)
+{
+	// Write-only, same as RUI3's AT+RMVMULC.
+	if (op != AtOp::Write)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	uint8_t addrBytes[4];
+	if (!parseHex(value, addrBytes, 4))
+	{
+		replyError("AT_PARAM_ERROR"); // bad DevAddr hex, expected 8 chars
+		return;
+	}
+	uint32_t devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
+						((uint32_t)addrBytes[2] << 8) | addrBytes[3];
+	int groupId = lora->findMulticastGroupByDevAddr(devAddr);
+	if (groupId < 0 || !lora->removeMulticastGroup((uint8_t)groupId))
+	{
+		replyError("no multicast group configured with this DevAddr"); // -> AT_ERROR
+		return;
+	}
+	replyOk();
+}
+
+void WisBlockLoRaAT::atLstMulc(AtOp op, const char *value)
+{
+	// Query-only, same as RUI3's AT+LSTMULC=?.
+	if (op != AtOp::Query)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	// One "Class:DevAddr:NwkSKey:AppSKey:Frequency:Datarate" line per configured group,
+	// matching RUI3's own AT+LSTMULC=? output format - keys included in plaintext
+	// deliberately, matching this library's AT+APPKEY=?/AT+NWKSKEY=?/AT+APPSKEY=? convention
+	// (see WisBlockMulticastGroup's doc comment). printHex() isn't used here since it always
+	// terminates the line - these need several more colon-separated fields after the hex, so
+	// each byte is printed directly instead.
+	char hexByte[3];
+	for (uint8_t i = 0; i < WISBLOCK_MULTICAST_GROUP_COUNT; i++)
+	{
+		const WisBlockMulticastGroup *g = lora->getMulticastGroup(i);
+		if (!g)
+		{
+			continue;
+		}
+		port->print(g->deviceClass == WISBLOCK_CLASS_B ? "B:" : "C:");
+		uint8_t addrBytes[4] = {(uint8_t)(g->devAddr >> 24), (uint8_t)(g->devAddr >> 16), (uint8_t)(g->devAddr >> 8),
+								 (uint8_t)g->devAddr};
+		for (int b = 0; b < 4; b++)
+		{
+			snprintf(hexByte, sizeof(hexByte), "%02X", addrBytes[b]);
+			port->print(hexByte);
+		}
+		port->print(":");
+		for (int b = 0; b < 16; b++)
+		{
+			snprintf(hexByte, sizeof(hexByte), "%02X", g->nwkSKey[b]);
+			port->print(hexByte);
+		}
+		port->print(":");
+		for (int b = 0; b < 16; b++)
+		{
+			snprintf(hexByte, sizeof(hexByte), "%02X", g->appSKey[b]);
+			port->print(hexByte);
+		}
+		port->print(":");
+		port->print(g->frequencyHz);
+		port->print(":");
+		port->println(g->dataRate);
+	}
+	replyOk();
 }
 
 void WisBlockLoRaAT::atZ(AtOp op, const char *value)

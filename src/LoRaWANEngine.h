@@ -53,6 +53,17 @@ public:
 	bool isJoined() const;
 	WisBlockJoinState joinState() const;
 	/**
+	 * The device's own current network-assigned DevAddr - for OTAA, learned from the Join
+	 * Accept (not otherwise recoverable; see WisBlockOTAAKeys::appKey's doc comment for the
+	 * same write-only reasoning that also applies to the actual session keys derived
+	 * alongside it - unlike DevAddr, NwkSKey/AppSKey have no getter anywhere in LoRa Basics
+	 * Modem's API surface, public or internal, by design). For ABP, simply echoes back
+	 * whatever setABPKeys() configured, since that's a fixed input for ABP rather than
+	 * something the network assigns. Returns whatever was last configured for ABP (0 for a
+	 * not-yet-joined OTAA device - there's nothing to report yet) before a successful join.
+	 */
+	uint32_t getDevAddr() const;
+	/**
 	 * RUI3-compatible AT+JOIN / api.lorawan.join parameters. See
 	 * WisBlockLoRaWANSettings' doc comments for the persisted fields these
 	 * setters write - all three are stored and take effect on the next
@@ -291,6 +302,53 @@ public:
 	 * updated at all until at least one beacon has actually been received. 0 if none yet. */
 	uint32_t getBeaconTime() const;
 
+	/**
+	 * RUI3-compatible AT+ADDMULC / api.lorawan.multicast.addGroup. Configures a LoRaWAN
+	 * multicast group and immediately starts its Class B or C RX session (RUI3's own
+	 * AT+ADDMULC bundles both steps into one call, rather than exposing LBM's underlying
+	 * two-step configure-then-start-session sequence separately - matched here for
+	 * compatibility). `groupId` is 0-WISBLOCK_MULTICAST_GROUP_COUNT-1 (4 groups - a LoRa Basics
+	 * Modem limit, not a choice made by this library); see WisBlockLoRaWAN.h's own
+	 * setMulticastGroup() doc comment for the DevAddr-keyed auto-assignment the AT+ADDMULC
+	 * layer builds on top of this group-ID-keyed primitive.
+	 *
+	 * `deviceClass` must be WISBLOCK_CLASS_B or WISBLOCK_CLASS_C - and the device must
+	 * already actually BE in that class (see setDeviceClass()) for the session start to
+	 * succeed; this deliberately doesn't switch device class for you, since that's a
+	 * device-wide setting with its own tradeoffs (see setDeviceClass()'s doc comment) that
+	 * shouldn't happen as a side effect of a multicast call. `nwkSKey`/`appSKey` are this
+	 * multicast GROUP's own session keys - unrelated to (not derived from) this device's own
+	 * unicast NwkSKey/AppSKey; provisioned out-of-band by the network operator, same as
+	 * RUI3's own AT+ADDMULC expects them supplied directly rather than computed on-device.
+	 * `periodicity` is required for both classes (RUI3 quirk - ignored for Class C, but the
+	 * AT command still requires a value be given even then).
+	 *
+	 * Returns false without changing anything already configured for this `groupId` if
+	 * `groupId`/`deviceClass` are out of range, the device isn't already in `deviceClass`, or
+	 * LBM rejects the configuration (e.g. a crypto failure, or `frequencyHz`/`dataRate` not
+	 * valid for the current region).
+	 */
+	bool setMulticastGroup( uint8_t groupId, WisBlockDeviceClass deviceClass, uint32_t devAddr,
+							 const uint8_t nwkSKey[16], const uint8_t appSKey[16], uint32_t frequencyHz,
+							 uint8_t dataRate, uint8_t periodicity = 0 );
+	/** RUI3-compatible AT+RMVMULC (by group ID rather than RUI3's own DevAddr - see
+	 * WisBlockLoRaWAN.h's setMulticastGroup()/findMulticastGroupByDevAddr() for the
+	 * DevAddr-keyed convenience layer AT+RMVMULC itself is built on). Stops the group's RX
+	 * session (if running) and clears this library's own record of it - there is no LBM call
+	 * to "unset" a group's address/keys on its side; a later setMulticastGroup() on this same
+	 * `groupId` simply overwrites them before starting a new session. Returns false (nothing
+	 * changed) if `groupId` is out of range or wasn't configured.
+	 */
+	bool removeMulticastGroup( uint8_t groupId );
+	/** RUI3-compatible AT+LSTMULC (by group ID rather than DevAddr - see removeMulticastGroup()'s
+	 * doc comment). Returns nullptr if `groupId` is out of range or wasn't configured. */
+	const WisBlockMulticastGroup *getMulticastGroup( uint8_t groupId ) const;
+	/** Linear search over the up-to-WISBLOCK_MULTICAST_GROUP_COUNT configured groups for one matching
+	 * `devAddr` - what RUI3's own DevAddr-keyed AT+RMVMULC/AT+ADDMULC (re-configure an
+	 * existing group) need underneath this class's group-ID-keyed API. Returns -1 if none
+	 * match. */
+	int findMulticastGroupByDevAddr( uint32_t devAddr ) const;
+
 	/** Pumps smtc_modem_run_engine() + drains smtc_modem_get_event(). Call every loop().
 	 * Returns the ms budget smtc_modem_run_engine() itself reports before it must be
 	 * called again - required for background task mode (WisBlockLbmTask) to self-schedule
@@ -307,6 +365,7 @@ public:
 private:
 	WisBlockLoRaWANSettings settings;
 	WisBlockJoinState currentJoinState = WISBLOCK_JOIN_IDLE;
+	WisBlockMulticastGroup multicastGroups[WISBLOCK_MULTICAST_GROUP_COUNT];
 	// FIX: see send()'s doc comment - tracks whether an uplink is currently
 	// queued/in-flight with LBM. Set true the moment send() successfully
 	// calls smtc_modem_request_uplink(); cleared unconditionally the

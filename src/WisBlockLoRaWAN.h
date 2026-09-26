@@ -164,6 +164,23 @@ public:
 	uint8_t getPingSlotPeriodicity() const { return lorawan.getPingSlotPeriodicity(); }
 	bool getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const { return lorawan.getBeaconFrequencyAndDr(frequencyHz, dr); }
 	uint32_t getBeaconTime() const { return lorawan.getBeaconTime(); }
+	/** See LoRaWANEngine::getDevAddr()'s doc comment. */
+	uint32_t getDevAddr() const { return lorawan.getDevAddr(); }
+
+	// --- LoRaWAN multicast groups (RUI3-compatible AT+ADDMULC/AT+RMVMULC/AT+LSTMULC) ------
+	/** See LoRaWANEngine::setMulticastGroup()'s doc comment for the full picture - this is a
+	 * thin pass-through, group-ID-keyed the same way. */
+	bool setMulticastGroup(uint8_t groupId, WisBlockDeviceClass deviceClass, uint32_t devAddr,
+							const uint8_t nwkSKey[16], const uint8_t appSKey[16], uint32_t frequencyHz,
+							uint8_t dataRate, uint8_t periodicity = 0)
+	{
+		ensureLoRaWANEngineStarted();
+		return lorawan.setMulticastGroup(groupId, deviceClass, devAddr, nwkSKey, appSKey, frequencyHz, dataRate,
+										  periodicity);
+	}
+	bool removeMulticastGroup(uint8_t groupId) { return lorawan.removeMulticastGroup(groupId); }
+	const WisBlockMulticastGroup *getMulticastGroup(uint8_t groupId) const { return lorawan.getMulticastGroup(groupId); }
+	int findMulticastGroupByDevAddr(uint32_t devAddr) const { return lorawan.findMulticastGroupByDevAddr(devAddr); }
 
 	// --- LoRa P2P setup --------------------------------------------------
 	void setP2PFrequency(uint32_t frequencyHz);

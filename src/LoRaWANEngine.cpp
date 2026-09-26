@@ -782,6 +782,113 @@ uint32_t LoRaWANEngine::getBeaconTime() const
 	return lorawan_api_get_beacon_epoch_time(kStackId);
 }
 
+uint32_t LoRaWANEngine::getDevAddr() const
+{
+	// See this method's doc comment in the header for why only DevAddr (not
+	// NwkSKey/AppSKey) has a live getter at all. lorawan_api_devaddr_get()
+	// reflects whatever's actually active in the stack right now - correct
+	// for ABP too (its DevAddr is set into the stack via
+	// smtc_modem_debug_connect_with_abp() at connect time - see begin()) -
+	// but only once actually joined/connected; before that it'd return
+	// stale/zeroed internal state rather than "not assigned yet".
+	return isJoined() ? lorawan_api_devaddr_get(kStackId) : settings.abp.devAddr;
+}
+
+bool LoRaWANEngine::setMulticastGroup(uint8_t groupId, WisBlockDeviceClass deviceClass, uint32_t devAddr,
+									   const uint8_t nwkSKey[16], const uint8_t appSKey[16], uint32_t frequencyHz,
+									   uint8_t dataRate, uint8_t periodicity)
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT ||
+		(deviceClass != WISBLOCK_CLASS_B && deviceClass != WISBLOCK_CLASS_C) || nwkSKey == nullptr ||
+		appSKey == nullptr)
+	{
+		return false;
+	}
+
+	if (smtc_modem_multicast_set_grp_config(kStackId, (smtc_modem_mc_grp_id_t)groupId, devAddr, nwkSKey, appSKey) !=
+		SMTC_MODEM_RC_OK)
+	{
+		return false;
+	}
+
+	// Configuring the group and starting its RX session are two separate LBM
+	// calls (smtc_modem_multicast_set_grp_config() above just stores the
+	// keys/address - see this method's doc comment for why both happen
+	// together here, matching RUI3's own single-command AT+ADDMULC). This
+	// second call is what actually requires the device to already be in the
+	// matching class - see SMTC_MODEM_RC_FAIL's "modem is not in class
+	// B/C" case in smtc_modem_api.h.
+	smtc_modem_return_code_t sessionRc;
+	if (deviceClass == WISBLOCK_CLASS_C)
+	{
+		sessionRc = smtc_modem_multicast_class_c_start_session(kStackId, (smtc_modem_mc_grp_id_t)groupId, frequencyHz,
+																 dataRate);
+	}
+	else
+	{
+		sessionRc = smtc_modem_multicast_class_b_start_session(
+			kStackId, (smtc_modem_mc_grp_id_t)groupId, frequencyHz, dataRate,
+			(smtc_modem_class_b_ping_slot_periodicity_t)periodicity);
+	}
+	if (sessionRc != SMTC_MODEM_RC_OK)
+	{
+		return false;
+	}
+
+	WisBlockMulticastGroup &g = multicastGroups[groupId];
+	g.configured = true;
+	g.deviceClass = deviceClass;
+	g.devAddr = devAddr;
+	memcpy(g.nwkSKey, nwkSKey, 16);
+	memcpy(g.appSKey, appSKey, 16);
+	g.frequencyHz = frequencyHz;
+	g.dataRate = dataRate;
+	g.periodicity = periodicity;
+	return true;
+}
+
+bool LoRaWANEngine::removeMulticastGroup(uint8_t groupId)
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT || !multicastGroups[groupId].configured)
+	{
+		return false;
+	}
+	if (multicastGroups[groupId].deviceClass == WISBLOCK_CLASS_C)
+	{
+		smtc_modem_multicast_class_c_stop_session(kStackId, (smtc_modem_mc_grp_id_t)groupId);
+	}
+	else
+	{
+		smtc_modem_multicast_class_b_stop_session(kStackId, (smtc_modem_mc_grp_id_t)groupId);
+	}
+	// No LBM call to "unset" a group's address/keys config on its side - see
+	// setMulticastGroup()'s doc comment; clearing our own record is enough,
+	// a later setMulticastGroup() on this groupId overwrites LBM's copy too.
+	multicastGroups[groupId] = WisBlockMulticastGroup();
+	return true;
+}
+
+const WisBlockMulticastGroup *LoRaWANEngine::getMulticastGroup(uint8_t groupId) const
+{
+	if (groupId >= WISBLOCK_MULTICAST_GROUP_COUNT || !multicastGroups[groupId].configured)
+	{
+		return nullptr;
+	}
+	return &multicastGroups[groupId];
+}
+
+int LoRaWANEngine::findMulticastGroupByDevAddr(uint32_t devAddr) const
+{
+	for (uint8_t i = 0; i < WISBLOCK_MULTICAST_GROUP_COUNT; i++)
+	{
+		if (multicastGroups[i].configured && multicastGroups[i].devAddr == devAddr)
+		{
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
 uint32_t LoRaWANEngine::handleEvents()
 {
 	// smtc_modem_run_engine()'s own doc comment (smtc_modem_utilities.h):
@@ -963,6 +1070,24 @@ uint32_t LoRaWANEngine::handleEvents()
 				r.rssi = (int16_t)meta.rssi - 64; // rssi field is dBm + 64 per smtc_modem_api.h
 				r.snr = meta.snr;				   // 0.25 dB steps, per smtc_modem_api.h comment
 				r.fpending = meta.fpending_bit != 0;
+
+				// meta.window tells us exactly which RX window this arrived on -
+				// smtc_modem_dl_window_t's *_MC_GRP0..3 values are multicast (Class C's and
+				// Class B's group ranges are each contiguous, so a range check plus the
+				// group's offset from its range's own GRP0 value recovers the group ID
+				// without a 8-way switch); everything else (RX1/RX2/RXC/RXB/RXBEACON/RXR) is
+				// this device's own unicast window.
+				if (meta.window >= SMTC_MODEM_DL_WINDOW_RXC_MC_GRP0 && meta.window <= SMTC_MODEM_DL_WINDOW_RXC_MC_GRP3)
+				{
+					r.isMulticast = true;
+					r.multicastGroupId = (uint8_t)(meta.window - SMTC_MODEM_DL_WINDOW_RXC_MC_GRP0);
+				}
+				else if (meta.window >= SMTC_MODEM_DL_WINDOW_RXB_MC_GRP0 &&
+						 meta.window <= SMTC_MODEM_DL_WINDOW_RXB_MC_GRP3)
+				{
+					r.isMulticast = true;
+					r.multicastGroupId = (uint8_t)(meta.window - SMTC_MODEM_DL_WINDOW_RXB_MC_GRP0);
+				}
 
 				// FIX (Class A pending-downlink bug - confirmed against a real device log plus
 				// the matching LNS downlink log showing f_pending=true): a Class A device can only

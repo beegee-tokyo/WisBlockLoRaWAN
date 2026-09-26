@@ -244,6 +244,9 @@ private:
 	void atVer(AtOp op, const char *value);
 	void atAlias(AtOp op, const char *value);
 	void atFirmwareVer(AtOp op, const char *value);
+	void atAddMulc(AtOp op, const char *value);
+	void atRmvMulc(AtOp op, const char *value);
+	void atLstMulc(AtOp op, const char *value);
 	void atZ(AtOp op, const char *value);
 	void atR(AtOp op, const char *value);
 	void atBoot(AtOp op, const char *value);

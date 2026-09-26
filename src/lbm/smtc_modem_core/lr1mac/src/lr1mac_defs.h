@@ -328,8 +328,8 @@ typedef enum rx_packet_type_e
 } rx_packet_type_t;
 typedef enum rx_win_type_e
 {
-    RX1 = 0,
-    RX2,
+    RX1_W = 0,
+    RX2_W,
 } rx_win_type_t;
 
 /**

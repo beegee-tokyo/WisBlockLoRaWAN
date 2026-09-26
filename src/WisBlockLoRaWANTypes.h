@@ -188,12 +188,67 @@ struct WisBlockRxResult
 	 * Class B/C already have a standing receive window and don't need one), so this field is
 	 * mainly informational unless that's been disabled. */
 	bool fpending = false;
+	/** LoRaWAN only (always false for P2P). True if this downlink arrived on one of this
+	 * device's multicast RX windows (Class B or C multicast group 0-3 - see
+	 * WisBlockLoRaWAN::setMulticastGroup()) rather than its own unicast RX1_W/RX2_W/RXC/RXB
+	 * window. See multicastGroupId below for which group. */
+	bool isMulticast = false;
+	/** Which multicast group (0-3, as used by setMulticastGroup()/AT+ADDMULC) this downlink
+	 * arrived on - only meaningful when isMulticast is true; 0 otherwise (group 0 is also a
+	 * valid group ID, so check isMulticast first, don't infer it from this being non-zero). */
+	uint8_t multicastGroupId = 0;
 };
 
 struct WisBlockTxResult
 {
 	bool success = false;
 	uint32_t airtimeMs = 0;
+};
+
+/** Number of LoRaWAN multicast groups that can be configured at once - a hard limit of the
+ * underlying LoRa Basics Modem stack (multicast group IDs 0-3), not a choice made by this
+ * library. See WisBlockMulticastGroup below. */
+static const uint8_t WISBLOCK_MULTICAST_GROUP_COUNT = 4;
+
+/**
+ * One LoRaWAN multicast group's configuration, as set by
+ * WisBlockLoRaWAN::setMulticastGroup() / AT+ADDMULC. Up to
+ * WISBLOCK_MULTICAST_GROUP_COUNT (4) of these can be configured at once - a
+ * hard limit of the underlying LoRa Basics Modem stack (multicast group IDs
+ * 0-3), not a choice made by this library.
+ *
+ * Unlike WisBlockOTAAKeys::appKey and WisBlockABPKeys::nwkSKey/appSKey
+ * (deliberately not readable back in plaintext - see their own AT+APPKEY=?/
+ * AT+NWKSKEY=?/AT+APPSKEY=? handlers' doc comments), these multicast
+ * session keys ARE readable back in plaintext via getMulticastGroup()/
+ * AT+LSTMULC=?, matching RUI3's own AT+LSTMULC behavior (its documented
+ * example output echoes both keys directly) - a deliberate choice to match
+ * RUI3, not an oversight; see Creation-Log-From-Claude-AI.md for the
+ * background on why plaintext readback is the wanted behavior here.
+ *
+ * Not persisted across reboots (no AT+SAVE/AT+RESTORE involvement) -
+ * multicast group provisioning is normally redone by the network operator
+ * each session anyway (whether manually via AT+ADDMULC or, once supported,
+ * automatically via the LoRaWAN Remote Multicast Setup package - see
+ * extra_script.py's build-flags documentation for that package's current
+ * status in this library).
+ */
+struct WisBlockMulticastGroup
+{
+	bool configured = false;
+	/** Only WISBLOCK_CLASS_B or WISBLOCK_CLASS_C are valid here - a multicast group makes no
+	 * sense for Class A, which has no standing RX window to receive it on. */
+	WisBlockDeviceClass deviceClass = WISBLOCK_CLASS_C;
+	uint32_t devAddr = 0;
+	uint8_t nwkSKey[16] = {0};
+	uint8_t appSKey[16] = {0};
+	uint32_t frequencyHz = 0;
+	uint8_t dataRate = 0;
+	/** Class B ping slot periodicity (0-7, same meaning as WisBlockLoRaWANSettings::
+	 * pingSlotPeriodicity, but per-group rather than device-wide) - ignored for Class C, but
+	 * RUI3's own AT+ADDMULC still requires a value for it even then (matching that convention
+	 * here rather than making the parameter conditionally optional). */
+	uint8_t periodicity = 0;
 };
 
 struct WisBlockLinkCheckResult

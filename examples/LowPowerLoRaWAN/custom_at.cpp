@@ -23,6 +23,8 @@ extern Ticker g_task_wakeup_timer;
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
 #define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
 
+extern WisBlockLoRaWAN lora;
+
 namespace
 {
 	// Bump this whenever CustomAtSettings gains or changes a field -
@@ -156,6 +158,97 @@ namespace
 
 		return WISBLOCK_AT_OK;
 	}
+
+	/** Regions as text array */
+	// char *regions_list[13] = {(char *)"EU433", (char *)"CN470", (char *)"RU864", (char *)"IN865", (char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"KR920", (char *)"AS923", (char *)"AS923-2", (char *)"AS923-3", (char *)"AS923-4", (char *)"LA915"};
+	char *regions_list[13] = {(char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"AS923_1", (char *)"AS923_2", (char *)"AS923_3", (char *)"AS923_4", (char *)"KR920", (char *)"IN865", (char *)"RU864", (char *)"CN470", (char *)"CN470_RP_1_0", (char *)"WW2G4"};
+	/** Network modes as text array*/
+	char *nwm_list[3] = {(char *)"P2P", (char *)"LoRaWAN", (char *)"FSK"};
+
+	WisBlockAtStatus status_handler(Stream &port, const char *cmd, char *args)
+	{
+		String value_str = "";
+		int nw_mode = 0;
+		int region_set = 0;
+		uint8_t key_eui[16] = {0}; // efadff29c77b4829acf71e1a6e76f713
+
+		if (!args || strcmp(args, "?") == 0)
+		{
+			Serial.println("Device Status:");
+#ifdef NRF52_SERIES
+			Serial.println("Module: RAK4630");
+#elif defined(ARDUINO_ARCH_ESP32)
+			Serial.println("Module: RAK3112");
+#elif defined(ARDUINO_ARCH_RP2040)
+			Serial.println("Module: RAK11310");
+#endif
+			Serial.printf("Version: %s\r\n", lora.getFirmwareVer());
+			Serial.printf("Send interval: %d s\r\n", g_customSettings.sendIntervalS);
+			/// \todo
+			nw_mode = lora.getWorkMode() == WISBLOCK_MODE_LORAWAN ? 1 : 0;
+			Serial.printf("Network mode %s\r\n", nwm_list[nw_mode]);
+			if (nw_mode == 1)
+			{
+				Serial.printf("Network %s\r\n", lora.isJoined() ? "joined" : "not joined");
+				region_set = lora.getConfig().lorawan.region;
+				Serial.printf("Region: %d\r\n", region_set);
+				Serial.printf("Region: %s\r\n", regions_list[region_set]);
+				if (lora.getConfig().lorawan.joinMode == WISBLOCK_JOIN_OTAA)
+				{
+					Serial.printf("OTAA mode\r\n");
+					memcpy(key_eui, lora.getConfig().lorawan.otaa.devEui, 8);
+					Serial.printf("DevEUI=%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+								  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+								  key_eui[4], key_eui[5], key_eui[6], key_eui[7]);
+					memcpy(key_eui, lora.getConfig().lorawan.otaa.joinEui, 8);
+					Serial.printf("AppEUI=%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+								  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+								  key_eui[4], key_eui[5], key_eui[6], key_eui[7]);
+					memcpy(key_eui, lora.getConfig().lorawan.otaa.appKey, 16);
+					Serial.printf("AppKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+								  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+								  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+								  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+								  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+				}
+				else
+				{
+					Serial.printf("ABP mode");
+					memcpy(key_eui, lora.getConfig().lorawan.abp.appSKey, 16);
+					Serial.printf("AppsKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+								  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+								  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+								  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+								  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+					memcpy(key_eui, lora.getConfig().lorawan.abp.nwkSKey, 16);
+					Serial.printf("NwsKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+								  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+								  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+								  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+								  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+					uint32_t addr = lora.getConfig().lorawan.abp.devAddr;
+					uint8_t bytes[4] = {(uint8_t)(addr >> 24), (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
+					Serial.printf("DevAddr=%02X%02X%02X%02X\r\n",
+								  bytes[0], bytes[1], bytes[2], bytes[3]);
+				}
+			}
+			else if (nw_mode == 0)
+			{
+				const WisBlockP2PSettings &s = lora.getP2PSettings();
+				Serial.printf("Frequency = %d\r\n", s.frequencyHz);
+				Serial.printf("SF = %d\r\n", s.spreadingFactor);
+				Serial.printf("BW = %d\r\n", (int)s.bandwidth);
+				Serial.printf("CR = %d\r\n", (int)s.codingRate);
+				Serial.printf("Preamble length = %d\r\n", s.preambleLength);
+				Serial.printf("TX power = %d\r\n", s.txPowerDbm);
+			}
+		}
+		else
+		{
+			return WISBLOCK_AT_PARAM_ERROR;
+		}
+		return WISBLOCK_AT_OK;
+	}
 } // namespace
 
 void registerCustomATCommands(WisBlockLoRaAT &atParser)
@@ -170,6 +263,12 @@ void registerCustomATCommands(WisBlockLoRaAT &atParser)
 	if (!atParser.addCustomATCommand("SENDINT", "get/set the periodic send interval in seconds (0 = disabled)", handleSendInt))
 	{
 		Serial.println("[CustomAT] Failed to register ATC+SENDINT - table full or already registered?");
+	}
+
+	// Register as ATC+STATUS to show all relevant settings at once. More comprehensive than the built-in AT+STATUS
+	if (!atParser.addCustomATCommand("STATUS", "Get device information", status_handler))
+	{
+		Serial.println("[CustomAT] Failed to register ATC+STATUS - table full or already registered?");
 	}
 }
 

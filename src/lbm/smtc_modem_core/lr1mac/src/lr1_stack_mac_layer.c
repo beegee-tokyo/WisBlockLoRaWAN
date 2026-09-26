@@ -66,7 +66,7 @@
  * --- PRIVATE CONSTANTS -------------------------------------------------------
  */
 #if ( MODEM_HAL_DBG_TRACE == MODEM_HAL_FEATURE_ON )
-static const char* smtc_name_rx_windows[] = { "RX1", "RX2" };
+static const char* smtc_name_rx_windows[] = { "RX1_W", "RX2_W" };
 static const char* smtc_name_bw[] = { "BW007", "BW010", "BW015", "BW020", "BW031", "BW041", "BW062",
                                       "BW125", "BW200", "BW250", "BW400", "BW500", "BW800", "BW1600" };
 #endif
@@ -118,7 +118,7 @@ void lr1_stack_mac_init( lr1_stack_mac_t* lr1_mac, lr1mac_activation_mode_t acti
     lr1_mac->dev_nonce                                = 0;
     lr1_mac->adr_mode_select                          = STATIC_ADR_MODE;
     lr1_mac->adr_mode_select_tmp                      = STATIC_ADR_MODE;
-    lr1_mac->current_win                              = RX1;
+    lr1_mac->current_win                              = RX1_W;
     lr1_mac->seconds_since_epoch                      = 0;
     lr1_mac->fractional_second                        = 0;
     lr1_mac->timestamp_last_device_time_ans_s         = 0;
@@ -512,10 +512,10 @@ void lr1_stack_mac_rx_radio_start( lr1_stack_mac_t* lr1_mac, const rx_win_type_t
 
     switch( type )
     {
-    case RX1:
+    case RX1_W:
         rx_frequency = lr1_mac->rx1_frequency;
         break;
-    case RX2:
+    case RX2_W:
         rx_frequency = lr1_mac->rx2_frequency;
         break;
     default:
@@ -614,7 +614,7 @@ void lr1_stack_mac_rx_radio_start( lr1_stack_mac_t* lr1_mac, const rx_win_type_t
         lr1_mac->radio_process_state = RADIOSTATE_RX_ON;
 
         SMTC_MODEM_HAL_TRACE_PRINTF( "\n" );
-        SMTC_MODEM_HAL_TRACE_PRINTF( "  Open Rx%d for Hook Id = %d", type - RX1 + 1, my_hook_id );
+        SMTC_MODEM_HAL_TRACE_PRINTF( "  Open Rx%d for Hook Id = %d", type - RX1_W + 1, my_hook_id );
 
         if( radio_params.pkt_type == RAL_PKT_TYPE_LORA )
         {
@@ -695,11 +695,11 @@ void lr1_stack_mac_rp_callback( lr1_stack_mac_t* lr1_mac )
         uint32_t rx_timestamp_calibration = tcurrent_ms;
         uint32_t rx_delay_ms              = 0;
 
-        if( lr1_mac->current_win == RX1 )
+        if( lr1_mac->current_win == RX1_W )
         {
             rx_delay_ms = lr1_mac->rx1_delay_s;
         }
-        else if( lr1_mac->current_win == RX2 )
+        else if( lr1_mac->current_win == RX2_W )
         {
             rx_delay_ms = lr1_mac->rx1_delay_s + 1;
         }
@@ -774,13 +774,13 @@ bool lr1_stack_mac_rx_timer_configure( lr1_stack_mac_t* lr1_mac, const rx_win_ty
 
     switch( type )
     {
-    case RX1:
+    case RX1_W:
         delay_ms = lr1_mac->rx1_delay_s;
         lr1_mac->rx_data_rate =
             smtc_real_get_rx1_datarate_config( lr1_mac->real, lr1_mac->tx_data_rate, lr1_mac->rx1_dr_offset );
         break;
 
-    case RX2:
+    case RX2_W:
         delay_ms              = lr1_mac->rx1_delay_s + 1;
         lr1_mac->rx_data_rate = lr1_mac->rx2_data_rate;
         break;
@@ -927,7 +927,7 @@ rx_packet_type_t lr1_stack_mac_rx_frame_decode( lr1_stack_mac_t* lr1_mac )
         }
         if( status == OKLORAWAN )
         {
-            // reset retransmission counter if received on RX1 or RX2
+            // reset retransmission counter if received on RX1_W or RX2_W
             lr1_mac->nb_trans_cpt = 1;
 
             // test the ack bit when tx_mtype == CONF_DATA_UP
@@ -938,11 +938,11 @@ rx_packet_type_t lr1_stack_mac_rx_frame_decode( lr1_stack_mac_t* lr1_mac )
 
             // FPending bit
             lr1_mac->rx_down_data.rx_metadata.rx_fpending_bit = ( lr1_mac->rx_fctrl >> DL_FPENDING_BIT ) & 0x01;
-            if( lr1_mac->current_win == RX1 )
+            if( lr1_mac->current_win == RX1_W )
             {
                 lr1_mac->rx_down_data.rx_metadata.rx_frequency_hz = lr1_mac->rx1_frequency;
             }
-            else if( lr1_mac->current_win == RX2 )
+            else if( lr1_mac->current_win == RX2_W )
             {
                 lr1_mac->rx_down_data.rx_metadata.rx_frequency_hz = lr1_mac->rx2_frequency;
             }
@@ -1919,7 +1919,7 @@ static void rx_param_setup_parser( lr1_stack_mac_t* lr1_mac )
     if( smtc_real_is_frequency_valid( lr1_mac->real, rx2_frequency_temp ) == ERRORLORAWAN )
     {
         status_ans &= 0x3;
-        SMTC_MODEM_HAL_TRACE_WARNING( "INVALID RX2 FREQUENCY\n" );
+        SMTC_MODEM_HAL_TRACE_WARNING( "INVALID RX2_W FREQUENCY\n" );
     }
 
     // Update the mac parameters if case of no error
