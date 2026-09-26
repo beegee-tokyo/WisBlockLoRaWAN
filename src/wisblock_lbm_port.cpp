@@ -453,7 +453,7 @@ extern "C"
 
 	void smtc_modem_hal_crashlog_set_status(bool available)
 	{
-		uint8_t flag = available ? 1 : 0;
+		// uint8_t flag = available ? 1 : 0;
 		// WisBlockLoRaFlash::write("wb_lbm_crash_flag", &flag, 1);
 	}
 

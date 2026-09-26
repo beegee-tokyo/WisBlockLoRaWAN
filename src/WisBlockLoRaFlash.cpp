@@ -33,8 +33,8 @@ bool init()
 {
 	if (!InternalFS.begin())
 	{
-		Serial.println("FS begin failed");
-		Serial.flush();
+		// Serial.println("FS begin failed");
+		// Serial.flush();
 		InternalFS.format();
 		// FIX: format() doesn't implicitly remount the filesystem - a
 		// freshly-formatted InternalFS still isn't mounted until begin() is
@@ -46,8 +46,8 @@ bool init()
 		// case this feature depends on, so worth getting right.
 		if (!InternalFS.begin())
 		{
-			Serial.println("FS begin failed again after format - internal flash may be faulty");
-			Serial.flush();
+			// Serial.println("FS begin failed again after format - internal flash may be faulty");
+			// Serial.flush();
 			return false;
 		}
 	}
@@ -62,7 +62,7 @@ bool read(const char *key, uint8_t *buf, size_t len)
 	File file(InternalFS);
 	if (!file.open(filename, FILE_O_READ))
 	{
-		Serial.printf("Failed to open file or read %s\n", filename);
+		// Serial.printf("Failed to open file or read %s\n", filename);
 		return false;
 	}
 	size_t got = file.read(buf, len);
@@ -81,7 +81,7 @@ bool write(const char *key, const uint8_t *buf, size_t len)
 	// Test open file and close before deleting
 	if (!file.open(filename, FILE_O_READ))
 	{
-		Serial.printf("File to write %s does not exist yet\n", filename);
+		// Serial.printf("File to write %s does not exist yet\n", filename);
 	}
 	file.close();
 
@@ -89,12 +89,12 @@ bool write(const char *key, const uint8_t *buf, size_t len)
 
 	if (!file.open(filename, FILE_O_WRITE))
 	{
-		Serial.printf("Saving to flash failed, can't open file\n");
+		// Serial.printf("Saving to flash failed, can't open file\n");
 		return false;
 	}
 	size_t wrote = file.write(buf, len);
 	file.close();
-	Serial.printf("Saving to flash expected %d written %d\n", len, wrote);
+	// Serial.printf("Saving to flash expected %d written %d\n", len, wrote);
 	return wrote == len;
 }
 
