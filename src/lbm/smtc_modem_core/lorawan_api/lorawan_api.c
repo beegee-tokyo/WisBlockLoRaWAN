@@ -166,6 +166,17 @@ status_lorawan_t lorawan_api_set_region( smtc_real_region_types_t region_type, u
         }
     }
 #endif
+#if defined( REGION_EU_433 )
+    if( region_type == SMTC_REAL_REGION_EU_433 )
+    {
+        // Configure duty-cycle object (single global 1% band, RP002-1.0.4)
+        for( int i = 0; i < BAND_EU433_MAX; i++ )
+        {
+            smtc_duty_cycle_config( BAND_EU433_MAX, i, duty_cycle_by_band_eu_433[i],
+                                    frequency_range_by_band_eu_433[i][0], frequency_range_by_band_eu_433[i][1] );
+        }
+    }
+#endif
 #if defined( REGION_RU_864 )
     if( region_type == SMTC_REAL_REGION_RU_864 )
     {

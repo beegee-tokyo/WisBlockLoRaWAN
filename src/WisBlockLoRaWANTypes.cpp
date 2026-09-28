@@ -17,6 +17,9 @@ bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
 {
 	switch (band)
 	{
+	case WISBLOCK_RUI3_BAND_EU433:
+		outRegion = WISBLOCK_REGION_EU433;
+		return true;
 	case WISBLOCK_RUI3_BAND_CN470:
 		outRegion = WISBLOCK_REGION_CN470;
 		return true;
@@ -50,8 +53,8 @@ bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
 	case WISBLOCK_RUI3_BAND_AS923_4:
 		outRegion = WISBLOCK_REGION_AS923_4;
 		return true;
-	default: // WISBLOCK_RUI3_BAND_EU433 (0), WISBLOCK_RUI3_BAND_LA915 (12),
-			 // WISBLOCK_RUI3_BAND_UNKNOWN, and anything else out of range
+	default: // WISBLOCK_RUI3_BAND_LA915 (12), WISBLOCK_RUI3_BAND_UNKNOWN, and anything else out
+			 // of range
 		return false;
 	}
 }
@@ -60,6 +63,8 @@ WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region)
 {
 	switch (region)
 	{
+	case WISBLOCK_REGION_EU433:
+		return WISBLOCK_RUI3_BAND_EU433;
 	case WISBLOCK_REGION_EU868:
 		return WISBLOCK_RUI3_BAND_EU868;
 	case WISBLOCK_REGION_US915:

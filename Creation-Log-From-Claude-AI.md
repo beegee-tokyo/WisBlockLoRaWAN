@@ -3314,3 +3314,8 @@ has never been received through this code path, so `isMulticast`/`multicastGroup
 population logic (correct per the header's documented enum values) is unverified against a
 real network server actually sending one. Remote Multicast Setup (item 3) is investigated and
 documented, not implemented.
+
+## EU433
+- Added EU433 (RP002-1.0.4) region: region_eu_433.c/.h/_defs.h, dispatch in smtc_real.c, duty-cycle registration in lorawan_api.c, WISBLOCK_REGION_EU433 / WISBLOCK_RUI3_BAND_EU433.
+- setRegion() now takes WisBlockRUI3Band (RUI3 AT+BAND numbering) and returns bool; added getRegion().
+- LBM now traces "Region set to ..." whenever the region is changed, to make region problems visible in logs.

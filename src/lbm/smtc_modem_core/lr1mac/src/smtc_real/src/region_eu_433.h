@@ -1,7 +1,10 @@
-/*!
- * \file      real_defs_str.h
+/**
+ * \file      region_eu_433.h
  *
- * \brief     Region Abstraction Layer (REAL) strings definition
+ * \brief     region_eu_433  abstraction layer definition
+ *
+ * \details   Restores EU433 support dropped from this vendored LoRa Basics Modem release - see
+ * region_eu_433_defs.h for the RP002-1.0.4 parameter sourcing notes.
  *
  * The Clear BSD License
  * Copyright Semtech Corporation 2021. All rights reserved.
@@ -32,8 +35,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __REAL_DEFS_STR_H__
-#define __REAL_DEFS_STR_H__
+#ifndef REGION_EU_433_H
+#define REGION_EU_433_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,6 +50,10 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "smtc_real_defs.h"
+#include "lr1mac_defs.h"
+#include "lr1_stack_mac_layer.h"
+
 /*
  * -----------------------------------------------------------------------------
  * --- PUBLIC MACROS -----------------------------------------------------------
@@ -56,56 +63,6 @@ extern "C" {
  * -----------------------------------------------------------------------------
  * --- PUBLIC CONSTANTS --------------------------------------------------------
  */
-
-#if MODEM_HAL_DBG_TRACE == MODEM_HAL_FEATURE_ON
-static const char* smtc_real_region_list_str[] = {
-#if defined( REGION_EU_868 )
-    [SMTC_REAL_REGION_EU_868] = "EU868",
-#endif
-#if defined( REGION_EU_433 )
-    [SMTC_REAL_REGION_EU_433] = "EU433",
-#endif
-#if defined( REGION_AS_923 )
-    [SMTC_REAL_REGION_AS_923] = "AS923_GRP1",
-#endif
-#if defined( REGION_US_915 )
-    [SMTC_REAL_REGION_US_915] = "US915",
-#endif
-#if defined( REGION_AU_915 )
-    [SMTC_REAL_REGION_AU_915] = "AU915",
-#endif
-#if defined( REGION_CN_470 )
-    [SMTC_REAL_REGION_CN_470] = "CN470",
-#endif
-#if defined( REGION_WW_2G4 )
-    [SMTC_REAL_REGION_WW_2G4] = "WW_2G4",
-#endif
-#if defined( REGION_AS_923 )
-    [SMTC_REAL_REGION_AS_923_GRP2] = "AS923_GRP2",
-#endif
-#if defined( REGION_AS_923 )
-    [SMTC_REAL_REGION_AS_923_GRP3] = "AS923_GRP3",
-#endif
-#if defined( REGION_IN_865 )
-    [SMTC_REAL_REGION_IN_865] = "IN_865",
-#endif
-#if defined( REGION_KR_920 )
-    [SMTC_REAL_REGION_KR_920] = "KR_920",
-#endif
-#if defined( REGION_RU_864 )
-    [SMTC_REAL_REGION_RU_864] = "RU_864",
-#endif
-#if defined( REGION_CN_470_RP_1_0 )
-    [SMTC_REAL_REGION_CN_470_RP_1_0] = "CN470_RP_1_0",
-#endif
-#if defined( RP2_103 )
-#if defined( REGION_AS_923 )
-    [SMTC_REAL_REGION_AS_923_GRP4] = "AS923_GRP4",
-#endif
-#endif
-};
-
-#endif
 
 /*
  * -----------------------------------------------------------------------------
@@ -117,6 +74,80 @@ static const char* smtc_real_region_list_str[] = {
  * --- PUBLIC FUNCTIONS PROTOTYPES ---------------------------------------------
  */
 
-#endif  // __REAL_DEFS_STR_H__
+/**
+ * @brief Initialize the region with default value and pointers
+ *
+ * @param real
+ */
+void region_eu_433_init( smtc_real_t* real );
+
+/**
+ * @brief Configure the regional boot parameter
+ * @remark must be called before each join request
+ *
+ * @param real
+ */
+void region_eu_433_config( smtc_real_t* real );
+
+/**
+ * @brief Get the next channel for the future uplink
+ *
+ * @param real
+ * @return status_lorawan_t
+ */
+status_lorawan_t region_eu_433_get_next_channel( smtc_real_t* real, uint8_t tx_data_rate, uint32_t* out_tx_frequency,
+                                                 uint32_t* out_rx1_frequency, uint8_t* active_channel_nb );
+
+/**
+ * @brief Get the next channel for the future join request
+ *
+ * @param real
+ * @return status_lorawan_t
+ */
+status_lorawan_t region_eu_433_get_join_next_channel( smtc_real_t* real, uint8_t tx_data_rate,
+                                                      uint32_t* out_tx_frequency, uint32_t* out_rx1_frequency,
+                                                      uint8_t* active_channel_nb );
+
+/**
+ * @brief Decrypt and build the Channel Mask from multiple atomic LinkADRReq
+ *
+ * @param real
+ * @param ChMaskCntl
+ * @param ChMask
+ * @return status_channel_t
+ */
+status_channel_t region_eu_433_build_channel_mask( smtc_real_t* real, uint8_t ChMaskCntl, uint16_t ChMask );
+
+/**
+ * @brief Get the corresponding RF modulation from a Datarate
+ *
+ * @param datarate
+ * @return modulation_type_t
+ */
+modulation_type_t region_eu_433_get_modulation_type_from_datarate( uint8_t datarate );
+
+/**
+ * @brief Convert LoRaWAN Datarate to LoRa SF and BW
+ *
+ * @param in_dr
+ * @param out_sf
+ * @param out_bw
+ */
+void region_eu_433_lora_dr_to_sf_bw( uint8_t in_dr, uint8_t* out_sf, lr1mac_bandwidth_t* out_bw );
+
+/**
+ * @brief Convert LoRaWAN Datarate to FSK bitrate
+ *
+ * @param real
+ * @param in_dr
+ * @param out_bitrate
+ */
+void region_eu_433_fsk_dr_to_bitrate( uint8_t in_dr, uint8_t* out_bitrate );
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // REGION_EU_433_H
 
 /* --- EOF ------------------------------------------------------------------ */

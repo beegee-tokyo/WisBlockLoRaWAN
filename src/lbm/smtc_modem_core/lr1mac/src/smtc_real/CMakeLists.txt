@@ -4,7 +4,7 @@
 # Region selection. They are all enabled by default, unless one is selected via the REGION flag
 #-----------------------------------------------------------------------------
 
-set(all_regions AS_923 AU_915 CN_470 CN_470_RP_1_0 EU_868 IN_865 KR_920 RU_864 US_915 WW_2G4)
+set(all_regions AS_923 AU_915 CN_470 CN_470_RP_1_0 EU_868 EU_433 IN_865 KR_920 RU_864 US_915 WW_2G4)
 if("${LBM_REGIONS}" STREQUAL "ALL")
     set(LBM_REGIONS ${all_regions})
 endif()

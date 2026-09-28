@@ -79,6 +79,8 @@ smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 	{
 	case WISBLOCK_REGION_EU868:
 		return SMTC_MODEM_REGION_EU_868;
+	case WISBLOCK_REGION_EU433:
+		return SMTC_MODEM_REGION_EU_433;
 	case WISBLOCK_REGION_US915:
 		return SMTC_MODEM_REGION_US_915;
 	case WISBLOCK_REGION_AU915:
@@ -138,13 +140,15 @@ bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
 	switch (region)
 	{
 	case WISBLOCK_REGION_EU868:
+	case WISBLOCK_REGION_EU433:
 	case WISBLOCK_REGION_AS923_1:
 	case WISBLOCK_REGION_AS923_2:
 	case WISBLOCK_REGION_AS923_3:
 	case WISBLOCK_REGION_AS923_4:
 	case WISBLOCK_REGION_RU864:
 		// DR0-DR5 identical across every one of these regions; DR6
-		// (SF7/BW250) is also defined for this specific group. DR7 is FSK.
+		// (SF7/BW250) is also defined for this specific group (EU433's
+		// RP002-1.0.4 DR6/DR7 shape is identical to EU868's). DR7 is FSK.
 		switch (dr)
 		{
 		case 0:

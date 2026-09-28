@@ -50,6 +50,9 @@
 #if defined( REGION_EU_868 )
 #include "region_eu_868.h"
 #endif
+#if defined( REGION_EU_433 )
+#include "region_eu_433.h"
+#endif
 #if defined( REGION_AS_923 )
 #include "region_as_923.h"
 #endif
@@ -74,10 +77,10 @@
 #if defined( REGION_RU_864 )
 #include "region_ru_864.h"
 #endif
-#if !defined( REGION_WW_2G4 ) && !defined( REGION_EU_868 ) && !defined( REGION_AS_923 ) &&        \
-    !defined( REGION_US_915 ) && !defined( REGION_AU_915 ) && !defined( REGION_CN_470 ) &&        \
-    !defined( REGION_CN_470_RP_1_0 ) && !defined( REGION_IN_865 ) && !defined( REGION_KR_920 ) && \
-    !defined( REGION_RU_864 )
+#if !defined( REGION_WW_2G4 ) && !defined( REGION_EU_868 ) && !defined( REGION_EU_433 ) &&        \
+    !defined( REGION_AS_923 ) && !defined( REGION_US_915 ) && !defined( REGION_AU_915 ) &&        \
+    !defined( REGION_CN_470 ) && !defined( REGION_CN_470_RP_1_0 ) && !defined( REGION_IN_865 ) && \
+    !defined( REGION_KR_920 ) && !defined( REGION_RU_864 )
 #error "Unknown region selected..."
 #endif
 
@@ -138,6 +141,13 @@ void smtc_real_init( smtc_real_t* real, smtc_real_region_types_t region_type )
     case SMTC_REAL_REGION_EU_868:
     {
         region_eu_868_init( real );
+        break;
+    }
+#endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        region_eu_433_init( real );
         break;
     }
 #endif
@@ -240,6 +250,13 @@ void smtc_real_config( smtc_real_t* real )
         break;
     }
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        region_eu_433_config( real );
+        break;
+    }
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -320,6 +337,9 @@ void smtc_real_config_session( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -343,7 +363,7 @@ void smtc_real_config_session( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_US_915 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_US_915 ) || \
     defined( REGION_AU_915 ) || defined( REGION_IN_865 ) || defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         // Not used for these regions
@@ -616,6 +636,9 @@ uint8_t smtc_real_get_number_of_chmask_in_cflist( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -633,7 +656,7 @@ uint8_t smtc_real_get_number_of_chmask_in_cflist( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         return 0;
@@ -685,6 +708,13 @@ status_lorawan_t smtc_real_get_next_channel( smtc_real_t* real, uint8_t tx_data_
     case SMTC_REAL_REGION_EU_868:
     {
         return region_eu_868_get_next_channel( real, tx_data_rate, out_tx_frequency, out_rx1_frequency,
+                                               out_nb_available_tx_channel );
+    }
+#endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        return region_eu_433_get_next_channel( real, tx_data_rate, out_tx_frequency, out_rx1_frequency,
                                                out_nb_available_tx_channel );
     }
 #endif
@@ -776,6 +806,13 @@ status_lorawan_t smtc_real_get_join_next_channel( smtc_real_t* real, uint8_t* tx
                                                     out_nb_available_tx_channel );
     }
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        return region_eu_433_get_join_next_channel( real, *tx_data_rate, out_tx_frequency, out_rx1_frequency,
+                                                    out_nb_available_tx_channel );
+    }
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -856,6 +893,9 @@ void smtc_real_mask_channel_used_for_tx( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -879,7 +919,7 @@ void smtc_real_mask_channel_used_for_tx( smtc_real_t* real )
 #if defined( REGION_CN_470_RP_1_0 )
     case SMTC_REAL_REGION_CN_470_RP_1_0:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 ) || defined( REGION_CN_470 ) ||                             \
     defined( REGION_CN_470_RP_1_0 )
     {
@@ -950,6 +990,9 @@ void smtc_real_set_channel_mask( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -974,7 +1017,7 @@ void smtc_real_set_channel_mask( smtc_real_t* real )
     case SMTC_REAL_REGION_RU_864:
 #endif
 
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) || defined( REGION_KR_920 ) ||                      \
     defined( REGION_RU_864 )
         // Copy all unwrapped channels in channel enable
@@ -1027,6 +1070,9 @@ void smtc_real_init_join_snapshot_channel_mask( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1050,7 +1096,7 @@ void smtc_real_init_join_snapshot_channel_mask( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) || defined( REGION_KR_920 ) ||                      \
     defined( REGION_RU_864 )
     {
@@ -1088,6 +1134,9 @@ void smtc_real_init_after_join_snapshot_channel_mask( smtc_real_t* real, uint8_t
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1111,7 +1160,7 @@ void smtc_real_init_after_join_snapshot_channel_mask( smtc_real_t* real, uint8_t
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) || defined( REGION_KR_920 ) ||                      \
     defined( REGION_RU_864 )
     {
@@ -1153,6 +1202,12 @@ status_channel_t smtc_real_build_channel_mask( smtc_real_t* real, uint8_t ch_mas
     case SMTC_REAL_REGION_EU_868:
     {
         return region_eu_868_build_channel_mask( real, ch_mask_cntl, ch_mask );
+    }
+#endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        return region_eu_433_build_channel_mask( real, ch_mask_cntl, ch_mask );
     }
 #endif
 #if defined( REGION_AS_923 )
@@ -1308,6 +1363,9 @@ bool smtc_real_are_all_default_channels_enabled( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1325,7 +1383,7 @@ bool smtc_real_are_all_default_channels_enabled( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         for( uint8_t i = 0; i < real_const.const_number_of_boot_tx_channel; i++ )
@@ -1379,6 +1437,9 @@ void smtc_real_enable_all_channels_with_valid_freq( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1396,7 +1457,7 @@ void smtc_real_enable_all_channels_with_valid_freq( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         for( uint8_t i = 0; i < real_const.const_number_of_boot_tx_channel; i++ )
@@ -1490,6 +1551,9 @@ status_lorawan_t smtc_real_is_tx_dr_acceptable( smtc_real_t* real, uint8_t dr, b
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1513,7 +1577,7 @@ status_lorawan_t smtc_real_is_tx_dr_acceptable( smtc_real_t* real, uint8_t dr, b
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) || defined( REGION_KR_920 ) ||                      \
     defined( REGION_RU_864 )
     {
@@ -1569,6 +1633,9 @@ status_lorawan_t smtc_real_is_nwk_received_tx_frequency_valid( smtc_real_t* real
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1586,7 +1653,7 @@ status_lorawan_t smtc_real_is_nwk_received_tx_frequency_valid( smtc_real_t* real
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         status_lorawan_t status = OKLORAWAN;
@@ -1632,6 +1699,9 @@ status_lorawan_t smtc_real_is_channel_index_valid( smtc_real_t* real, uint8_t ch
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1649,7 +1719,7 @@ status_lorawan_t smtc_real_is_channel_index_valid( smtc_real_t* real, uint8_t ch
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
     {
         status_lorawan_t status = OKLORAWAN;
@@ -1727,6 +1797,9 @@ void smtc_real_set_tx_frequency_channel( smtc_real_t* real, uint32_t tx_freq, ui
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1744,7 +1817,7 @@ void smtc_real_set_tx_frequency_channel( smtc_real_t* real, uint32_t tx_freq, ui
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_tx_channel )
         {
@@ -1790,6 +1863,9 @@ status_lorawan_t smtc_real_set_rx1_frequency_channel( smtc_real_t* real, uint32_
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1807,7 +1883,7 @@ status_lorawan_t smtc_real_set_rx1_frequency_channel( smtc_real_t* real, uint32_
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_rx_channel )
         {
@@ -1856,6 +1932,9 @@ void smtc_real_set_channel_dr( smtc_real_t* real, uint8_t channel_index, uint8_t
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1873,7 +1952,7 @@ void smtc_real_set_channel_dr( smtc_real_t* real, uint8_t channel_index, uint8_t
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_tx_channel )
         {
@@ -1924,6 +2003,9 @@ void smtc_real_set_channel_enabled( smtc_real_t* real, uint8_t enable, uint8_t c
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -1941,7 +2023,7 @@ void smtc_real_set_channel_enabled( smtc_real_t* real, uint8_t enable, uint8_t c
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_tx_channel )
         {
@@ -1987,6 +2069,9 @@ uint32_t smtc_real_get_tx_channel_frequency( smtc_real_t* real, uint8_t channel_
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2004,7 +2089,7 @@ uint32_t smtc_real_get_tx_channel_frequency( smtc_real_t* real, uint8_t channel_
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_tx_channel )
         {
@@ -2058,6 +2143,9 @@ uint32_t smtc_real_get_rx1_channel_frequency( smtc_real_t* real, uint8_t channel
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2075,7 +2163,7 @@ uint32_t smtc_real_get_rx1_channel_frequency( smtc_real_t* real, uint8_t channel
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_KR_920 ) || defined( REGION_RU_864 )
         if( channel_index >= real_const.const_number_of_rx_channel )
         {
@@ -2299,6 +2387,13 @@ modulation_type_t smtc_real_get_modulation_type_from_datarate( smtc_real_t* real
         break;
     }
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        return region_eu_433_get_modulation_type_from_datarate( datarate );
+        break;
+    }
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2384,6 +2479,13 @@ void smtc_real_lora_dr_to_sf_bw( smtc_real_t* real, uint8_t in_dr, uint8_t* out_
         break;
     }
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        region_eu_433_lora_dr_to_sf_bw( in_dr, out_sf, out_bw );
+        break;
+    }
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2459,6 +2561,13 @@ void smtc_real_fsk_dr_to_bitrate( smtc_real_t* real, uint8_t in_dr, uint8_t* out
     case SMTC_REAL_REGION_EU_868:
     {
         region_eu_868_fsk_dr_to_bitrate( in_dr, out_bitrate );
+        break;
+    }
+#endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+    {
+        region_eu_433_fsk_dr_to_bitrate( in_dr, out_bitrate );
         break;
     }
 #endif
@@ -2605,6 +2714,9 @@ int8_t smtc_real_clamp_output_power_eirp_vs_freq_and_dr( smtc_real_t* real, int8
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2628,7 +2740,7 @@ int8_t smtc_real_clamp_output_power_eirp_vs_freq_and_dr( smtc_real_t* real, int8
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_AU_915 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_AU_915 ) || \
     defined( REGION_CN_470 ) || defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) ||                      \
     defined( REGION_RU_864 )
     {
@@ -2767,6 +2879,9 @@ uint8_t* smtc_real_get_gfsk_sync_word( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2787,7 +2902,7 @@ uint8_t* smtc_real_get_gfsk_sync_word( smtc_real_t* real )
 #if defined( REGION_RU_864 )
     case SMTC_REAL_REGION_RU_864:
 #endif
-#if defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 ) || defined( REGION_IN_865 ) || defined( REGION_RU_864 )
     {
         return ( uint8_t* ) real_const.const_sync_word_gfsk;
@@ -2907,6 +3022,9 @@ bool smtc_real_is_beacon_hopping( smtc_real_t* real )
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2924,7 +3042,7 @@ bool smtc_real_is_beacon_hopping( smtc_real_t* real )
 #if defined( REGION_KR_920 )
     case SMTC_REAL_REGION_KR_920:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_RU_864 ) || defined( SMTC_REAL_REGION_KR_920 )
     {
         return false;
@@ -2967,6 +3085,9 @@ uint32_t smtc_real_get_beacon_frequency( smtc_real_t* real, uint32_t gps_time_s 
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -2984,7 +3105,7 @@ uint32_t smtc_real_get_beacon_frequency( smtc_real_t* real, uint32_t gps_time_s 
 #if defined( REGION_KR_920 )
     case SMTC_REAL_REGION_KR_920:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_RU_864 ) || defined( SMTC_REAL_REGION_KR_920 )
     {
         return real_const.const_beacon_frequency;
@@ -3037,6 +3158,9 @@ uint32_t smtc_real_get_ping_slot_frequency( smtc_real_t* real, uint32_t gps_time
 #if defined( REGION_EU_868 )
     case SMTC_REAL_REGION_EU_868:
 #endif
+#if defined( REGION_EU_433 )
+    case SMTC_REAL_REGION_EU_433:
+#endif
 #if defined( REGION_AS_923 )
     case SMTC_REAL_REGION_AS_923:
     case SMTC_REAL_REGION_AS_923_GRP2:
@@ -3054,7 +3178,7 @@ uint32_t smtc_real_get_ping_slot_frequency( smtc_real_t* real, uint32_t gps_time
 #if defined( REGION_KR_920 )
     case SMTC_REAL_REGION_KR_920:
 #endif
-#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
+#if defined( REGION_WW_2G4 ) || defined( REGION_EU_868 ) || defined( REGION_EU_433 ) || defined( REGION_AS_923 ) || defined( REGION_IN_865 ) || \
     defined( REGION_RU_864 ) || defined( SMTC_REAL_REGION_KR_920 )
     {
         return real_const.const_ping_slot_frequency;

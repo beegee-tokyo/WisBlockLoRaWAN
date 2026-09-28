@@ -831,9 +831,11 @@ status_lorawan_t lr1mac_core_set_region( lr1_stack_mac_t* lr1_mac_obj, smtc_real
         lr1_stack_mac_region_init( lr1_mac_obj, region_type );
         lr1_stack_mac_region_config( lr1_mac_obj );
         lr1mac_core_context_save( lr1_mac_obj );
+        SMTC_MODEM_HAL_TRACE_PRINTF( " Region set to %s\n", smtc_real_region_list_str[lr1_mac_obj->real->region_type] );
 
         return OKLORAWAN;
     }
+    SMTC_MODEM_HAL_TRACE_PRINTF( " Region set FAILED, unsupported region 0x%02x\n", region_type );
     return ERRORLORAWAN;
 }
 

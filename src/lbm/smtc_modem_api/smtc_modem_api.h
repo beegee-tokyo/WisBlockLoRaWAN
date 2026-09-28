@@ -126,6 +126,7 @@ typedef enum smtc_modem_region_e
     SMTC_MODEM_REGION_RU_864        = 11,
     SMTC_MODEM_REGION_CN_470_RP_1_0 = 12,
     SMTC_MODEM_REGION_AS_923_GRP4   = 13,
+    SMTC_MODEM_REGION_EU_433        = 14,
 } smtc_modem_region_t;
 
 /**

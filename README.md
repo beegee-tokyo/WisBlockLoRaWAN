@@ -15,7 +15,7 @@ FUOTA function is not implemented and is not planned at this time due to the com
 
 ## API documentation
 
-_**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the library.    
+All API commands are documented in the [WisBlockLoRaWAN-API](WisBlockLoRaWAN-API.md) document.    
 
 ## AT command set
 
@@ -29,7 +29,7 @@ _**to be done**_ See P2P and LoRaWAN examples for a first idea how to use the li
 | AT+DEVADDR=_**hex4**_ / AT+DEVADDR=?             | Device Address - settable for ABP; for OTAA, AT+DEVADDR=? reports the live network-assigned address once joined (empty/0 before that - see `LoRaWANEngine::getDevAddr()`'s doc comment) |
 | AT+NWKSKEY=_**hex16**_ / AT+NWKSKEY=?            | Network Session Key (ABP)                      |
 | AT+APPSKEY=_**hex16**_ / AT+APPSKEY=?            | App Session Key (ABP)                          |
-| AT+BAND=_**0..12**_ / AT+BAND=?             | 0 EU433 (unsupported), 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
+| AT+BAND=_**0..12**_ / AT+BAND=?             | 0 EU433, 1 CN470, 2 RU864, 3 IN865, 4 EU868, 5 US915, 6 AU915, 7 KR920, 8 AS923-1, 9 AS923-2, 10 AS923-3, 11 AS923-4, 12 LA915 (unsupported) |
 | AT+MASK=_**hex4**_ / AT+MASK=?              | Sub-band pre-select (US915/AU915/CN470/CN470_RP_1_0 only) - bit N enables sub-band N+1, 0000 = all channels |
 | AT+LBT=_**0/1**_ / AT+LBT=?                 | Listen Before Talk on/off (support Korea, Japan) - silently auto-enabled where regulatorily mandatory either way |
 | AT+LBTRSSI=_**dBm**_ / AT+LBTRSSI=?         | LBT RSSI threshold in dBm (signed), e.g. -80 |

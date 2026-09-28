@@ -50,6 +50,9 @@ extern "C" {
 #if defined( REGION_EU_868 )
 #include "region_eu_868_defs.h"
 #endif
+#if defined( REGION_EU_433 )
+#include "region_eu_433_defs.h"
+#endif
 #if defined( REGION_AS_923 )
 #include "region_as_923_defs.h"
 #endif
@@ -148,6 +151,9 @@ typedef enum smtc_real_region_types_e
     SMTC_REAL_REGION_AS_923_GRP4 = 13,
 #endif
 #endif
+#if defined( REGION_EU_433 )
+    SMTC_REAL_REGION_EU_433 = 14,
+#endif
 } smtc_real_region_types_t;
 
 /**
@@ -216,6 +222,9 @@ static const uint8_t smtc_real_region_list[] = {
 #if defined( REGION_AS_923 )
     SMTC_REAL_REGION_AS_923_GRP4,
 #endif
+#endif
+#if defined( REGION_EU_433 )
+    SMTC_REAL_REGION_EU_433,
 #endif
 };
 
@@ -313,6 +322,9 @@ typedef struct smtc_real_s
     {
 #if defined( REGION_EU_868 )
         region_eu868_context_t eu868;
+#endif
+#if defined( REGION_EU_433 )
+        region_eu433_context_t eu433;
 #endif
 #if defined( REGION_AS_923 )
         region_as923_context_t as923;

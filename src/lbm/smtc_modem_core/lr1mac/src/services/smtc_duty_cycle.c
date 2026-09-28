@@ -68,7 +68,7 @@
 static struct
 {
     smtc_dtc_t* dtc_obj_ptr;
-#if defined( REGION_EU_868 ) || ( REGION_RU_864 )
+#if defined( REGION_EU_868 ) || defined( REGION_RU_864 ) || defined( REGION_EU_433 )
     smtc_dtc_t dtc_obj_ctx;
 #endif
 } dtc_context;
@@ -135,7 +135,7 @@ static void smtc_duty_cycle_put_band_in_array( smtc_dtc_t* dtc_obj, uint8_t* tmp
  */
 void smtc_duty_cycle_init( void )
 {
-#if defined( REGION_EU_868 ) || ( REGION_RU_864 )
+#if defined( REGION_EU_868 ) || defined( REGION_RU_864 ) || defined( REGION_EU_433 )
     dtc_obj_ptr = &dtc_obj_ctx;
     // Set to 0 the dtc_obj
     memset( dtc_obj_ptr, 0, sizeof( smtc_dtc_t ) );

@@ -694,7 +694,7 @@ void WisBlockLoRaAT::atBand(AtOp op, const char *value)
 	{
 		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(atoi(value))))
 		{
-			replyError("unsupported band index - EU433/LA915 not built into this LBM vendoring");
+			replyError("unsupported band index - LA915 not built into this LBM vendoring");
 			return;
 		}
 		replyOk();

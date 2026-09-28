@@ -18,6 +18,7 @@
 // #define REGION_CN_470 1
 // #define REGION_CN_470_RP_1_0 1
 // #define REGION_EU_868 1
+// #define REGION_EU_433 1
 // #define REGION_IN_865 1
 // #define REGION_KR_920 1
 // #define REGION_RU_864 1

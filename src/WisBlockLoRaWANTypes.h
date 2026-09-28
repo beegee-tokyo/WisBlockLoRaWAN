@@ -35,6 +35,11 @@ enum WisBlockRegion : uint8_t
 	WISBLOCK_REGION_CN470 = 10,
 	WISBLOCK_REGION_CN470_RP_1_0 = 11,
 	WISBLOCK_REGION_WW2G4 = 12, /* 2.4 GHz worldwide, if radio variant supports it */
+	/** RP002-1.0.4 EU433 (433.05-434.79 MHz) - dropped from upstream LBM (Semtech no longer
+	 * ships region_eu_433.c/.h/_defs.h), re-vendored in this library's src/lbm since
+	 * RAKwireless WisBlock/WisCore modules still need it - see region_eu_433_defs.h's doc
+	 * comment for the parameter sourcing. */
+	WISBLOCK_REGION_EU433 = 13,
 };
 
 /**
@@ -43,10 +48,11 @@ enum WisBlockRegion : uint8_t
  * WisBlockLoRaWAN::setRegion()/getRegion() and AT+BAND use, precisely so callers never have to
  * juggle two different "which region is this" numberings for the same setting.
  *
- * RUI3's EU433 (0) and LA915 (12) are part of RUI3's documented numbering but have no
- * WisBlockRegion equivalent at all in this vendored LBM build (its main.h doesn't define
- * REGION_EU_433 or REGION_LA_915) - wisblockRUI3BandToRegion() returns false for them rather than
- * silently picking something else, and setRegion()/AT+BAND reject them the same way.
+ * RUI3's LA915 (12) is part of RUI3's documented numbering but has no WisBlockRegion equivalent
+ * at all in this vendored LBM build (its main.h doesn't define REGION_LA_915) -
+ * wisblockRUI3BandToRegion() returns false for it rather than silently picking something else,
+ * and setRegion()/AT+BAND reject it the same way. EU433 (0) *is* supported - see
+ * WISBLOCK_REGION_EU433's doc comment.
  */
 enum WisBlockRUI3Band : uint8_t
 {
@@ -72,9 +78,9 @@ enum WisBlockRUI3Band : uint8_t
 /**
  * Converts a RUI3 AT+BAND index (WisBlockRUI3Band, as used by WisBlockLoRaWAN::setRegion() and
  * AT+BAND) to this library's internal SWL2001/LBM-mirroring WisBlockRegion enum.
- * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_EU433,
- * WISBLOCK_RUI3_BAND_LA915, WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion
- * equivalent in this vendored LBM build.
+ * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_LA915,
+ * WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion equivalent in this
+ * vendored LBM build.
  */
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);
 

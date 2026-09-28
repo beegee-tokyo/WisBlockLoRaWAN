@@ -69,6 +69,9 @@
 #if defined( REGION_RU_864 )
 #include "region_ru_864_defs.h"
 #endif
+#if defined( REGION_EU_433 )
+#include "region_eu_433_defs.h"
+#endif
 
 #if defined( USE_LR11XX_CE )
 #include "lr11xx_system.h"

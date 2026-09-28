@@ -70,8 +70,8 @@ public:
 	 * used internally and stored in getConfig().lorawan.region. Converts internally to
 	 * WisBlockRegion before applying, via wisblockRUI3BandToRegion() - see its doc comment and
 	 * WisBlockRUI3Band's for why these two numberings exist.
-	 * @return false (no change made) for WISBLOCK_RUI3_BAND_EU433, WISBLOCK_RUI3_BAND_LA915, or
-	 * any other band with no WisBlockRegion equivalent in this vendored LBM build.
+	 * @return false (no change made) for WISBLOCK_RUI3_BAND_LA915, or any other band with no
+	 * WisBlockRegion equivalent in this vendored LBM build.
 	 */
 	bool setRegion(WisBlockRUI3Band band);
 	/**

@@ -110,6 +110,10 @@ defines = [
     "REGION_CN_470",
     "REGION_CN_470_RP_1_0",
     "REGION_EU_868",
+    # EU433: dropped from upstream SWL2001/LBM (no region_eu_433.c/.h/_defs.h is shipped
+    # there anymore), but re-vendored in this library - see region_eu_433_defs.h's doc
+    # comment - because RAKwireless WisBlock/WisCore modules still need it.
+    "REGION_EU_433",
     "REGION_IN_865",
     "REGION_KR_920",
     "REGION_RU_864",
