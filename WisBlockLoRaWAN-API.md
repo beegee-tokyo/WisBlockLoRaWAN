@@ -2655,7 +2655,7 @@ void setup()
 
 ## AT Command Interface
 
-`WisBlockLoRaAT` is a thin text protocol on top of the same `WisBlockLoRaWAN` object, so AT commands and API calls always stay in sync. The command set follows RUI3 (`AT+BAND`, `AT+NJM`, `AT+JOIN`, `AT+SEND`, ...), see the README for the complete command table. Custom commands use the prefix `ATC+`.
+`WisBlockLoRaAT` is a thin text protocol on top of the same `WisBlockLoRaWAN` object, so AT commands and API calls always stay in sync. The command set follows RUI3 (`AT+BAND`, `AT+NJM`, `AT+JOIN`, `AT+SEND`, ...), see [WisBlockLoRaWAN-AT-Commands](WisBlockLoRaWAN-AT-Commands.md) for the complete command reference. Custom commands use the prefix `ATC+`.
 
 ## _ℹ️ INFO_
 ----    
