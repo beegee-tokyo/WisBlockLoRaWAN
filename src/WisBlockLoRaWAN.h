@@ -13,6 +13,7 @@
 
 #include "LoRaP2PEngine.h"
 #include "LoRaWANEngine.h"
+#include "WisBlockLoRaHwConfig.h"
 #include "WisBlockLoRaWANConfig.h"
 #include "WisBlockLoRaWANTypes.h"
 
@@ -22,8 +23,27 @@ public:
 	/** Loads saved config (or factory defaults), inits radio + board pins. Call once from setup().
 	 * Deliberately does NOT start the LoRaWAN engine (smtc_modem_init() and everything that follows
 	 * from it - region/class/ADR setup) here, even if that's the configured/default work mode
-	 * - see ensureLoRaWANEngineStarted() below for why. */
+	 * - see ensureLoRaWANEngineStarted() below for why.
+	 *
+	 * Uses the compile-time-selected RAKwireless board preset (RAK4631/RAK3312/RAK11310 -
+	 * see WisBlockLoRaHwConfig.h). For any other board, use the begin(const WisBlockLoRaHwConfig&)
+	 * overload below instead. */
 	void begin();
+
+	/**
+	 * Same as plain begin(), but takes an explicit board description instead of relying on the
+	 * compile-time RAKwireless board preset - see WisBlockLoRaHwConfig.h's doc comment for what
+	 * it describes and its wisblockLoRaHwConfigRAKxxxx() presets (including the new RAK3401 one)
+	 * for real examples to start from. This is how a board other than RAK4631/RAK3312/RAK11310
+	 * is supported: fill in a WisBlockLoRaHwConfig for its wiring (or copy a preset and override
+	 * the fields that differ) and pass it here instead of calling plain begin().
+	 *
+	 * Only available on nRF52840/ESP32-S3 builds - RP2040 (RAK11310) doesn't have the full
+	 * FreeRTOS support this flexible path assumes, see wisblock_radio_hal.h's doc comment.
+	 */
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+	void begin(const WisBlockLoRaHwConfig &hwConfig);
+#endif
 
 	/** Pumps LoRaWAN/P2P engines and low-power timer bookkeeping. Call every loop().
 	 * Returns the ms budget before this must be called again (see LoRaWANEngine::handleEvents());

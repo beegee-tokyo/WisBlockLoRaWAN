@@ -19,10 +19,12 @@
  * upstream SWL2001 repo) - that reference targets Semtech's own eval board,
  * which has no TCXO (crystal only). The WisBlock SX1262 module used across
  * all three boards this library targets *does* have a TCXO, confirmed at
- * 1.8V / 5ms startup (same value already used directly in
+ * 3.3V / 50ms startup (same value already used directly in
  * LoRaP2PEngine.cpp's sx126x_set_dio3_as_tcxo_ctrl() call and in
- * wisblock_lbm_port.cpp's smtc_modem_hal_get_radio_tcxo_startup_delay_ms())
- * - ral_sx126x_bsp_get_xosc_cfg() below is adapted accordingly.
+ * wisblock_lbm_port.cpp's smtc_modem_hal_get_radio_tcxo_startup_delay_ms();
+ * an earlier revision of this comment said "1.8V / 5ms", which never
+ * matched the 3.3V/50ms value actually programmed by any of those three
+ * call sites - corrected here, no functional change).
  *
  * Also removed: Semtech's reference calls a `radio_utilities_get_tx_power_offset()`
  * helper from their example app scaffolding (lbm_examples/, not vendored by
@@ -31,16 +33,20 @@
  * offset here rather than in application code, so it applies uniformly to
  * both ADR-driven and manually-set power levels.
  *
- * NOTE: this file is intentionally MCU-agnostic (no #if defined(ARDUINO_ARCH_*)
- * guards) - the RAK4631/RAK3312/RAK11310 SX1262 modules are treated as
- * sharing the same radio-side board design, consistent with how TCXO
- * config is already handled elsewhere in this library. If a specific
- * board's module actually differs (different regulator wiring, no TCXO,
- * etc.), split this into per-board files following the
- * wisblock_radio_hal_rak*.cpp naming pattern.
+ * Since the Creation Log entry "Flexible hw_config-based radio init (RAK3401
+ * / non-WisBlock boards)", the regulator mode, RF-switch (DIO2) and TCXO
+ * settings below are read from wisblock_radio_hal_get_bsp_config() (set by
+ * WisBlockRadioHal::init() from the active WisBlockLoRaHwConfig) instead of
+ * being hardcoded to the WisBlock modules' values - see
+ * wisblock_radio_bsp_config.h. This file otherwise stays MCU-agnostic (no
+ * #if defined(ARDUINO_ARCH_*) guards): a board's *radio module* wiring
+ * (this file's concern) and its *MCU* (wisblock_radio_hal.cpp's concern) are
+ * independent axes, and WisBlockLoRaHwConfig now describes the former
+ * directly instead of this file assuming it always matches WisBlock's.
  */
 
 #include "ral_sx126x_bsp.h" // vendored: src/lbm/smtc_modem_core/smtc_ral/src/ral_sx126x_bsp.h
+#include "wisblock_radio_bsp_config.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -135,26 +141,28 @@ static const uint32_t ral_sx126x_convert_tx_dbm_to_ua_reg_mode_ldo_hp[] = {
 void ral_sx126x_bsp_get_reg_mode( const void* context, sx126x_reg_mod_t* reg_mode )
 {
 	(void)context;
-	// CHANGED from SX126X_REG_MODE_DCDC (Semtech's own reference default,
-	// copied without verifying against RAK's actual module schematic - no
-	// network access available to check it). DC-DC mode requires a
-	// physical inductor to be populated on the board; if it isn't, standby/RX
-	// draws little enough current that nothing visibly breaks, but TX's
-	// current spike is exactly where a misconfigured supply would misbehave
-	// - consistent with the observed symptom (P2P TX/RX fine, LoRaWAN join
-	// panics specifically inside TX setup). LDO works unconditionally on
-	// any board. If you've confirmed your module's schematic populates the
-	// DC-DC inductor, switch back for the efficiency gain.
-	*reg_mode = SX126X_REG_MODE_DCDC;
+	// KNOWN DISCREPANCY, left as-is rather than guessed at: an earlier
+	// revision of this comment described switching the default here from
+	// SX126X_REG_MODE_DCDC to SX126X_REG_MODE_LDO for safety (DC-DC mode
+	// needs a physical inductor populated on the board; LDO works
+	// unconditionally on any board), reasoning from a LoRaWAN-join-time
+	// panic that pointed at TX's current spike. The code, however, has
+	// always actually set DCDC below - whichever of the two was tested is
+	// unknown from the code alone. Behavior is UNCHANGED here (still DCDC)
+	// to avoid silently flipping already-deployed boards; use
+	// WisBlockLoRaHwConfig::useLdo (see wisblockLoRaHwConfigRAK4631() etc.)
+	// if you need to switch it, and confirm against your module's actual
+	// schematic either way.
+	*reg_mode = wisblock_radio_hal_get_bsp_config()->useLdo ? SX126X_REG_MODE_LDO : SX126X_REG_MODE_DCDC;
 }
 
 void ral_sx126x_bsp_get_rf_switch_cfg( const void* context, bool* dio2_is_set_as_rf_switch )
 {
 	(void)context;
-	// Matches LORA_ANT_SWITCH == -1 in WisBlockLoRaBoards.h and the
-	// sx126x_set_dio2_as_rf_sw_ctrl(kCtx, true) call already made directly
-	// in LoRaP2PEngine.cpp for P2P mode - kept consistent here for LoRaWAN mode.
-	*dio2_is_set_as_rf_switch = true;
+	// Read from the active WisBlockLoRaHwConfig (useDio2AntSwitch) instead of
+	// being hardcoded true - LoRaP2PEngine.cpp's sx126x_set_dio2_as_rf_sw_ctrl()
+	// call for P2P mode reads the same config, so the two modes always agree.
+	*dio2_is_set_as_rf_switch = wisblock_radio_hal_get_bsp_config()->dio2AntSwitch;
 }
 
 void ral_sx126x_bsp_get_tx_cfg( const void* context, const ral_sx126x_bsp_tx_cfg_input_params_t* input_params,
@@ -191,15 +199,16 @@ void ral_sx126x_bsp_get_xosc_cfg( const void* context, ral_xosc_cfg_t* xosc_cfg,
 								   sx126x_tcxo_ctrl_voltages_t* supply_voltage, uint32_t* startup_time_in_tick )
 {
 	(void)context;
-	// This board's SX1262 module uses a TCXO (confirmed 1.8V / ~5ms
-	// startup - same value used directly in LoRaP2PEngine.cpp and
-	// wisblock_lbm_port.cpp). startup_time_in_tick is passed straight
-	// through to sx126x_set_dio3_as_tcxo_ctrl() (see ral_sx126x.c), same
-	// raw 15.625us-per-step units as everywhere else in this library:
-	// 50ms / 15.625us = 320 = 50 << 6.
-	*xosc_cfg = RAL_XOSC_CFG_TCXO_RADIO_CTRL;
-	*supply_voltage = SX126X_TCXO_CTRL_3_3V;
-	*startup_time_in_tick = 50 << 6;
+	// Read from the active WisBlockLoRaHwConfig instead of being hardcoded
+	// to the WisBlock modules' TCXO (3.3V, 50ms startup - see
+	// wisblockLoRaHwConfigRAK4631() etc.). startup_time_in_tick is passed
+	// straight through to sx126x_set_dio3_as_tcxo_ctrl() (see ral_sx126x.c),
+	// already converted to the driver's native 15.625us-per-step units by
+	// WisBlockRadioHal (see wisblock_radio_bsp_config.h).
+	const struct WisBlockLoRaRadioBspConfig* cfg = wisblock_radio_hal_get_bsp_config();
+	*xosc_cfg = cfg->dio3Tcxo ? RAL_XOSC_CFG_TCXO_RADIO_CTRL : RAL_XOSC_CFG_XTAL;
+	*supply_voltage = cfg->tcxoVoltage;
+	*startup_time_in_tick = cfg->tcxoStartupTimeInTick;
 }
 
 void ral_sx126x_bsp_get_trim_cap( const void* context, uint8_t* trimming_cap_xta, uint8_t* trimming_cap_xtb )

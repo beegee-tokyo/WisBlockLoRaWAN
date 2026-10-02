@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "sx126x.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h
+#include "wisblock_radio_bsp_config.h"
 #include "wisblock_radio_hal.h"
 
 /*
@@ -182,13 +183,21 @@ void LoRaP2PEngine::begin(const WisBlockP2PSettings &initial)
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 	sx126x_set_pkt_type(kCtx, SX126X_PKT_TYPE_LORA);
 
-	// All three boards (RAK4631/RAK3312/RAK11310) use the SX1262's built-in
-	// RF switch control via DIO2, not an MCU GPIO (see LORA_ANT_SWITCH ==
-	// -1 in WisBlockLoRaBoards.h).
-	sx126x_set_dio2_as_rf_sw_ctrl(kCtx, true);
-
-	// TCXO: 3.3V / 5ms startup delay, confirmed for this board's SX1262 module.
-	sx126x_set_dio3_as_tcxo_ctrl(kCtx, SX126X_TCXO_CTRL_3_3V, 50 << 6 /* 50ms, in 15.625us steps: 50000/15.625 = 3200 = 50<<6 */);
+	// RF switch (DIO2) and TCXO config come from the active WisBlockLoRaHwConfig
+	// (see wisblock_radio_hal_get_bsp_config() / WisBlockRadioHal::init()) -
+	// not hardcoded to the three built-in WisBlock presets, since the
+	// Creation Log entry "Flexible hw_config-based radio init (RAK3401 /
+	// non-WisBlock boards)". LoRaWAN mode's ral_sx126x_bsp_get_rf_switch_cfg()/
+	// _get_xosc_cfg() (wisblock_ral_sx126x_bsp.c) read the exact same config,
+	// so the two modes always agree.
+	{
+		const WisBlockLoRaRadioBspConfig *bspCfg = wisblock_radio_hal_get_bsp_config();
+		sx126x_set_dio2_as_rf_sw_ctrl(kCtx, bspCfg->dio2AntSwitch);
+		if (bspCfg->dio3Tcxo)
+		{
+			sx126x_set_dio3_as_tcxo_ctrl(kCtx, bspCfg->tcxoVoltage, bspCfg->tcxoStartupTimeInTick);
+		}
+	}
 
 	applyRadioParams();
 }
@@ -381,8 +390,14 @@ void LoRaP2PEngine::reconfigureAfterColdSleep()
 	// else).
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 	sx126x_set_pkt_type(kCtx, SX126X_PKT_TYPE_LORA);
-	sx126x_set_dio2_as_rf_sw_ctrl(kCtx, true);
-	sx126x_set_dio3_as_tcxo_ctrl(kCtx, SX126X_TCXO_CTRL_3_3V, 50 << 6);
+	{
+		const WisBlockLoRaRadioBspConfig *bspCfg = wisblock_radio_hal_get_bsp_config();
+		sx126x_set_dio2_as_rf_sw_ctrl(kCtx, bspCfg->dio2AntSwitch);
+		if (bspCfg->dio3Tcxo)
+		{
+			sx126x_set_dio3_as_tcxo_ctrl(kCtx, bspCfg->tcxoVoltage, bspCfg->tcxoStartupTimeInTick);
+		}
+	}
 	applyRadioParams();
 }
 

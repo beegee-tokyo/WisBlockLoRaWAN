@@ -1,7 +1,7 @@
 /**
  * @file wisblock_radio_hal.h
  * @brief SPI/GPIO glue between the Arduino core and Semtech's SX1262 radio
- * driver, for the RAK4631 (nRF52840) WisBlock core module.
+ * driver.
  *
  * This implements the exact function contract of Semtech's own
  * `sx126x_hal.h` (from the open-source `sx126x_driver` repo, also consumed
@@ -15,10 +15,22 @@
  *
  * Drop Semtech's `sx126x_driver` sources into src/lbm/ (or reference them
  * directly if vendoring full LBM) and this file satisfies its BSP
- * requirement with no changes needed on the driver side. The `context`
- * pointer threaded through every call is Semtech's mechanism for supporting
- * multiple radios/boards from one driver instance; here it resolves to a
- * `WisBlockRadioContext*` describing which board's pins to use.
+ * requirement with no changes needed on the driver side.
+ *
+ * Board flexibility: since the Creation Log entry "Flexible hw_config-based
+ * radio init (RAK3401 / non-WisBlock boards)", this file is no longer one
+ * fixed implementation per RAKwireless board (wisblock_radio_hal_rak4631.cpp
+ * / _rak3312.cpp used to hardcode WisBlockLoRaBoards.h's pin macros
+ * directly). init(const WisBlockLoRaHwConfig&) below takes the board's pin
+ * assignment and RF-switch/TCXO wiring at runtime instead, so any nRF52840
+ * or ESP32-S3 board with an SX1262 can be supported without a new .cpp file
+ * - see WisBlockLoRaHwConfig.h's doc comment for the field-combinations
+ * this supports and wisblock_radio_hal.cpp (the merged nRF52/ESP32
+ * implementation) for how they're realized in GPIO/SPI terms.
+ * wisblock_radio_hal_rak11310.cpp (RP2040) is untouched and still owns its
+ * own fixed pin set - RP2040/mbed has no full FreeRTOS support, so it isn't
+ * part of this flexible path (WisBlockLoRaWAN::begin() still auto-selects
+ * it at compile time for RP2040 builds).
  *
  * Reference (function contract only, not copied verbatim):
  * https://github.com/Lora-net/sx126x_driver — sx126x_hal.h
@@ -27,6 +39,8 @@
 #define WISBLOCK_RADIO_HAL_H
 
 #include <stdint.h>
+
+#include "WisBlockLoRaHwConfig.h"
 
 /** Matches sx126x_hal_status_t from Semtech's sx126x_hal.h. */
 enum sx126x_hal_status_e
@@ -38,28 +52,48 @@ enum sx126x_hal_status_e
 };
 typedef enum sx126x_hal_status_e sx126x_hal_status_t;
 
-/**
- * Per-board radio context. One static instance is provided for the RAK4631
- * (see wisblockRadioContext in the .cpp); the `context` pointer LBM/the
- * radio driver carries around is a `const void*` to one of these.
- */
-struct WisBlockRadioContext
-{
-	int8_t pinNss;
-	int8_t pinReset;
-	int8_t pinBusy;
-	int8_t pinDio1;
-	int8_t pinAntPwr;
-	uint32_t spiHz;
-};
-
 namespace WisBlockRadioHal
 {
-/** Configures SPI + all radio GPIOs. Call once from WisBlockLoRaWAN::begin(). */
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+/**
+ * Configures SPI + all radio GPIOs from an explicit hw_config, so a board
+ * other than the three built-in WisBlock presets can be used - see
+ * WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&). Call once, before
+ * anything else in this namespace or the LBM/P2P engines.
+ *
+ * Only compiled for nRF52840/ESP32-S3 - see this file's doc comment for why
+ * RP2040 (RAK11310) doesn't take this path.
+ */
+void init(const WisBlockLoRaHwConfig &hwConfig);
+#endif
+
+/**
+ * Configures SPI + all radio GPIOs using the compile-time-selected
+ * RAKwireless board preset (RAK4631/RAK3312/RAK11310 - see
+ * WisBlockLoRaHwConfig.h). This is what plain WisBlockLoRaWAN::begin()
+ * (with no hw_config argument) calls; kept for that backward-compatible
+ * path and equivalent to calling the config-based init() above with the
+ * matching wisblockLoRaHwConfigRAKxxxx() preset.
+ */
 void init();
 
-/** The context instance to pass as `context` into every sx126x_hal_*() / ral_*() call. */
+/** The context instance to pass as `context` into every sx126x_hal_*() /
+ * ral_*() call. Always resolves to the single static board config this HAL
+ * was last init()-ed with - see the NOTE in wisblock_radio_hal.cpp's
+ * sx126x_hal_reset() for why the incoming pointer itself is never used. */
 const void *context();
+
+/** The active board's DIO1 pin (from the WisBlockLoRaHwConfig this HAL was
+ * last init()-ed with) - wisblock_lbm_port.cpp's WisBlockLbmPort::init()
+ * reads this to attach the DIO1 interrupt on the right pin, instead of
+ * hardcoding WisBlockLoRaBoards.h's compile-time LORA_DIO1 macro (which
+ * only matches the three built-in RAKwireless presets, not a custom board
+ * passed to WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&) - see the
+ * Creation Log entry "DIO1 interrupt hardcoded to the wrong pin for custom
+ * hw_config boards" for the RP_FAILSAFE panic this caused on RAK3401
+ * before this existed). Only valid after WisBlockRadioHal::init() has run.
+ */
+int8_t dio1Pin();
 
 /** True while BUSY is asserted (chip processing a previous command / booting). */
 bool isBusy();
@@ -71,15 +105,17 @@ bool isBusy();
 bool waitOnBusy(uint32_t timeoutMs = 1000);
 
 /**
- * Drives the LORA_ANT_PWR GPIO that feeds this board's RF-switch/antenna
- * front-end supply. This is normally managed automatically - see the
- * "Radio HAL: RF-switch power tracking" note in each
- * wisblock_radio_hal_<board>.cpp: it's switched off the moment the radio
+ * Drives whichever pin(s) this board's hw_config uses for RF-switch/antenna
+ * front-end power (radioRxEn if useRxenAntPwr, DIO3 if useDio3AntSwitch, or
+ * both if a board somehow uses both) - see the "RF-switch power tracking"
+ * note in wisblock_radio_hal.cpp: it's switched off the moment the radio
  * itself is put to sleep (SX126x SetSleep opcode observed in
  * sx126x_hal_write()) and back on, with a settle delay, the moment the next
  * SPI transaction wakes it. Exposed here only for cases outside that normal
  * flow - e.g. forcing it off before a deep MCU sleep where you know the
- * radio will be fully re-initialized on wake anyway.
+ * radio will be fully re-initialized on wake anyway. A no-op on a board
+ * that uses neither flag (radioTxEn/radioRxEn wired as direct RF-switch
+ * steering lines instead - see WisBlockLoRaHwConfig.h).
  */
 void setAntennaPower(bool on);
 
@@ -98,9 +134,9 @@ bool isAsleep();
 
 /**
  * The settle delay (in whole milliseconds, rounded up) that
- * checkDeviceReady() waits after restoring LORA_ANT_PWR before trusting the
- * SPI bus again on wake - see kAntPwrSettleUs in each
- * wisblock_radio_hal_<board>.cpp. Exists so smtc_modem_hal_get_radio_tcxo_startup_delay_ms()
+ * checkDeviceReady() waits after restoring antenna power before trusting
+ * the SPI bus again on wake - see kAntPwrSettleUs in wisblock_radio_hal.cpp.
+ * Exists so smtc_modem_hal_get_radio_tcxo_startup_delay_ms()
  * (wisblock_lbm_port.cpp) can fold this into the total latency it reports
  * to LBM's radio_planner, instead of reporting only the SX1262's own TCXO
  * startup time and silently running late against radio_planner's own

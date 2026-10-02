@@ -57,6 +57,7 @@ namespace
 } // namespace
 
 WisBlockLoRaAT *WisBlockLoRaAT::activeInstanceForRx = nullptr;
+WisBlockLoRaAT::RxWakeCallback WisBlockLoRaAT::rxWakeCb = nullptr;
 
 // ---------------------------------------------------------------------------
 // Built-in AT command lookup table - one row per command name (no "AT"
@@ -124,7 +125,6 @@ const size_t WisBlockLoRaAT::atCommandTableSize = sizeof(WisBlockLoRaAT::atComma
 
 #ifdef ARDUINO_ARCH_ESP32
 #include <esp_system.h>
-void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 #endif
 
 void WisBlockLoRaAT::begin(WisBlockLoRaWAN &loraRef, Stream &portRef)
@@ -132,11 +132,11 @@ void WisBlockLoRaAT::begin(WisBlockLoRaWAN &loraRef, Stream &portRef)
 	lora = &loraRef;
 	port = &portRef;
 	lineLength = 0;
+}
 
-#ifdef ARDUINO_ARCH_ESP32
-	backgroundRxActive = true;
-	Serial.onEvent(usbEventCallback);
-#endif
+void WisBlockLoRaAT::setRxWakeCallback(RxWakeCallback cb)
+{
+	rxWakeCb = cb;
 }
 
 void WisBlockLoRaAT::handleSerial()
@@ -148,7 +148,7 @@ void WisBlockLoRaAT::handleSerial()
 	// WisBlockLoRaWAN::handleEvents()'s equivalent guard.
 	if (backgroundRxActive)
 	{
-		return;
+		return; // inline background mode owns the stream, see enableBackgroundRx()
 	}
 	processIncomingBytes();
 }
@@ -894,13 +894,13 @@ void WisBlockLoRaAT::atClass(AtOp op, const char *value)
 		// and then replyOk() again right after, sending two "OK\r\n" lines
 		// back for a single query. reply() alone is correct.
 		reply(dc == WISBLOCK_CLASS_B ? "B" : dc == WISBLOCK_CLASS_C ? "C"
-																	 : "A");
+																	: "A");
 	}
 	else if (op == AtOp::Write)
 	{
 		char c = value[0];
 		WisBlockDeviceClass dc = (c == 'B' || c == 'b') ? WISBLOCK_CLASS_B : (c == 'C' || c == 'c') ? WISBLOCK_CLASS_C
-																									  : WISBLOCK_CLASS_A;
+																									: WISBLOCK_CLASS_A;
 		lora->setDeviceClass(dc);
 		replyOk();
 	}
@@ -1685,7 +1685,7 @@ void WisBlockLoRaAT::atAddMulc(AtOp op, const char *value)
 		return;
 	}
 	uint32_t devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
-						((uint32_t)addrBytes[2] << 8) | addrBytes[3];
+					   ((uint32_t)addrBytes[2] << 8) | addrBytes[3];
 
 	tok = strtok(nullptr, ":");
 	uint8_t nwkSKey[16];
@@ -1777,7 +1777,7 @@ void WisBlockLoRaAT::atRmvMulc(AtOp op, const char *value)
 		return;
 	}
 	uint32_t devAddr = ((uint32_t)addrBytes[0] << 24) | ((uint32_t)addrBytes[1] << 16) |
-						((uint32_t)addrBytes[2] << 8) | addrBytes[3];
+					   ((uint32_t)addrBytes[2] << 8) | addrBytes[3];
 	int groupId = lora->findMulticastGroupByDevAddr(devAddr);
 	if (groupId < 0 || !lora->removeMulticastGroup((uint8_t)groupId))
 	{
@@ -1811,7 +1811,7 @@ void WisBlockLoRaAT::atLstMulc(AtOp op, const char *value)
 		}
 		port->print(g->deviceClass == WISBLOCK_CLASS_B ? "B:" : "C:");
 		uint8_t addrBytes[4] = {(uint8_t)(g->devAddr >> 24), (uint8_t)(g->devAddr >> 16), (uint8_t)(g->devAddr >> 8),
-								 (uint8_t)g->devAddr};
+								(uint8_t)g->devAddr};
 		for (int b = 0; b < 4; b++)
 		{
 			snprintf(hexByte, sizeof(hexByte), "%02X", addrBytes[b]);
@@ -1874,46 +1874,37 @@ void WisBlockLoRaAT::atBoot(AtOp op, const char *value)
 }
 
 // ---------------------------------------------------------------------------
-// Background RX: USB CDC RX callback hooks per platform. Both call straight
-// into onBackgroundRxData() -> processIncomingBytes(), reading and
-// dispatching whatever's available right there in the callback rather than
-// signaling a separate task to do it - see WisBlockLoRaAT.h's
-// enableBackgroundRx() doc comment for the one-instance-only and
-// can't-coexist-with-your-own-USB-callback caveats this implies.
+// Background RX: USB CDC RX notification per platform.
 //
-// Thread-safety note: these callbacks run in the TinyUSB device task's
-// context (RAK4631) or the ESP32 core's USB/event task context (RAK3312) -
-// a real FreeRTOS task, not a hard ISR, so calling into this library (and
-// therefore LBM) is *safe to attempt*, but it's a *different* task than
-// WisBlockLbmTask's own background event task if
-// WisBlockLoRaWAN::enableBackgroundTask() is also active. processIncomingBytes()
-// already wraps each dispatched line in lora->lockLbm()/unlockLbm() to
-// serialize against that - see wisblock_lbm_task.h for why.
+// Two modes (see WisBlockLoRaAT.h, setRxWakeCallback()/enableBackgroundRx()):
+//
+//  - WAKE mode (a wake callback is registered): the USB hook only calls that
+//    callback. It must be short and non-blocking - set a flag / give a
+//    semaphore / notify a task. The application then calls handleSerial()
+//    from its own task (typically loop()), so AT commands run on the same
+//    task as the rest of the application and are not executed inside the
+//    USB driver's own task. This is the mode to use on ESP32.
+//
+//  - INLINE mode (no callback): the USB hook calls processIncomingBytes()
+//    directly in the USB driver's task context. Only supported on nRF52
+//    (TinyUSB). On ESP32 the CDC event task has a small stack and also
+//    delivers the driver's own RX/TX events, so enableBackgroundRx() returns
+//    false there instead of silently doing this.
 // ---------------------------------------------------------------------------
 
 #include <Arduino.h>
-extern SemaphoreHandle_t g_task_sem;
-extern volatile uint16_t g_task_event_type;
-#ifdef ARDUINO_ARCH_ESP32
-static BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-#endif
+
 void WisBlockLoRaAT::onBackgroundRxData()
 {
-	g_task_event_type |= 0b0000000000100000; // #define AT_CMD
-	if (g_task_sem != NULL)
+	if (rxWakeCb)
 	{
-#ifdef ARDUINO_ARCH_ESP32
-		xSemaphoreGiveFromISR(g_task_sem, &xHigherPriorityTaskWoken);
-#endif
-#ifdef NRF52_SERIES
-		xSemaphoreGiveFromISR(g_task_sem, pdFALSE);
-#endif
+		rxWakeCb();
+		return;
 	}
-
-	// if (activeInstanceForRx)
-	// {
-	// 	activeInstanceForRx->processIncomingBytes();
-	// }
+	if (activeInstanceForRx)
+	{
+		activeInstanceForRx->processIncomingBytes();
+	}
 }
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
@@ -1923,7 +1914,9 @@ void WisBlockLoRaAT::onBackgroundRxData()
 bool WisBlockLoRaAT::enableBackgroundRx()
 {
 	activeInstanceForRx = this;
-	backgroundRxActive = true;
+	// Wake mode: loop() keeps calling handleSerial(). Inline mode: the
+	// callback processes the data itself, handleSerial() becomes a no-op.
+	backgroundRxActive = (rxWakeCb == nullptr);
 	return true;
 }
 
@@ -1941,32 +1934,66 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 
 #elif defined(ARDUINO_ARCH_ESP32)
 
-#include <Arduino.h>
-#include <HWCDC.h> // ARDUINO_HW_CDC_EVENTS / ARDUINO_HW_CDC_RX_EVENT - see the TODO below if your core version differs
+// Which Serial is it? RAK3312/RAK3112 build with ARDUINO_USB_CDC_ON_BOOT=1 and
+// ARDUINO_USB_MODE=1, i.e. Serial is the USB-Serial/JTAG peripheral (HWCDC).
+// The USBCDC (TinyUSB) and UART branches below follow the same pattern but
+// have not been compiled/tested by the author.
+#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE == 1
+#define WB_AT_USE_HWCDC 1
+#include <HWCDC.h>
+#elif defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+#define WB_AT_USE_USBCDC 1
+#include <USB.h>
+#include <USBCDC.h>
+#endif
 
-// namespace
-// {
+namespace
+{
+// Signature required by esp_event_handler_t. Runs in the Arduino core's USB
+// event task: do nothing here except forward to the wake callback.
 void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
 	(void)arg;
 	(void)event_data;
-	// ARDUINO_HW_CDC_EVENTS/_RX_EVENT matches the ESP32-S3 native USB CDC
-	// (HWCDC) event API. TODO: if your esp32-arduino core version exposes
-	// this under a different class/event-base name (USBCDC vs HWCDC has
-	// varied across core releases), adjust this match accordingly - the
-	// rest of this file doesn't need to change.
+#if defined(WB_AT_USE_HWCDC)
 	if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT)
+#elif defined(WB_AT_USE_USBCDC)
+	if (event_base == ARDUINO_USB_CDC_EVENTS && event_id == ARDUINO_USB_CDC_RX_EVENT)
+#else
+	(void)event_base;
+	(void)event_id;
+	if (false)
+#endif
 	{
 		WisBlockLoRaAT::onBackgroundRxData();
 	}
 }
-// } // namespace
+} // namespace
 
 bool WisBlockLoRaAT::enableBackgroundRx()
 {
-	// activeInstanceForRx = this;
-	// Serial.onEvent(ARDUINO_HW_CDC_EVENTS, usbEventCallback);
-	// backgroundRxActive = true;
+	if (rxWakeCb == nullptr)
+	{
+		// Inline processing inside the ESP32 USB event task is not supported,
+		// register a wake callback with setRxWakeCallback() first.
+		return false;
+	}
+	activeInstanceForRx = this;
+	backgroundRxActive = false; // wake mode: the application calls handleSerial()
+
+	static bool registered = false; // never register the event handler twice
+	if (!registered)
+	{
+#if defined(WB_AT_USE_HWCDC)
+		Serial.onEvent(ARDUINO_HW_CDC_RX_EVENT, usbEventCallback);
+#elif defined(WB_AT_USE_USBCDC)
+		Serial.onEvent(ARDUINO_USB_CDC_RX_EVENT, usbEventCallback);
+#else
+		// UART-backed Serial: no event API, use the HardwareSerial RX callback
+		Serial.onReceive([]() { WisBlockLoRaAT::onBackgroundRxData(); });
+#endif
+		registered = true;
+	}
 	return true;
 }
 

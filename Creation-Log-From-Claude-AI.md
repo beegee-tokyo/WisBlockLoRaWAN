@@ -3319,3 +3319,177 @@ documented, not implemented.
 - Added EU433 (RP002-1.0.4) region: region_eu_433.c/.h/_defs.h, dispatch in smtc_real.c, duty-cycle registration in lorawan_api.c, WISBLOCK_REGION_EU433 / WISBLOCK_RUI3_BAND_EU433.
 - setRegion() now takes WisBlockRUI3Band (RUI3 AT+BAND numbering) and returns bool; added getRegion().
 - LBM now traces "Region set to ..." whenever the region is changed, to make region problems visible in logs.
+## Flexible hw_config-based radio init (RAK3401 / non-WisBlock boards)
+
+Reworked how this library configures the SX1262 so it isn't limited to the three RAKwireless
+WisBlock Core modules it started with (RAK4631, RAK3312, RAK11310), following the pattern used
+by beegee-tokyo/SX126x-Arduino's `hw_config` struct (`src/boards/mcu/board.h` /
+`lora_rak3400_init()` in `src/boards/mcu/board.cpp`, referenced directly for this task) - any
+nRF52840 or ESP32-S3 board (with full FreeRTOS support - see below for why that qualifier
+matters) with an SX1262 wired up in one of the common ways can now be described with a struct
+and passed to a new `begin()` overload, instead of needing a new hardcoded per-board `.cpp` file.
+
+1. **New `WisBlockLoRaHwConfig` struct** (`src/WisBlockLoRaHwConfig.h`/`.cpp`) - pins, chip type,
+   SPI clock/instance, and the RF-switch/TCXO wiring combinations from SX126x-Arduino's
+   `hw_config`: `radioTxEn`/`radioRxEn` (separate TX/RX enable lines, or one doubling as antenna
+   *power*), `useDio2AntSwitch`, `useDio3Tcxo`/`useDio3AntSwitch` (DIO3 is one pin, so these are
+   mutually exclusive), `useRxenAntPwr`, `useLdo`, and `tcxoCtrlVoltage` (reuses LBM's own
+   `sx126x_tcxo_ctrl_voltages_t` directly - numerically identical to SX126x-Arduino's
+   `RadioTcxoCtrlVoltage_t`, both mirror the datasheet's TCXO_CTRL bitfield, so no second enum
+   was added). Preset builder functions for all three existing boards
+   (`wisblockLoRaHwConfigRAK4631()` etc.) plus a new one for RAK3401 (below).
+
+2. **RAK3401 support** - a RAK3400 WisDuo nRF52840 module used as a WisBlock Core module, paired
+   with a RAK13300/RAK13302 SX1262 transceiver module. Values taken from the user's own working
+   pin table and flag set for this exact combination (not derived from SX126x-Arduino's
+   `lora_rak3400_init()`, which is close but not identical - notably the user's RAK3401 uses
+   `useRxenAntPwr = true` where the reference function's comment suggests otherwise for some
+   modules): `PIN_LORA_RESET=4, NSS=26, SCLK=3, MISO=29, DIO_1=10, BUSY=9, MOSI=30, RADIO_TXEN=-1,
+   RADIO_RXEN=21`, `USE_DIO2_ANT_SWITCH=true`, `USE_DIO3_TCXO=true`, `USE_DIO3_ANT_SWITCH=false`,
+   `USE_RXEN_ANT_PWR=true`. Uses a *second* SPI peripheral (`SPIClass(NRF_SPIM1, 29, 3, 30)`,
+   MISO/SCK/MOSI order) instead of the MCU's default SPI0 - RAK3400's SPI0 is already committed
+   elsewhere on this board - via the new `WisBlockLoRaHwConfig::spiInstance` field.
+
+3. **Merged `wisblock_radio_hal_rak4631.cpp` + `wisblock_radio_hal_rak3312.cpp` into one
+   `wisblock_radio_hal.cpp`.** Diffing the two showed they were identical except for the SPI
+   peripheral init call (Adafruit nRF52 core's `SPI.setPins()+begin()` vs. ESP32 core's 4-arg
+   `SPI.begin(sck,miso,mosi,ss)`) and a `yield()` inside ESP32's busy-wait loop (watchdog
+   starvation guard) - both now small `#if defined(ARDUINO_ARCH_NRF52)/#elif
+   defined(ARDUINO_ARCH_ESP32)` blocks inside one shared implementation driven by the runtime
+   `WisBlockLoRaHwConfig` instead of `WisBlockLoRaBoards.h` macros baked in per file. Every
+   existing behavior (sleep-mode BUSY tracking, RF-switch/antenna-power cut-on-sleep, the
+   `WISBLOCK_RADIO_HAL_DEBUG`/`_KEEP_ANT_PWR_ALWAYS_ON`/`_KEEP_SPI_ALWAYS_ON` diagnostic toggles)
+   carried over unchanged - verified line-by-line against both original files, not rewritten from
+   scratch, specifically to avoid silently changing already-tested behavior for existing boards.
+   Added, as genuinely new logic (no WisBlock preset needs it, but a `radioTxEn`+`radioRxEn`
+   direct-steering board like an eByte E22 module would): manual RX/TX antenna-switch steering
+   hooked off the SX126x SetRx(0x82)/SetRxDutyCycle(0x94)/SetTx(0x83) opcodes in
+   `sx126x_hal_write()`, matching SX126x-Arduino's `SX126xRXena()`/`SX126xTXena()`.
+   `wisblock_radio_hal_rak11310.cpp` (RP2040) is untouched apart from renaming its local context
+   struct's fields to match (`WisBlockRadioContext` no longer exists as a separate type - folded
+   into `WisBlockLoRaHwConfig`) - RP2040/mbed has no full FreeRTOS support, so it's intentionally
+   not part of the new flexible path; `begin(const WisBlockLoRaHwConfig&)` is only compiled for
+   nRF52840/ESP32-S3.
+
+4. **`wisblock_ral_sx126x_bsp.c`** (LBM's LoRaWAN-mode radio BSP - regulator mode, DIO2 RF-switch,
+   TCXO voltage/startup) and the two duplicated blocks in **`LoRaP2PEngine.cpp`** (P2P mode's
+   direct `sx126x_set_dio2_as_rf_sw_ctrl()`/`sx126x_set_dio3_as_tcxo_ctrl()` calls) now read these
+   settings from the active `WisBlockLoRaHwConfig` (via a small C-compatible
+   `wisblock_radio_bsp_config.h`/`wisblock_radio_hal_get_bsp_config()`, needed because the BSP
+   file is C, not C++, and can't include a header with a `SPIClass*` member) instead of being
+   hardcoded to the three WisBlock presets' values - so LoRaWAN mode and P2P mode can no longer
+   silently disagree about the board's RF-switch/TCXO wiring the way they structurally could
+   before (two independent hardcoded copies).
+
+5. **New `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` overload** (nRF52840/ESP32-S3
+   only) - identical to plain `begin()` except it calls the new `WisBlockRadioHal::init(const
+   WisBlockLoRaHwConfig&)` instead of the compile-time RAKwireless board preset. Plain `begin()`
+   is unchanged in behavior (still auto-selects RAK4631/RAK3312/RAK11310 by MCU architecture) and
+   now literally calls this same code path with the matching preset internally.
+
+6. **Corrected in passing, not part of the ask:** this file's/`LoRaP2PEngine.cpp`'s TCXO doc
+   comments said "1.8V / 5ms" while the code all along set 3.3V and 50ms (`50 << 6` ticks) -
+   fixed the comments to match the code (no functional change). Also found, and left
+   *deliberately unfixed* pending real hardware confirmation:
+   `ral_sx126x_bsp_get_reg_mode()`'s comment describes switching the default from
+   `SX126X_REG_MODE_DCDC` to `SX126X_REG_MODE_LDO` for safety, but the code has always actually
+   set DCDC - which of the two was tested is unknown from the code alone, so behavior is
+   unchanged (still DCDC) and the new `useLdo` field is offered as the way to switch it once
+   confirmed, rather than guessed at here.
+
+### Files changed
+
+New: `src/WisBlockLoRaHwConfig.h`/`.cpp`, `src/wisblock_radio_hal.cpp`,
+`src/wisblock_radio_bsp_config.h`. Removed: `src/wisblock_radio_hal_rak4631.cpp`,
+`src/wisblock_radio_hal_rak3312.cpp` (merged into the new `wisblock_radio_hal.cpp`). Edited:
+`src/wisblock_radio_hal.h` (rewritten around `WisBlockLoRaHwConfig` instead of the old
+`WisBlockRadioContext`), `src/wisblock_radio_hal_rak11310.cpp` (field renames only, see item 3),
+`src/wisblock_ral_sx126x_bsp.c` (item 4), `src/LoRaP2PEngine.cpp` (item 4), `src/WisBlockLoRaWAN.h`/
+`.cpp` (new `begin()` overload, item 5), `src/WisBlockLoRaWAN_all.h` (`DEF_FW_VER`'s doc comment -
+it assumes RAK4631 whenever `NRF52_SERIES` is defined, which is no longer unambiguous now that
+RAK3401 exists; left the macro itself as-is, just documented the caveat).
+
+### Verification
+
+No compiler or real hardware available in this environment (same limitation as every prior
+hardware-facing entry in this log). Checked instead: brace/paren balance on every touched file;
+every symbol the merged `wisblock_radio_hal.cpp` and the edited `wisblock_ral_sx126x_bsp.c`/
+`LoRaP2PEngine.cpp` reference back to `wisblock_radio_bsp_config.h`'s struct fields and
+`WisBlockLoRaHwConfig`'s fields, name-for-name; that `wisblock_radio_hal_rak11310.cpp` still
+defines every function `wisblock_radio_hal.h` declares unconditionally (`context()`, `isBusy()`,
+`waitOnBusy()`, `setAntennaPower()`, `isAsleep()`, `antennaPowerSettleMs()`, `init()`) now that
+those declarations no longer live in a per-board file; that its SPI pin setup
+(`SPI.setRX/TX/SCK()`) reads `LORA_SPI_*` macros directly rather than from the renamed context
+struct, so dropping that struct's now-unused `pinSck/pinMosi/pinMiso` fields for RP2040 doesn't
+regress anything. Diffed the merged nRF52/ESP32 HAL's logic line-by-line against both original
+per-board files (not just skimmed) specifically to catch any accidental behavior change beyond
+the intended generalization - found and fixed one during that pass: an early draft of
+`configurePins()` initialized the single RXEN-as-antenna-power case to LOW (powered off) instead
+of the original files' HIGH (powered on for the initial reset/probe, consistent with `radioMode`
+starting as `Awake`).
+
+**Not done**: not tested against real RAK3401 hardware - the pin table and flags came from the
+user directly rather than from a schematic this session could check independently. SX1261 (vs.
+SX1262) is accepted as a `WisBlockLoRaHwConfig::chipType` value but doesn't yet change the PA
+config `wisblock_ral_sx126x_bsp.c` programs into the chip (still always SX1262 HP PA) - noted in
+that field's doc comment rather than silently ignored.
+## DIO1 interrupt hardcoded to the wrong pin for custom hw_config boards
+
+Found testing the RAK3401_RAK13300.ino example against real hardware: join's TX went out fine,
+then nothing - `[LBM PANIC] rp_callback:441 RP_FAILSAFE - #2` a few seconds later instead of an
+RX1 window opening.
+
+Root cause: `WisBlockLbmPort::init()` (`wisblock_lbm_port.cpp`) attached the DIO1 interrupt with
+`attachInterrupt(digitalPinToInterrupt(LORA_DIO1), ...)` - `LORA_DIO1` is `WisBlockLoRaBoards.h`'s
+*compile-time* macro, which only resolves to the right pin for the three built-in RAKwireless
+presets. This predates the hw_config work (see "Flexible hw_config-based radio init") and was
+never updated when that landed: `WisBlockRadioHal::init(hwConfig)` correctly stores RAK3401's real
+DIO1 pin (10) in its runtime config, but `WisBlockLbmPort::init()` never looked at it, so the
+interrupt stayed wired to RAK4631's pin 47 instead. The join's TX itself doesn't depend on DIO1 (it
+only needs BUSY and SPI), so it went out normally; radio_planner's own TX-done IRQ never arrived
+afterward, and `RP_FAILSAFE` is exactly radio_planner's own timeout for "the IRQ I was waiting for
+never came" - not a new/different failure mode, just this one's specific symptom.
+
+Second bug, same root cause, not yet triggered on hardware but definitely present: `begin()` and
+`begin(hwConfig)` both called `WisBlockLbmPort::init()` *before* `WisBlockRadioHal::init(...)`.
+Harmless with the DIO1 fix absent (there was nothing to read yet), but would have silently reused
+whichever pin the *previous* `init()` call had left in the runtime config (or an unconfigured one,
+on first boot) once the fix below made `WisBlockLbmPort::init()` depend on it. Reordered so radio
+init always runs first.
+
+Fix: added `WisBlockRadioHal::dio1Pin()` (implemented in both `wisblock_radio_hal.cpp` and
+`wisblock_radio_hal_rak11310.cpp`, returning the active config's `pinDio1`), and
+`WisBlockLbmPort::init()` now calls that instead of the `LORA_DIO1` macro. `WisBlockLoRaBoards.h`'s
+include dropped from `wisblock_lbm_port.cpp` entirely - it was only ever used for this one macro
+in that file (two other comments referencing it were about `LORA_ANT_SWITCH`, mentioned only in
+prose, not actual code, and no compile dependency on the header either way).
+
+### Files changed
+
+`src/wisblock_radio_hal.h` (new `dio1Pin()` declaration), `src/wisblock_radio_hal.cpp` /
+`src/wisblock_radio_hal_rak11310.cpp` (implementation), `src/wisblock_lbm_port.cpp` (use it instead
+of `LORA_DIO1`, drop the now-unneeded `WisBlockLoRaBoards.h` include, two comment updates),
+`src/WisBlockLoRaWAN.cpp` (reordered `WisBlockRadioHal::init()` before `WisBlockLbmPort::init()` in
+both `begin()` overloads).
+
+### Verification
+
+No hardware in this environment - this is a direct response to the user's own hardware log
+(`RP_FAILSAFE` immediately after a successful-looking join TX with no RX1/RX2 lines in between,
+which only makes sense if the TX-done IRQ was never delivered). Checked that every other direct
+`LORA_DIO1`/`WisBlockLoRaBoards.h` reference in `wisblock_lbm_port.cpp` was comment-only (grepped
+every macro `WisBlockLoRaBoards.h` defines against the file); brace balance on every edited file;
+that `dio1Pin()` was added to *both* `WisBlockRadioHal` backends (nRF52/ESP32 and RP2040), since
+the header declares it unconditionally.
+
+**Not done / still open**: the user's log also showed the join TX at 916800000 Hz, not an EU868
+frequency, even though both the factory default region and the example sketch's explicit
+`setRegion(WISBLOCK_RUI3_BAND_EU868)` are EU868. Nothing in this DIO1 fix explains that, and no
+cause was found for it either - LBM's own join-nonce context (reset to DevNonce=1 in the user's
+log) and this library's own separately-persisted `config.lorawan.region` are two independent
+stores (see the EU433 investigation earlier in this log), so a fresh LBM context doesn't imply a
+fresh saved region. Likely leftover `config.lorawan.region` from a previous, differently-regioned
+test flashed to the same board, surviving in flash under a key this session's reflash didn't
+touch - but that's a guess, not something this session could check. Flagged for the user to
+re-check (e.g. `AT+BAND=?`, or `lora.restoreFactoryDefaults()`) now that DIO1 is fixed and TX/RX
+can actually be observed end-to-end.

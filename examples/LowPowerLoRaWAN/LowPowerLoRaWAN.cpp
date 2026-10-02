@@ -373,9 +373,9 @@ void setup()
 	custom_settings = getCustomAtSettings();
 	UPLINK_INTERVAL_MS = custom_settings.sendIntervalS * 1000; // seconds to milli seconds
 
-#if defined ESP32
-	Serial.onEvent(usbEventCallback);
-#endif
+// #if defined ESP32
+// 	Serial.onEvent(usbEventCallback);
+// #endif
 
 // Initialize the timer for frequent sending
 #if defined ARDUINO_ARCH_NRF52

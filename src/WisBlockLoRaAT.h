@@ -105,14 +105,34 @@ public:
 	bool addCustomATCommand(const char *cmd, const char *usage, CustomAtHandler handler);
 
 	/**
-	 * Starts background, interrupt/callback-driven AT command processing -
-	 * eliminates the need to call handleSerial() from loop() at all, the
-	 * same way WisBlockLoRaWAN::enableBackgroundTask() eliminates
-	 * handleEvents() polling. `port` (passed to begin()) must be the
-	 * physical USB CDC Serial - the underlying OS hooks this wires up
+	 * Callback type for setRxWakeCallback().
+	 */
+	typedef void (*RxWakeCallback)(void);
+
+	/**
+	 * Registers a function that is called whenever USB CDC RX data arrives.
+	 * Call it BEFORE enableBackgroundRx(). The callback runs in the USB
+	 * driver's task (or TinyUSB task) context, so it must be short and
+	 * must not block or print: typically it sets an event flag and gives
+	 * a semaphore / notifies a task so the application's own task wakes
+	 * up and calls handleSerial(). The AT commands themselves then run on
+	 * the application's task, not inside the USB driver.
+	 *
+	 * Required on ESP32 (RAK3312/RAK3112); optional on nRF52 (without it,
+	 * commands are processed directly in the TinyUSB callback).
+	 */
+	void setRxWakeCallback(RxWakeCallback cb);
+
+	/**
+	 * Hooks the USB CDC RX notification of the physical USB CDC Serial
 	 * (TinyUSB's tud_cdc_rx_cb on RAK4631, the native USB CDC RX event on
-	 * RAK3312) are tied to that specific peripheral, not an arbitrary
-	 * Stream.
+	 * RAK3312). `port` (passed to begin()) must be that Serial.
+	 *
+	 * With a wake callback registered (setRxWakeCallback()), the hook only
+	 * calls that callback and YOU must call handleSerial() from your task
+	 * after being woken. Without a callback (nRF52 only) the data is
+	 * processed directly inside the USB callback and handleSerial()
+	 * becomes a no-op.
 	 *
 	 * IMPORTANT: this can only be enabled for ONE WisBlockLoRaAT instance,
 	 * and it installs a weak-symbol/global event hook that cannot coexist
@@ -121,7 +141,7 @@ public:
 	 *
 	 * Not available on RAK11310 (RP2040) - handleSerial() polling remains
 	 * the only option there. Returns false if unsupported on this
-	 * platform/build.
+	 * platform/build, or on ESP32 if no wake callback was registered.
 	 */
 	bool enableBackgroundRx();
 
@@ -257,6 +277,7 @@ private:
 	// as WisBlockLoRaWAN::activeInstanceForTask. Only one WisBlockLoRaAT
 	// instance can use background RX mode at a time.
 	static WisBlockLoRaAT *activeInstanceForRx;
+	static RxWakeCallback rxWakeCb;
 };
 
 #endif // WISBLOCK_LORA_AT_H

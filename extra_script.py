@@ -133,6 +133,8 @@ defines = [
     # Flip to 1 here (or override via your own platformio.ini build_flags)
     # for verbose LBM-internal trace output during bring-up.
     # ("MODEM_HAL_DBG_TRACE", 0),
+	# Enhance stack size for ESP32
+	# ("WB_AT_RX_TASK_STACK_SIZE",6144)
 ]
 
 env.Append(CPPDEFINES=defines)

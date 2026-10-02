@@ -17,6 +17,21 @@ FUOTA function is not implemented and is not planned at this time due to the com
 
 All API commands are documented in the [WisBlockLoRaWAN-API](WisBlockLoRaWAN-API.md) document.    
 
+## Supported hardware
+
+Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310
+(RP2040, reduced support - see above). `WisBlockLoRaWAN::begin()` with no argument picks one of
+these automatically from the target architecture, same as before.
+
+On nRF52840 and ESP32-S3, any other board with an SX1262 wired up in a common way can be used
+too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
+`WisBlockLoRaHwConfig` (`src/WisBlockLoRaHwConfig.h`) and pass it to
+`WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` instead of plain `begin()`. A RAK3401
+(RAK3400 WisDuo module + RAK13300/RAK13302 transceiver) preset is included as a worked example -
+`wisblockLoRaHwConfigRAK3401()` - see `examples/RAK3401_RAK13300/`. This flexible path is
+nRF52840/ESP32-S3 only, for the same
+FreeRTOS-support reason RAK11310 has reduced support above.
+
 ## AT command set
 
 All AT commands are documented in the [WisBlockLoRaWAN-AT-Commands](WisBlockLoRaWAN-AT-Commands.md) document.

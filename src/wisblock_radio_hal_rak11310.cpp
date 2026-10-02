@@ -2,8 +2,18 @@
 
 /*
  * RAK11310 (RP2040, arduino-pico core) implementation. Same sx126x_hal_*
- * contract as wisblock_radio_hal_rak4631.cpp / wisblock_radio_hal_rak3312.cpp
- * - only the SPI init call differs underneath.
+ * contract as wisblock_radio_hal.cpp (which now covers both RAK4631 and
+ * RAK3312, merged - see that file's doc comment) - only the SPI init call
+ * differs underneath.
+ *
+ * Kept as its own fixed-pin file rather than folded into the flexible
+ * WisBlockLoRaHwConfig-driven path those two share: RP2040/mbed has no full
+ * FreeRTOS support, and the flexible-init task this library's other two
+ * MCU targets got (see the Creation Log entry "Flexible hw_config-based
+ * radio init (RAK3401 / non-WisBlock boards)") was explicitly scoped to
+ * nRF52840/ESP32-S3 only for that reason. WisBlockLoRaWAN::begin() still
+ * auto-selects this file at compile time for RP2040 builds; there is no
+ * begin(const WisBlockLoRaHwConfig&) path for RP2040.
  */
 #if defined(ARDUINO_ARCH_RP2040)
 
@@ -24,12 +34,20 @@ constexpr uint32_t kBusyTimeoutMs = 1000;
 // transaction if you need faster wake latency than this costs you.
 constexpr uint32_t kAntPwrSettleUs = 1000;
 
-WisBlockRadioContext wisblockRadioContext = {
+// WisBlockLoRaHwConfig, RP2040's own local instance - see
+// WisBlockLoRaHwConfig.h. This file predates that struct's introduction
+// (see the Creation Log entry "Flexible hw_config-based radio init (RAK3401
+// / non-WisBlock boards)") and isn't wired into its flexible
+// begin(const WisBlockLoRaHwConfig&) path (RP2040 has no full FreeRTOS
+// support), so only the field names changed here (pinAntPwr -> radioRxEn +
+// useRxenAntPwr), not the actual pins or behavior.
+WisBlockLoRaHwConfig wisblockRadioContext = {
 	.pinNss = LORA_SPI_NSS,
 	.pinReset = LORA_RESET,
 	.pinBusy = LORA_BUSY,
 	.pinDio1 = LORA_DIO1,
-	.pinAntPwr = LORA_ANT_PWR,
+	.radioRxEn = LORA_ANT_PWR,
+	.useRxenAntPwr = true,
 	.spiHz = 8000000UL, // SX1262 SPI max is 16 MHz; 8 MHz is a safe default over WisBlock header traces
 };
 
@@ -99,7 +117,7 @@ void checkDeviceReady()
 	// power savings documented earlier in this file.
 	Serial.printf("[wake] t=%lu ms (ant pwr forced always-on, settle skipped)\n", millis());
 #else
-	digitalWrite(wisblockRadioContext.pinAntPwr, HIGH);
+	digitalWrite(wisblockRadioContext.radioRxEn, HIGH);
 	delayMicroseconds(kAntPwrSettleUs);
 	Serial.printf("[wake] t=%lu ms (ant pwr restored, %lu us settle)\n", millis(), (unsigned long)kAntPwrSettleUs);
 #endif
@@ -107,7 +125,7 @@ void checkDeviceReady()
 #ifdef WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON
 	// See the WISBLOCK_RADIO_HAL_DEBUG branch above for what this does.
 #else
-	digitalWrite(wisblockRadioContext.pinAntPwr, HIGH);
+	digitalWrite(wisblockRadioContext.radioRxEn, HIGH);
 	delayMicroseconds(kAntPwrSettleUs);
 #endif
 #endif
@@ -145,12 +163,12 @@ void init()
 	pinMode(wisblockRadioContext.pinBusy, INPUT);
 	// DIO1 pinMode/attachInterrupt is handled in wisblock_lbm_port.cpp.
 
-	pinMode(wisblockRadioContext.pinAntPwr, OUTPUT);
+	pinMode(wisblockRadioContext.radioRxEn, OUTPUT);
 	// Powered on for the initial reset/probe below; from here on this
 	// pin's state is tracked automatically alongside RadioMode (see
 	// "RF-switch power tracking" note above) - off while the radio is
 	// asleep, on otherwise.
-	digitalWrite(wisblockRadioContext.pinAntPwr, HIGH);
+	digitalWrite(wisblockRadioContext.radioRxEn, HIGH);
 
 	// arduino-pico's SPI core remaps pins via setRX/setTX/setSCK before
 	// begin(), rather than taking them as begin() arguments like the
@@ -166,6 +184,11 @@ void init()
 const void *context()
 {
 	return &wisblockRadioContext;
+}
+
+int8_t dio1Pin()
+{
+	return wisblockRadioContext.pinDio1;
 }
 
 bool isBusy()
@@ -188,7 +211,7 @@ bool waitOnBusy(uint32_t timeoutMs)
 
 void setAntennaPower(bool on)
 {
-	digitalWrite(wisblockRadioContext.pinAntPwr, on ? HIGH : LOW);
+	digitalWrite(wisblockRadioContext.radioRxEn, on ? HIGH : LOW);
 	if (on)
 	{
 		delayMicroseconds(kAntPwrSettleUs);
@@ -307,7 +330,7 @@ extern "C"
 			// asleep - see "RF-switch power tracking" note above. Restored
 			// automatically by checkDeviceReady() the next time anything
 			// wakes the radio.
-			digitalWrite(wisblockRadioContext.pinAntPwr, LOW);
+			digitalWrite(wisblockRadioContext.radioRxEn, LOW);
 #endif
 #ifndef WISBLOCK_RADIO_HAL_KEEP_SPI_ALWAYS_ON
 			// HYPOTHESIS UNDER TEST (not yet confirmed - see the README's

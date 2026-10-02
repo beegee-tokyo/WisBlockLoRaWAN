@@ -1,5 +1,4 @@
 #include "wisblock_lbm_port.h"
-#include "WisBlockLoRaBoards.h"
 #include "WisBlockLoRaFlash.h"
 #include "wisblock_lbm_task.h"
 #include "wisblock_radio_hal.h"
@@ -118,8 +117,24 @@ void init()
 	// only wakes for real IRQs. Confirmed supported pinMode value on all
 	// three cores this library targets (Adafruit nRF52, ESP32 Arduino,
 	// arduino-pico).
-	pinMode(LORA_DIO1, INPUT_PULLDOWN);
-	attachInterrupt(digitalPinToInterrupt(LORA_DIO1), onDio1Rising, RISING);
+	// NOTE: reads WisBlockRadioHal::dio1Pin() (the active WisBlockLoRaHwConfig's
+	// pinDio1), not WisBlockLoRaBoards.h's compile-time LORA_DIO1 macro -
+	// that macro only matches the three built-in RAKwireless presets, and
+	// using it unconditionally here left a custom board passed to
+	// WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&) (e.g. RAK3401,
+	// whose real DIO1 pin is 10, not RAK4631's 47) with its DIO1 interrupt
+	// silently attached to the wrong physical pin: the join's TX itself
+	// still went out fine (that part doesn't depend on DIO1), but the
+	// TX-done IRQ the radio raises afterward never reached this ISR, so
+	// radio_planner never heard back and eventually hit its own failsafe
+	// timeout ("[LBM PANIC] rp_callback:441 RP_FAILSAFE") instead of
+	// opening RX1 - see the Creation Log entry "DIO1 interrupt hardcoded to
+	// the wrong pin for custom hw_config boards" for the full story. This
+	// requires WisBlockRadioHal::init() to have already run - see the
+	// ordering note on WisBlockLoRaWAN::begin()'s call sequence.
+	int8_t dio1Pin = WisBlockRadioHal::dio1Pin();
+	pinMode(dio1Pin, INPUT_PULLDOWN);
+	attachInterrupt(digitalPinToInterrupt(dio1Pin), onDio1Rising, RISING);
 }
 
 void tick()
@@ -372,8 +387,8 @@ extern "C"
 
 	void smtc_modem_hal_set_ant_switch(bool is_tx_on)
 	{
-		// SX1262 drives its own RF switch via DIO2 (see LORA_ANT_SWITCH ==
-		// -1 in WisBlockLoRaBoards.h) on all three boards, configured once
+		// SX1262 drives its own RF switch via DIO2 (useDio2AntSwitch in the
+		// active WisBlockLoRaHwConfig, true for all four built-in presets)
 		// via the radio driver's SetDio2AsRfSwitchCtrl - not something the
 		// MCU toggles per TX/RX here. If a board revision instead wires an
 		// MCU GPIO to the antenna switch, drive it from is_tx_on here.
@@ -435,7 +450,9 @@ extern "C"
 	{
 		// TODO: wire to an actual VBAT ADC read; RAK4631/3312/11310 all
 		// expose a battery-voltage-sense pin on the WisBlock base board
-		// (separate from the core module pins in WisBlockLoRaBoards.h).
+		// (separate from the core module pins WisBlockLoRaHwConfig
+		// describes). A custom board would need its own ADC pin/scaling
+		// here too - not something WisBlockLoRaHwConfig currently covers.
 		return 3300;
 	}
 

@@ -28,6 +28,13 @@
 	"." WISBLOCK_LORAWAN_STRINGIFY( WISBLOCK_LORAWAN_VERSION_PATCH )
 
 #ifdef NRF52_SERIES
+/** Assumes RAK4631 - the only nRF52840 WisBlock Core module this was written
+ * for. Since the Creation Log entry "Flexible hw_config-based radio init
+ * (RAK3401 / non-WisBlock boards)", other nRF52840 boards (RAK3401, or any
+ * board using WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)) also
+ * define NRF52_SERIES and would get this same string - call
+ * lora.setFirmwareVer() with your own board's name instead of relying on
+ * this macro if that matters to you. */
 #define DEF_FW_VER "WB_BM_RAK4631_" WISBLOCK_LORAWAN_STRINGIFY(WISBLOCK_LORAWAN_VERSION_MAJOR) "." \
 WISBLOCK_LORAWAN_STRINGIFY(WISBLOCK_LORAWAN_VERSION_MINOR) \
 "." WISBLOCK_LORAWAN_STRINGIFY(WISBLOCK_LORAWAN_VERSION_PATCH)

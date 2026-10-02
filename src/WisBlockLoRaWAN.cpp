@@ -25,16 +25,27 @@ void WisBlockLoRaWAN::begin()
 
 	wisblockConfigLoad(config); // falls back to factory defaults internally
 
+	// Sets up SPI + NSS/RESET/BUSY/DIO1 GPIOs and performs the initial
+	// hardware reset, using the compile-time-selected RAKwireless board
+	// preset - see wisblock_radio_hal.cpp (RAK4631/RAK3312) and
+	// wisblock_radio_hal_rak11310.cpp (RAK11310). Use
+	// begin(const WisBlockLoRaHwConfig&) instead for any other board.
+	//
+	// FIX: must run BEFORE WisBlockLbmPort::init() below, not after -
+	// WisBlockLbmPort::init() attaches the DIO1 interrupt on
+	// WisBlockRadioHal::dio1Pin(), which only reflects the right pin once
+	// this has populated it. Getting this backwards left DIO1 wired to
+	// whatever pin a *previous* init() call (or none at all, on first
+	// boot) had left behind - harmless by coincidence for the three
+	// built-in presets. See the Creation Log entry "DIO1 interrupt
+	// hardcoded to the wrong pin for custom hw_config boards".
+	WisBlockRadioHal::init();
+
 	// Also calls WisBlockLoRaFlash::init() internally (for LBM's own
 	// context store) - harmless/idempotent given the explicit call above,
 	// kept there so wisblock_lbm_port.cpp doesn't depend on being
 	// sequenced after this file's flash init.
 	WisBlockLbmPort::init();
-
-	// Sets up SPI + NSS/RESET/BUSY GPIOs and performs the initial hardware
-	// reset (see wisblock_radio_hal_rak4631.cpp for the RAK4631 backend;
-	// wisblock_radio_hal_<board>.cpp for the other two targets).
-	WisBlockRadioHal::init();
 
 	// Deliberately does NOT call lorawan.begin() here - see
 	// ensureLoRaWANEngineStarted()'s doc comment in WisBlockLoRaWAN.h for
@@ -45,6 +56,27 @@ void WisBlockLoRaWAN::begin()
 
 	began = true;
 }
+
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+void WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig &hwConfig)
+{
+	// Identical to plain begin() (see its comments above), except the radio
+	// is configured from an explicit hw_config instead of the compile-time
+	// RAKwireless board preset - see WisBlockLoRaHwConfig.h and
+	// wisblock_radio_hal.h's "Board flexibility" doc comment.
+	WisBlockLoRaFlash::init();
+	wisblockConfigLoad(config);
+	// See the ordering FIX note in plain begin() above - radio init before
+	// LbmPort init, not after.
+	WisBlockRadioHal::init(hwConfig);
+	WisBlockLbmPort::init();
+
+	// See the matching comment in plain begin() above.
+	p2p.begin(config.p2p);
+
+	began = true;
+}
+#endif
 
 void WisBlockLoRaWAN::ensureLoRaWANEngineStarted()
 {
