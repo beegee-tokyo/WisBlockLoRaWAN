@@ -47,7 +47,7 @@ extern "C" {
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "smtc_secure_element.h"
+#include "smtc_secure_element/smtc_secure_element.h"
 
 /*
  * -----------------------------------------------------------------------------

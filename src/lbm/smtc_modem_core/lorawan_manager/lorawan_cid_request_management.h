@@ -45,7 +45,7 @@ extern "C" {
 
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
-#include "lr1_stack_mac_layer.h"
+#include "../lr1mac/src/lr1_stack_mac_layer.h"
 #include "lorawan_management_defs.h"
 
 /*

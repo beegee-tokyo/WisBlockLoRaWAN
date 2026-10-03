@@ -37,40 +37,42 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "smtc_modem_api.h"
-#include "smtc_modem_test_api.h"
-#include "lorawan_management_defs.h"
-#include "lorawan_send_management.h"
-#include "lorawan_cid_request_management.h"
-#include "lorawan_class_b_management.h"
-#include "smtc_modem_hal_dbg_trace.h"
-#include "modem_supervisor_light.h"
-#include "modem_core.h"
-#include "smtc_real_defs.h"
-#include "lorawan_api.h"
-#include "smtc_duty_cycle.h"
+#include "../smtc_modem_api/smtc_modem_api.h"
+#include "../smtc_modem_api/smtc_modem_test_api.h"
+#include "lorawan_manager/lorawan_management_defs.h"
+#include "lorawan_manager/lorawan_send_management.h"
+#include "lorawan_manager/lorawan_cid_request_management.h"
+#include "lorawan_manager/lorawan_class_b_management.h"
+#include "logging/smtc_modem_hal_dbg_trace.h"
+#include "modem_supervisor/modem_supervisor_light.h"
+#include "modem_utilities/modem_core.h"
+#include "lr1mac/src/smtc_real/src/smtc_real_defs.h"
+#include "lorawan_api/lorawan_api.h"
+#include "lr1mac/src/services/smtc_duty_cycle.h"
 
-#include "radio_planner.h"
-#include "ral.h"
-#include "ralf.h"
-#include "smtc_modem_utilities.h"
-#include "modem_event_utilities.h"
-#include "modem_core.h"
-#include "smtc_modem_crypto.h"
-#include "lora_basics_modem_version.h"
-#include "smtc_lbt.h"
-#include "smtc_lora_cad_bt.h"
+#include "radio_planner/src/radio_planner.h"
+#include "smtc_ral/src/ral.h"
+#include "smtc_ralf/src/ralf.h"
+#include "../smtc_modem_api/smtc_modem_utilities.h"
+#include "modem_utilities/modem_event_utilities.h"
+#include "modem_utilities/modem_core.h"
+#include "smtc_modem_crypto/smtc_modem_crypto.h"
+#include "../lora_basics_modem_version.h"
+#include "lr1mac/src/services/smtc_lbt.h"
+#include "lr1mac/src/services/smtc_lora_cad_bt.h"
 #if defined( REGION_EU_868 )
-#include "region_eu_868_defs.h"
+#include "lr1mac/src/smtc_real/src/region_eu_868_defs.h"
 #endif
 #if defined( REGION_RU_864 )
-#include "region_ru_864_defs.h"
+#include "lr1mac/src/smtc_real/src/region_ru_864_defs.h"
 #endif
 #if defined( REGION_EU_433 )
-#include "region_eu_433_defs.h"
+#include "lr1mac/src/smtc_real/src/region_eu_433_defs.h"
 #endif
 
 #if defined( USE_LR11XX_CE )
@@ -80,7 +82,7 @@
 #if defined( SX128X )
 #include "ralf_sx128x.h"
 #elif defined( SX126X )
-#include "ralf_sx126x.h"
+#include "smtc_ralf/src/ralf_sx126x.h"
 #elif defined( LR11XX )
 #include "ralf_lr11xx.h"
 #elif defined( SX127X )
@@ -90,12 +92,12 @@
 #endif
 
 #if defined( ADD_SMTC_STREAM )
-#include "device_management_defs.h"
+#include "modem_services/device_management_defs.h"
 #include "lbm_stream_service.h"
 #endif
 
 #if defined( ADD_SMTC_CLOUD_DEVICE_MANAGEMENT )
-#include "device_management_defs.h"
+#include "modem_services/device_management_defs.h"
 #include "cloud_dm_package.h"
 #endif
 
@@ -109,7 +111,7 @@
 #endif
 
 #if defined( USE_LR11XX_CE ) && ( ADD_FUOTA == 2 )
-#include "aes.h"
+#include "smtc_modem_crypto/soft_secure_element/aes.h"
 #endif  // USE_LR11XX_CE && ( ADD_FUOTA == 2 )
 
 /*

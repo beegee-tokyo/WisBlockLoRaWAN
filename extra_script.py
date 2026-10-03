@@ -7,8 +7,12 @@ which PlatformIO's plain compiler invocation does automatically:
 
 1. CPPPATH - adds every nested src/lbm/... subdirectory to the include
    search path. PlatformIO's Library Dependency Finder does not reliably
-   discover deeply-nested header directories the way Arduino IDE's
-   recursive `src/` scanning does.
+   discover deeply-nested header directories. (The Arduino IDE does not
+   either: it compiles `src/` recursively but only puts `src/` itself on
+   the include path. For the Arduino IDE, every LBM #include is therefore a
+   relative path, and src/wb_lbm_config.h supplies the -D flags below - both
+   maintained by tools/make_lbm_includes_relative.py. Keep the `defines` list
+   below and wb_lbm_config.h in sync.)
 
 2. CPPDEFINES - LBM's source is written to be built with a specific set of
    -D flags selecting the radio, LoRaWAN Regional Parameters version, stack
@@ -56,6 +60,9 @@ If you re-vendor a different LBM version and the directory layout changes,
 regenerate the include list with (run from the library root):
 
     find src/lbm -name "*.h" -exec dirname {} \\; | sort -u
+
+and then re-run `python3 tools/make_lbm_includes_relative.py` so the includes
+of the newly vendored files become relative (needed for the Arduino IDE).
 """
 
 Import("env")

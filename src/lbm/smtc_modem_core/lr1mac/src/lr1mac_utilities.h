@@ -45,7 +45,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>  // ceilf() and floorf()
-#include "ral_defs.h"
+#include "../../smtc_ral/src/ral_defs.h"
 #include "lr1mac_defs.h"
 /*
  *-----------------------------------------------------------------------------------

@@ -45,7 +45,7 @@ extern "C" {
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "smtc_modem_hal.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
 
 /*
  * -----------------------------------------------------------------------------

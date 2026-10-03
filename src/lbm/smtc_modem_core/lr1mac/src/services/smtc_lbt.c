@@ -32,13 +32,15 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../wb_lbm_config.h"
 #include "smtc_lbt.h"
 
-#include "smtc_modem_hal_dbg_trace.h"
-#include "radio_planner.h"
+#include "../../../logging/smtc_modem_hal_dbg_trace.h"
+#include "../../../radio_planner/src/radio_planner.h"
 #include "stddef.h"
-#include "smtc_modem_hal.h"
-#include "lr1_stack_mac_layer.h"
+#include "../../../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../lr1_stack_mac_layer.h"
 static smtc_lbt_t lbt_obj_declare[NUMBER_OF_STACKS];
 #define LBT_SNIFF_DURATION_MS_DEFAULT ( 5 )
 #define LBT_THRESHOLD_DBM_DEFAULT ( int16_t )( -80 )

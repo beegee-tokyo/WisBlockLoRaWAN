@@ -15,6 +15,39 @@ const uint32_t UPLINK_INTERVAL_MS = 30000;
 /** Flag for the event type */
 volatile uint16_t g_task_event_type = 0;
 
+/**
+ * The event flags are set from several tasks (LBM task, USB event task,
+ * timers) and cleared from loop(), possibly on different cores. A plain
+ * "flags |= x" / "flags &= ~x" is a read-modify-write that can lose an event
+ * when two of them overlap, so all updates go through these helpers.
+ */
+#if defined ARDUINO_ARCH_ESP32
+static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
+#define EVENT_LOCK() portENTER_CRITICAL(&g_event_mux)
+#define EVENT_UNLOCK() portEXIT_CRITICAL(&g_event_mux)
+#elif defined ARDUINO_ARCH_NRF52
+#define EVENT_LOCK() taskENTER_CRITICAL()
+#define EVENT_UNLOCK() taskEXIT_CRITICAL()
+#else
+#define EVENT_LOCK()
+#define EVENT_UNLOCK()
+#endif
+
+static inline void taskEventSet(uint16_t bits)
+{
+	EVENT_LOCK();
+	g_task_event_type |= bits;
+	EVENT_UNLOCK();
+}
+
+/** @param mask Inverted event mask, e.g. N_AT_CMD */
+static inline void taskEventClear(uint16_t mask)
+{
+	EVENT_LOCK();
+	g_task_event_type &= mask;
+	EVENT_UNLOCK();
+}
+
 #if defined ARDUINO_ARCH_NRF52
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
 #define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
@@ -34,7 +67,7 @@ void periodic_wakeup(TimerHandle_t unused)
 {
 	// Switch on LED to show we are awake
 	digitalWrite(LED_GREEN, HIGH);
-	g_task_event_type |= STATUS;
+	taskEventSet(STATUS);
 	if (g_task_sem != NULL)
 	{
 		// Wake up task to send initial packet
@@ -56,7 +89,7 @@ void periodic_wakeup(void)
 {
 	// Switch on LED to show we are awake
 	digitalWrite(LED_GREEN, HIGH);
-	g_task_event_type |= STATUS;
+	taskEventSet(STATUS);
 	if (g_task_sem != NULL)
 	{
 		// Wake up task to send initial packet
@@ -65,6 +98,39 @@ void periodic_wakeup(void)
 }
 #else
 #warning MCU not supported
+#endif
+
+#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+/**
+ * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives.
+ *
+ * Runs in the USB driver's task context, so it only flags the event and wakes
+ * loop(). The AT command itself is parsed and executed in loop() by
+ * at_serial.handleSerial().
+ */
+void atRxWake(void)
+{
+	taskEventSet(AT_CMD);
+	if (g_task_sem == NULL)
+	{
+		return;
+	}
+#if defined ARDUINO_ARCH_NRF52
+	bool inIsr = isInISR();
+#else
+	bool inIsr = xPortInIsrContext();
+#endif
+	if (inIsr)
+	{
+		BaseType_t woken = pdFALSE;
+		xSemaphoreGiveFromISR(g_task_sem, &woken);
+		portYIELD_FROM_ISR(woken);
+	}
+	else
+	{
+		xSemaphoreGive(g_task_sem);
+	}
+}
 #endif
 
 void onTxDone(const WisBlockTxResult &result)
@@ -173,6 +239,15 @@ void setup()
 	}
 
 	at_serial.begin(lora, Serial);
+#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+	// USB RX only wakes loop() (atRxWake), the AT commands are processed in
+	// loop() with at_serial.handleSerial()
+	at_serial.setRxWakeCallback(atRxWake);
+	if (!at_serial.enableBackgroundRx())
+	{
+		Serial.println("[Setup] AT command USB RX hook failed");
+	}
+#endif
 
 	// Prepare timer and seamphore to wake up loop for frequent sending
 #if defined ARDUINO_ARCH_NRF52 || defined ESP32
@@ -233,7 +308,7 @@ void loop()
 
 		if ((g_task_event_type & STATUS) == STATUS)
 		{
-			g_task_event_type &= N_STATUS;
+			taskEventClear(N_STATUS);
 			if (!waitingForCad)
 			{
 				waitingForCad = true;
@@ -247,9 +322,8 @@ void loop()
 		// Serial input event
 		if ((g_task_event_type & AT_CMD) == AT_CMD)
 		{
-			Serial.println("[LOOP] AT CMD");
-			Serial.flush();
-			g_task_event_type &= N_AT_CMD;
+			taskEventClear(N_AT_CMD);
+			// Reads and executes everything that is available
 			at_serial.handleSerial();
 		}
 	}

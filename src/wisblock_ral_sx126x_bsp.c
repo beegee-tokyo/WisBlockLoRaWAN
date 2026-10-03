@@ -45,7 +45,9 @@
  * directly instead of this file assuming it always matches WisBlock's.
  */
 
-#include "ral_sx126x_bsp.h" // vendored: src/lbm/smtc_modem_core/smtc_ral/src/ral_sx126x_bsp.h
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
+#include "lbm/smtc_modem_core/smtc_ral/src/ral_sx126x_bsp.h" // vendored: src/lbm/smtc_modem_core/smtc_ral/src/ral_sx126x_bsp.h
 #include "wisblock_radio_bsp_config.h"
 #include <stdbool.h>
 #include <stdint.h>

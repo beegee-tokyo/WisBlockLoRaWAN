@@ -50,7 +50,7 @@ extern "C" {
 #include "radio_planner_stats.h"
 #include "radio_planner_hook_id_defs.h"
 
-#include "ralf.h"
+#include "../../smtc_ralf/src/ralf.h"
 
 /*
  * -----------------------------------------------------------------------------

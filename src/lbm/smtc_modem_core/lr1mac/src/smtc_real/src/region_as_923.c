@@ -37,12 +37,14 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../../wb_lbm_config.h"
 #include <string.h>  // memcpy
-#include "lr1mac_utilities.h"
-#include "smtc_modem_hal.h"
+#include "../../lr1mac_utilities.h"
+#include "../../../../../smtc_modem_hal/smtc_modem_hal.h"
 #include "region_as_923_defs.h"
 #include "region_as_923.h"
-#include "smtc_modem_hal_dbg_trace.h"
+#include "../../../../logging/smtc_modem_hal_dbg_trace.h"
 
 /*
  * -----------------------------------------------------------------------------

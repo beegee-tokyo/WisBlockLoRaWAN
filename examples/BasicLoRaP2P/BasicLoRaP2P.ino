@@ -1,10 +1,15 @@
 /**
  * BasicLoRaP2P.ino
  * Alternates between CAD-gated TX and RX every few seconds.
+ *
+ * The AT command interface runs on the USB serial port. It is polled from
+ * loop() with at_serial.handleSerial(), the same way as lora.handleEvents().
  */
+#include <WisBlockLoRaAT.h>
 #include <WisBlockLoRaWAN.h>
 
 WisBlockLoRaWAN lora;
+WisBlockLoRaAT at_serial;
 uint32_t lastActionMs = 0;
 bool waitingForCad = false;
 
@@ -53,11 +58,16 @@ void setup()
 	lora.onP2PCadResult(onCad);
 
 	lora.saveConfig();
+
+	// AT commands over USB serial, processed in loop()
+	at_serial.begin(lora, Serial);
+
 	lora.startP2PReceive(0);
 }
 
 void loop()
 {
+	at_serial.handleSerial(); // reads and executes pending AT commands
 	lora.handleEvents();
 
 	if (!waitingForCad && millis() - lastActionMs > 10000)

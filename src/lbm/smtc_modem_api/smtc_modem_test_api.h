@@ -48,7 +48,7 @@ extern "C" {
 #include <stdbool.h>  // bool type
 
 #include "smtc_modem_api.h"
-#include "ral_defs.h"
+#include "../smtc_modem_core/smtc_ral/src/ral_defs.h"
 
 /*
  * -----------------------------------------------------------------------------

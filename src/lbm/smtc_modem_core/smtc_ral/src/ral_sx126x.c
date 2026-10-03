@@ -37,11 +37,13 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "sx126x.h"
-#include "sx126x_lr_fhss.h"
+#include "../../radio_drivers/sx126x_driver/src/sx126x.h"
+#include "../../radio_drivers/sx126x_driver/src/sx126x_lr_fhss.h"
 #include "ral_sx126x.h"
 #include "ral_sx126x_bsp.h"
 

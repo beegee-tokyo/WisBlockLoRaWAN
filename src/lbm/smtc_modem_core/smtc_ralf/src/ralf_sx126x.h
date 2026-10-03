@@ -47,7 +47,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "ral_sx126x.h"
+#include "../../smtc_ral/src/ral_sx126x.h"
 #include "ralf.h"
 
 /*

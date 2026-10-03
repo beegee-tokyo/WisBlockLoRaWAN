@@ -1,10 +1,12 @@
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "LoRaWANEngine.h"
 #include <Arduino.h> // millis() - used for the custom join-reattempt-interval timer
 #include <string.h>
 
-#include "smtc_modem_api.h"	  // vendored: src/lbm/smtc_modem_api/smtc_modem_api.h
-#include "smtc_modem_utilities.h" // vendored: smtc_modem_run_engine(), smtc_modem_init()
-#include "lorawan_api.h"	  // vendored: src/lbm/smtc_modem_core/lorawan_api/lorawan_api.h - lorawan_api_next_dr_get()
+#include "lbm/smtc_modem_api/smtc_modem_api.h"	  // vendored: src/lbm/smtc_modem_api/smtc_modem_api.h
+#include "lbm/smtc_modem_api/smtc_modem_utilities.h" // vendored: smtc_modem_run_engine(), smtc_modem_init()
+#include "lbm/smtc_modem_core/lorawan_api/lorawan_api.h"	  // vendored: src/lbm/smtc_modem_core/lorawan_api/lorawan_api.h - lorawan_api_next_dr_get()
 
 namespace
 {

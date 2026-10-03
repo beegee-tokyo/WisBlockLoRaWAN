@@ -32,17 +32,19 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../../wb_lbm_config.h"
 #include "smtc_real.h"
 #include "smtc_real_defs.h"
 
-#include "lr1mac_utilities.h"
-#include "lr1_stack_mac_layer.h"
+#include "../../lr1mac_utilities.h"
+#include "../../lr1_stack_mac_layer.h"
 
-#include "smtc_modem_hal_dbg_trace.h"
-#include "smtc_modem_hal.h"
+#include "../../../../logging/smtc_modem_hal_dbg_trace.h"
+#include "../../../../../smtc_modem_hal/smtc_modem_hal.h"
 
-#include "smtc_lbt.h"
-#include "lr1mac_config.h"
+#include "../../services/smtc_lbt.h"
+#include "../../../lr1mac_config.h"
 
 #if defined( REGION_WW_2G4 )
 #include "region_ww_2g4.h"

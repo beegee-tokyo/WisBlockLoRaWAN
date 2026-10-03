@@ -1,3 +1,5 @@
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "WisBlockLoRaHwConfig.h"
 #include "WisBlockLoRaBoards.h"
 

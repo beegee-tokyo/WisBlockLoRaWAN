@@ -3,10 +3,15 @@
  * OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.
  * Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h
  * has the right pins for your revision and LBM is vendored in (see README).
+ *
+ * The AT command interface runs on the USB serial port. It is polled from
+ * loop() with at_serial.handleSerial(), the same way as lora.handleEvents().
  */
+#include <WisBlockLoRaAT.h>
 #include <WisBlockLoRaWAN.h>
 
 WisBlockLoRaWAN lora;
+WisBlockLoRaAT at_serial;
 
 // Replace with your device's real OTAA credentials.
 uint8_t devEui[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01};
@@ -76,11 +81,16 @@ void setup()
 	lora.onLinkCheckAnswer(onLinkCheck);
 
 	lora.saveConfig();
+
+	// AT commands over USB serial, processed in loop()
+	at_serial.begin(lora, Serial);
+
 	lora.join();
 }
 
 void loop()
 {
+	at_serial.handleSerial(); // reads and executes pending AT commands
 	lora.handleEvents();
 
 	if (lora.isJoined() && millis() - lastUplinkMs > UPLINK_INTERVAL_MS)

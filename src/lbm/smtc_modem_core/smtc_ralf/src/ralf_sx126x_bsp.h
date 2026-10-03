@@ -44,7 +44,7 @@ extern "C" {
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
-#include "ral_sx126x_bsp.h"
+#include "../../smtc_ral/src/ral_sx126x_bsp.h"
 #include "ralf_defs.h"
 
 /*

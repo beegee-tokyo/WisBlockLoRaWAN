@@ -45,7 +45,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "ral_defs.h"
+#include "../../../../smtc_ral/src/ral_defs.h"
 
 #if defined( REGION_EU_868 )
 #include "region_eu_868_defs.h"

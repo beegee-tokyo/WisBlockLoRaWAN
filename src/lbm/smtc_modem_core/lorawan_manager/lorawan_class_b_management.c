@@ -37,16 +37,18 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 #include "lorawan_class_b_management.h"
-#include "modem_core.h"
-#include "modem_supervisor_light.h"
-#include "smtc_modem_api.h"
-#include "smtc_modem_hal.h"
-#include "smtc_modem_hal_dbg_trace.h"
-#include "lorawan_api.h"
-#include "modem_event_utilities.h"
+#include "../modem_utilities/modem_core.h"
+#include "../modem_supervisor/modem_supervisor_light.h"
+#include "../../smtc_modem_api/smtc_modem_api.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../logging/smtc_modem_hal_dbg_trace.h"
+#include "../lorawan_api/lorawan_api.h"
+#include "../modem_utilities/modem_event_utilities.h"
 
 /*
  * -----------------------------------------------------------------------------

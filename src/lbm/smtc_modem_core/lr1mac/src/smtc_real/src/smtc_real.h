@@ -41,9 +41,9 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "lr1mac_defs.h"
+#include "../../lr1mac_defs.h"
 #include "smtc_real_defs.h"
-#include "lr1_stack_mac_layer.h"
+#include "../../lr1_stack_mac_layer.h"
 
 /*
  * ============================================================================

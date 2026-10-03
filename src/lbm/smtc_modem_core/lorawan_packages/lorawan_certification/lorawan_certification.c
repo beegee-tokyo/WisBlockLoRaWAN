@@ -37,19 +37,21 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "modem_supervisor_light.h"
-#include "lorawan_api.h"
-#include "smtc_modem_hal.h"
-#include "smtc_modem_hal_dbg_trace.h"
-#include "smtc_duty_cycle.h"
-#include "smtc_modem_test_api.h"
-#include "modem_core.h"
-#include "lora_basics_modem_version.h"
+#include "../../modem_supervisor/modem_supervisor_light.h"
+#include "../../lorawan_api/lorawan_api.h"
+#include "../../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../../logging/smtc_modem_hal_dbg_trace.h"
+#include "../../lr1mac/src/services/smtc_duty_cycle.h"
+#include "../../../smtc_modem_api/smtc_modem_test_api.h"
+#include "../../modem_utilities/modem_core.h"
+#include "../../../lora_basics_modem_version.h"
 #include "lorawan_certification.h"
-#include "modem_tx_protocol_manager.h"
+#include "../../modem_supervisor/modem_tx_protocol_manager.h"
 
 #ifdef ADD_FUOTA
 #include "lorawan_fragmentation_package.h"

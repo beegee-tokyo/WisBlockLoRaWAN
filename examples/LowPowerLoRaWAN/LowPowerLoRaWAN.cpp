@@ -14,6 +14,8 @@ CustomAtSettings custom_settings;
 
 // Flag if pending downlinks are all pulled automatically until queue is empty
 #define GET_PENDING_DLP 1
+// Flag if Multicast group should be enabled
+#define ENA_MULTICAST 0
 
 // Time management and RX buffer
 time_t unixTime; // a time stamp
@@ -21,7 +23,9 @@ WisBlockRxResult rx_buffered;
 
 // Replace with your device's real OTAA credentials.
 #if defined ARDUINO_ARCH_NRF52
-uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x06, 0x79, 0xdb}; // ac1f09fffe0679db // 0x09, 0x01, 0x88
+uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x06, 0x79, 0xdb}; // ac1f09fffe0679db
+#elif defined(RAK3400)
+uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x00, 0x00, 0x02}; // ac1f09fffe000002
 #else
 uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x18, 0xF0, 0xC4}; // ac1f09fffe18f0c4
 #endif
@@ -32,6 +36,39 @@ uint32_t UPLINK_INTERVAL_MS = 0; // 240000;
 
 /** Flag for the event type */
 volatile uint16_t g_task_event_type = 0;
+
+/**
+ * The event flags are set from several tasks (LBM task, USB event task,
+ * timers) and cleared from loop(), possibly on different cores. A plain
+ * "flags |= x" / "flags &= ~x" is a read-modify-write that can lose an event
+ * when two of them overlap, so all updates go through these helpers.
+ */
+#if defined ARDUINO_ARCH_ESP32
+static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
+#define EVENT_LOCK() portENTER_CRITICAL(&g_event_mux)
+#define EVENT_UNLOCK() portEXIT_CRITICAL(&g_event_mux)
+#elif defined ARDUINO_ARCH_NRF52
+#define EVENT_LOCK() taskENTER_CRITICAL()
+#define EVENT_UNLOCK() taskEXIT_CRITICAL()
+#else
+#define EVENT_LOCK()
+#define EVENT_UNLOCK()
+#endif
+
+static inline void taskEventSet(uint16_t bits)
+{
+	EVENT_LOCK();
+	g_task_event_type |= bits;
+	EVENT_UNLOCK();
+}
+
+/** @param mask Inverted event mask, e.g. N_AT_CMD */
+static inline void taskEventClear(uint16_t mask)
+{
+	EVENT_LOCK();
+	g_task_event_type &= mask;
+	EVENT_UNLOCK();
+}
 
 /** Uplink buffer in Cayenne LPP format */
 WisCayenne g_solution_data(255);
@@ -59,7 +96,7 @@ void periodic_wakeup(TimerHandle_t unused)
 	{
 		// Switch on LED to show we are awake
 		digitalWrite(LED_GREEN, HIGH);
-		g_task_event_type |= STATUS;
+		taskEventSet(STATUS);
 		// Wake up task to send initial packet
 		xSemaphoreGive(g_task_sem);
 	}
@@ -81,7 +118,7 @@ void periodic_wakeup(void)
 	{
 		// Switch on LED to show we are awake
 		digitalWrite(LED_GREEN, HIGH);
-		g_task_event_type |= STATUS;
+		taskEventSet(STATUS);
 		// Wake up task to send initial packet
 		xSemaphoreGive(g_task_sem);
 	}
@@ -90,11 +127,44 @@ void periodic_wakeup(void)
 #warning MCU not supported
 #endif
 
+#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+/**
+ * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives.
+ *
+ * Runs in the USB driver's task context, so it only flags the event and wakes
+ * loop(). The AT command itself is parsed and executed in loop() by
+ * at_serial.handleSerial().
+ */
+void atRxWake(void)
+{
+	taskEventSet(AT_CMD);
+	if (g_task_sem == NULL)
+	{
+		return;
+	}
+#if defined ARDUINO_ARCH_NRF52
+	bool inIsr = isInISR();
+#else
+	bool inIsr = xPortInIsrContext();
+#endif
+	if (inIsr)
+	{
+		BaseType_t woken = pdFALSE;
+		xSemaphoreGiveFromISR(g_task_sem, &woken);
+		portYIELD_FROM_ISR(woken);
+	}
+	else
+	{
+		xSemaphoreGive(g_task_sem);
+	}
+}
+#endif
+
 void onJoined()
 {
 	Serial.println("[LoRaWAN] Join succeeded");
 	digitalWrite(LED_BLUE, LOW);
-	g_task_event_type |= LORA_JOIN_FIN;
+	taskEventSet(LORA_JOIN_FIN);
 	if (g_task_sem != NULL)
 	{
 		// Wake up task to send initial packet
@@ -150,7 +220,7 @@ void onRxDone(const WisBlockRxResult &result)
 	}
 	if (result.length > 0)
 	{
-		g_task_event_type |= LORA_DATA;
+		taskEventSet(LORA_DATA);
 		if (g_task_sem != NULL)
 		{
 			rx_buffered.port = result.port;
@@ -179,7 +249,7 @@ void onTimeAnswer(bool success, const WisBlockTimeAnswer &t)
 		unixTime = t.gpsEpochSeconds;
 		// Make it PH time
 		unixTime = unixTime + 315964800 - 18; // Convert GPS Epoch Seconds to UTC
-		g_task_event_type |= LORA_TIME;
+		taskEventSet(LORA_TIME);
 		if (g_task_sem != NULL)
 		{
 			// Wake up task to send initial packet
@@ -269,15 +339,20 @@ void setup()
 #warning MCU not supported
 #endif
 
+#ifdef RAK3400
+	Serial.println("[Setup] RAK3401 lora.begin");
+	lora.begin(wisblockLoRaHwConfigRAK3401());
+#else
 	Serial.println("[Setup] lora.begin");
 	lora.begin();
+#endif
 	// Serial.println("[LoRaWAN] setup");
-	// 	lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
-	// 	lora.setOTAAKeys(devEui, joinEui, appKey);
-	// 	lora.setRegion(WISBLOCK_RUI3_BAND_AS923_3); // RUI3 AT+BAND numbering - see WisBlockRUI3Band
-	// 	const WisBlockPersistedConfig &cfg = lora.getConfig();
-	// 	int idx = cfg.lorawan.region;
-	// 	Serial.printf("[Setup] Current band selection %d\n", cfg.lorawan.region);
+	// lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
+	// lora.setOTAAKeys(devEui, joinEui, appKey);
+	// lora.setRegion(WISBLOCK_RUI3_BAND_AS923_3);
+	// const WisBlockPersistedConfig &cfg = lora.getConfig();
+	int idx = lora.getRegion();
+	Serial.printf("[Setup] Current band selection %d\n", idx);
 
 	// 	uint16_t mask = 0xFFFF;
 	// 	if (idx == WISBLOCK_RUI3_BAND_AU915) // WISBLOCK_REGION_AU915
@@ -339,8 +414,6 @@ void setup()
 	}
 
 	//  Check if Join is controlled via AT command with manual join or autojoin
-	// Serial.println("[Setup] join");
-	// lora.join();
 	if (!lora.getAutoJoin())
 	{
 		lora.setAutoJoin(true);
@@ -354,15 +427,20 @@ void setup()
 		Serial.println("[Setup] Auto join is enabled");
 	}
 
-	Serial.println("[Setup] save");
+	Serial.println("[Setup] Save config");
 	if (!lora.saveConfig())
 	{
 		Serial.println("[Setup] Failed to save settings");
 	}
 
-	// // Start AT command interface
+	// Start AT command interface. USB RX only wakes loop() (atRxWake), the
+	// AT commands are processed in loop() via at_serial.handleSerial()
 	at_serial.begin(lora, Serial);
-	// at_serial.enableBackgroundRx();
+	at_serial.setRxWakeCallback(atRxWake);
+	if (!at_serial.enableBackgroundRx())
+	{
+		Serial.println("[Setup] AT command USB RX hook failed");
+	}
 
 	// Register application-defined custom AT commands (ATC+SENDINT=<seconds> -
 	// see custom_at.h/.cpp) and load any previously-saved values for them.
@@ -372,10 +450,6 @@ void setup()
 	Serial.println("[Setup] Get saved custom settings");
 	custom_settings = getCustomAtSettings();
 	UPLINK_INTERVAL_MS = custom_settings.sendIntervalS * 1000; // seconds to milli seconds
-
-// #if defined ESP32
-// 	Serial.onEvent(usbEventCallback);
-// #endif
 
 // Initialize the timer for frequent sending
 #if defined ARDUINO_ARCH_NRF52
@@ -401,7 +475,7 @@ void loop()
 
 		if ((g_task_event_type & LORA_JOIN_FIN) == LORA_JOIN_FIN)
 		{
-			g_task_event_type &= N_LORA_JOIN_FIN;
+			taskEventClear(N_LORA_JOIN_FIN);
 
 			if (!lora.setADR(false))
 			{
@@ -436,15 +510,17 @@ void loop()
 #endif
 			if (custom_settings.sendIntervalS != 0)
 			{ // Request to send first packet
-				g_task_event_type |= STATUS;
+				taskEventSet(STATUS);
 			}
 
+#if ENA_MULTICAST == 1
 			// Enable Multicast group
 			setupMulticastGroup();
+#endif
 		}
 		if ((g_task_event_type & STATUS) == STATUS)
 		{
-			g_task_event_type &= N_STATUS;
+			taskEventClear(N_STATUS);
 			if (lora.isJoined())
 			{
 				Serial.println("[LOOP] Send");
@@ -466,7 +542,7 @@ void loop()
 		// RX event
 		if ((g_task_event_type & LORA_DATA) == LORA_DATA)
 		{
-			g_task_event_type &= N_LORA_DATA;
+			taskEventClear(N_LORA_DATA);
 			// Serial.printf("[LOOP] RX %u bytes on port %u, RSSI %d SNR %d\n",
 			// 			  rx_buffered.length, rx_buffered.port, rx_buffered.rssi, rx_buffered.snr);
 			Serial.print("[LOOP] RX: ");
@@ -493,7 +569,7 @@ void loop()
 		// Server time received
 		if ((g_task_event_type & LORA_TIME) == LORA_TIME)
 		{
-			g_task_event_type &= N_LORA_TIME;
+			taskEventClear(N_LORA_TIME);
 			setTime(unixTime + (8 * 60 * 60)); // Philippine time
 			char buf[40];
 			sprintf(buf, "%02d/%02d/%4d %02d:%02d:%02d", day(), month(), year(), hour(), minute(), second());
@@ -504,15 +580,9 @@ void loop()
 		// Serial input event
 		if ((g_task_event_type & AT_CMD) == AT_CMD)
 		{
-			// Serial.println("[LOOP] AT CMD");
-			// Serial.flush();
-			g_task_event_type &= N_AT_CMD;
-			// at_serial.handleSerial();
-			while (Serial.available() > 0)
-			{
-				at_serial.processIncomingBytes();
-				delay(5);
-			}
+			taskEventClear(N_AT_CMD);
+			// Reads and executes everything that is available
+			at_serial.handleSerial();
 		}
 	}
 }

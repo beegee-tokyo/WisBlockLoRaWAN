@@ -39,9 +39,9 @@
 extern "C" {
 #endif
 
-#include "lorawan_certification.h"
-#include "lorawan_join_management.h"
-#include "lorawan_dwn_ack_management.h"
+#include "../lorawan_packages/lorawan_certification/lorawan_certification.h"
+#include "../lorawan_manager/lorawan_join_management.h"
+#include "../lorawan_manager/lorawan_dwn_ack_management.h"
 
 #if defined( ADD_SMTC_ALC_SYNC )
 #include "lorawan_alcsync.h"

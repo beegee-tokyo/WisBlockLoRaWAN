@@ -37,32 +37,34 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "smtc_modem_hal.h"
-#include "smtc_modem_hal_dbg_trace.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../logging/smtc_modem_hal_dbg_trace.h"
 
-#include "lr1mac_core.h"
+#include "../lr1mac/src/lr1mac_core.h"
 
-#include "smtc_duty_cycle.h"
+#include "../lr1mac/src/services/smtc_duty_cycle.h"
 #if defined( ADD_CSMA )
-#include "smtc_lora_cad_bt.h"
+#include "../lr1mac/src/services/smtc_lora_cad_bt.h"
 #endif  // ADD_CSMA
 #if defined( SMTC_MULTICAST )
-#include "smtc_multicast.h"
+#include "../lr1mac/src/services/smtc_multicast.h"
 #endif  // SMTC_MULTICAST
 #if defined( ADD_CLASS_C )
-#include "lr1mac_class_c.h"
+#include "../lr1mac/src/lr1mac_class_c/lr1mac_class_c.h"
 #endif
 #if defined( ADD_CLASS_B )
-#include "smtc_ping_slot.h"
-#include "smtc_beacon_sniff.h"
+#include "../lr1mac/src/lr1mac_class_b/smtc_ping_slot.h"
+#include "../lr1mac/src/lr1mac_class_b/smtc_beacon_sniff.h"
 #endif
-#include "modem_core.h"
-#include "smtc_real.h"
-#include "smtc_secure_element.h"
-#include "smtc_modem_crypto.h"
+#include "../modem_utilities/modem_core.h"
+#include "../lr1mac/src/smtc_real/src/smtc_real.h"
+#include "../smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
+#include "../smtc_modem_crypto/smtc_modem_crypto.h"
 #include "lorawan_api.h"
 
 static struct

@@ -32,6 +32,8 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS WITH THE SOFTWARE
 
 *****************************************************************************/
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include <stdint.h>
 #include "aes.h"
 #include "cmac.h"

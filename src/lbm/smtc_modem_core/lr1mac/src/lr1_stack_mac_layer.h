@@ -42,8 +42,8 @@ extern "C" {
  * --- DEPENDENCIES -----------------------------------------------------------------
  */
 #include "lr1mac_defs.h"
-#include "smtc_real_defs.h"
-#include "radio_planner.h"
+#include "smtc_real/src/smtc_real_defs.h"
+#include "../../radio_planner/src/radio_planner.h"
 
 /*
  * -----------------------------------------------------------------------------

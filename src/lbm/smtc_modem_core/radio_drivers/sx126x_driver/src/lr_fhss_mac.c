@@ -36,6 +36,8 @@
  * -----------------------------------------------------------------------------
  * --- DEPENDENCIES ------------------------------------------------------------
  */
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../wb_lbm_config.h"
 #include "lr_fhss_mac.h"
 #include <string.h>
 

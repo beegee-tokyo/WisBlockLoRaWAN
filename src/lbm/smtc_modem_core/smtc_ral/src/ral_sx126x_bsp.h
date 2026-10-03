@@ -46,7 +46,7 @@ extern "C" {
 
 #include <stdint.h>
 #include "ral_defs.h"
-#include "sx126x.h"
+#include "../../radio_drivers/sx126x_driver/src/sx126x.h"
 
 /*
  * -----------------------------------------------------------------------------

@@ -18,7 +18,9 @@
 #if defined ARDUINO_ARCH_NRF52
 extern TimerHandle_t g_task_wakeup_timer;
 #elif defined ESP32
+#include <Ticker.h>
 extern Ticker g_task_wakeup_timer;
+void periodic_wakeup(void);
 #endif
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
 #define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
@@ -152,7 +154,7 @@ namespace
 			}
 #endif
 #if defined ESP32
-			g_task_wakeup_timer.attach_ms(g_lorawan_settings.send_repeat_time, periodic_wakeup);
+			g_task_wakeup_timer.attach_ms(g_customSettings.sendIntervalS * 1000, periodic_wakeup);
 #endif
 		}
 

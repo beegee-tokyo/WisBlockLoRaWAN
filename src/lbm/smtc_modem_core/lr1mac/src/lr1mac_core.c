@@ -37,16 +37,18 @@
  * --- DEPENDENCIES -----------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include "lr1mac_core.h"
 
-#include "smtc_modem_hal_dbg_trace.h"
+#include "../../logging/smtc_modem_hal_dbg_trace.h"
 #include "lr1mac_utilities.h"
-#include "smtc_modem_hal.h"
-#include "smtc_real.h"
-#include "smtc_real_defs.h"
-#include "smtc_real_defs_str.h"
+#include "../../../smtc_modem_hal/smtc_modem_hal.h"
+#include "smtc_real/src/smtc_real.h"
+#include "smtc_real/src/smtc_real_defs.h"
+#include "smtc_real/src/smtc_real_defs_str.h"
 
-#include "lr1mac_config.h"
+#include "../lr1mac_config.h"
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE MACROS-----------------------------------------------------------

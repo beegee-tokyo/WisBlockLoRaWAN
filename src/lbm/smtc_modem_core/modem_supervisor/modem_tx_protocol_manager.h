@@ -43,8 +43,8 @@ extern "C" {
  * -----------------------------------------------------------------------------
  * --- DEPENDENCIES ------------------------------------------------------------
  */
-#include "radio_planner.h"
-#include "lr1_stack_mac_layer.h"
+#include "../radio_planner/src/radio_planner.h"
+#include "../lr1mac/src/lr1_stack_mac_layer.h"
 
 /*
  * -----------------------------------------------------------------------------

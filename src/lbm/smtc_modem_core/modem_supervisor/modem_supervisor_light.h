@@ -43,9 +43,9 @@ extern "C" {
  * -----------------------------------------------------------------------------
  * --- DEPENDENCIES ------------------------------------------------------------
  */
-#include "radio_planner.h"
-#include "lr1_stack_mac_layer.h"
-#include "modem_services_config.h"
+#include "../radio_planner/src/radio_planner.h"
+#include "../lr1mac/src/lr1_stack_mac_layer.h"
+#include "../modem_utilities/modem_services_config.h"
 #include "modem_tx_protocol_manager.h"
 /*
  * -----------------------------------------------------------------------------

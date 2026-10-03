@@ -32,16 +32,18 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "smtc_modem_hal_dbg_trace.h"
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../wb_lbm_config.h"
+#include "../../../logging/smtc_modem_hal_dbg_trace.h"
 #include "smtc_beacon_sniff.h"
 #include "smtc_ping_slot.h"
-#include "radio_planner.h"
-#include "smtc_modem_hal.h"
-#include "lr1_stack_mac_layer.h"
-#include "lr1mac_core.h"
-#include "smtc_real.h"
-#include "smtc_secure_element.h"
-#include "lr1mac_utilities.h"
+#include "../../../radio_planner/src/radio_planner.h"
+#include "../../../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../lr1_stack_mac_layer.h"
+#include "../lr1mac_core.h"
+#include "../smtc_real/src/smtc_real.h"
+#include "../../../smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
+#include "../lr1mac_utilities.h"
 
 /*
  * -----------------------------------------------------------------------------

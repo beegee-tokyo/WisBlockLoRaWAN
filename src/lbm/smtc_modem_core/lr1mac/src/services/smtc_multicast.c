@@ -36,15 +36,17 @@
  * -----------------------------------------------------------------------------
  * --- DEPENDENCIES ------------------------------------------------------------
  */
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
 #include "smtc_multicast.h"
 
-#include "smtc_modem_hal.h"
-#include "smtc_modem_hal_dbg_trace.h"
+#include "../../../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../../../logging/smtc_modem_hal_dbg_trace.h"
 
-#include "smtc_modem_crypto.h"
+#include "../../../smtc_modem_crypto/smtc_modem_crypto.h"
 
 #include <string.h>  //for memset
 /*

@@ -42,7 +42,6 @@
 #endif
 #ifdef ARDUINO_ARCH_ESP32
 #include <Ticker.h>
-void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
 #endif
 
 /** Wake up events, more events can be defined in app.h */

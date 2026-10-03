@@ -32,6 +32,13 @@ too, without a new library file: describe its pins and RF-switch/TCXO wiring wit
 nRF52840/ESP32-S3 only, for the same
 FreeRTOS-support reason RAK11310 has reduced support above.
 
+## Arduino IDE
+
+The library builds in the Arduino IDE / arduino-cli as well as in PlatformIO. Install it into your `libraries` folder (or from the ZIP) and select a WisBlock board (RAK4631, RAK3112/RAK3312). Notes:
+
+- The Arduino IDE only adds the library's `src/` folder to the include path and cannot pass per-library compiler flags. So every `#include` of a vendored LoRa Basics Modem (LBM) header inside this library is a path relative to the including file, and `src/wb_lbm_config.h` supplies the build flags. The library therefore does **not** depend on the include path or on any other installed library, and never uses headers from other libraries that happen to ship files with the same names. PlatformIO keeps using `extra_script.py`; both work with the same sources.
+- After re-vendoring LBM, run `python3 tools/make_lbm_includes_relative.py` once to convert the new files.
+
 ## AT command set
 
 All AT commands are documented in the [WisBlockLoRaWAN-AT-Commands](WisBlockLoRaWAN-AT-Commands.md) document.

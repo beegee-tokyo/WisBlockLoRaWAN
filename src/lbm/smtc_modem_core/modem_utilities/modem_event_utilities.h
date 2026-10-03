@@ -39,9 +39,9 @@
 extern "C" {
 #endif
 
-#include "smtc_modem_api.h"
-#include "smtc_modem_hal.h"
-#include "lr1mac_defs.h"
+#include "../../smtc_modem_api/smtc_modem_api.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../lr1mac/src/lr1mac_defs.h"
 
 #define MODEM_NUMBER_OF_EVENTS SMTC_MODEM_EVENT_MAX  // number of possible events in modem
 

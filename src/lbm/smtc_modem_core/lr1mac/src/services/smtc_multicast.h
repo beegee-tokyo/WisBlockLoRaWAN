@@ -47,8 +47,8 @@ extern "C" {
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "lr1mac_defs.h"
-#include "smtc_secure_element.h"
+#include "../lr1mac_defs.h"
+#include "../../../smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
 
 /*
  * -----------------------------------------------------------------------------

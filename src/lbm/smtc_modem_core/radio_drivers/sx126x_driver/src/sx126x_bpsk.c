@@ -37,6 +37,8 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../../wb_lbm_config.h"
 #include "sx126x_bpsk.h"
 #include "sx126x_hal.h"
 #include "sx126x.h"

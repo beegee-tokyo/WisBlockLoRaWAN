@@ -38,9 +38,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include "radio_planner.h"
-#include "lr1_stack_mac_layer.h"
-#include "smtc_lbt.h"
+#include "radio_planner/src/radio_planner.h"
+#include "lr1mac/src/lr1_stack_mac_layer.h"
+#include "lr1mac/src/services/smtc_lbt.h"
 /*!
  * \typedef modem_test_context_t
  * \brief   Test context

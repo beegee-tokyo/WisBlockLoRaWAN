@@ -49,7 +49,7 @@ extern "C" {
 #include "radio_planner_hook_id_defs.h"
 
 // Include radio abstraction layer
-#include "ralf.h"
+#include "../../smtc_ralf/src/ralf.h"
 
 /*
  * -----------------------------------------------------------------------------

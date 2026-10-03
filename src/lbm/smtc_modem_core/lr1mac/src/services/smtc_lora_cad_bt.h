@@ -42,7 +42,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "radio_planner.h"
+#include "../../../radio_planner/src/radio_planner.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -46,7 +46,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "lr_fhss_v1_base_types.h"
+#include "../../radio_drivers/sx126x_driver/src/lr_fhss_v1_base_types.h"
 
 /*
  * -----------------------------------------------------------------------------

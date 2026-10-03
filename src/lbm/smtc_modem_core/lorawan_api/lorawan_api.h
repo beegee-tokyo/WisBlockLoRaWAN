@@ -47,14 +47,14 @@ extern "C" {
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "lr1mac_defs.h"
-#include "lr1_stack_mac_layer.h"
-#include "smtc_real_defs.h"
+#include "../lr1mac/src/lr1mac_defs.h"
+#include "../lr1mac/src/lr1_stack_mac_layer.h"
+#include "../lr1mac/src/smtc_real/src/smtc_real_defs.h"
 #if defined( ADD_CLASS_B )
-#include "smtc_beacon_sniff.h"
+#include "../lr1mac/src/lr1mac_class_b/smtc_beacon_sniff.h"
 #endif
-#include "radio_planner.h"
-#include "fifo_ctrl.h"
+#include "../radio_planner/src/radio_planner.h"
+#include "../modem_utilities/fifo_ctrl.h"
 
 /*
  * -----------------------------------------------------------------------------

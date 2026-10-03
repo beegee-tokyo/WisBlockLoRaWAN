@@ -37,27 +37,29 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
 #include "modem_core.h"
 #include "modem_event_utilities.h"
 
-#include "smtc_modem_hal_dbg_trace.h"
-#include "smtc_real.h"
-#include "lorawan_api.h"
-#include "smtc_modem_api.h"
-#include "smtc_modem_utilities.h"
-#include "smtc_duty_cycle.h"
+#include "../logging/smtc_modem_hal_dbg_trace.h"
+#include "../lr1mac/src/smtc_real/src/smtc_real.h"
+#include "../lorawan_api/lorawan_api.h"
+#include "../../smtc_modem_api/smtc_modem_api.h"
+#include "../../smtc_modem_api/smtc_modem_utilities.h"
+#include "../lr1mac/src/services/smtc_duty_cycle.h"
 
-#include "lr1mac_utilities.h"
-#include "modem_supervisor_light.h"
+#include "../lr1mac/src/lr1mac_utilities.h"
+#include "../modem_supervisor/modem_supervisor_light.h"
 #include "modem_services_config.h"
-#include "lorawan_join_management.h"
-#include "lorawan_dwn_ack_management.h"
-#include "lorawan_cid_request_management.h"
-#include "lorawan_class_b_management.h"
-#include "lorawan_send_management.h"
+#include "../lorawan_manager/lorawan_join_management.h"
+#include "../lorawan_manager/lorawan_dwn_ack_management.h"
+#include "../lorawan_manager/lorawan_cid_request_management.h"
+#include "../lorawan_manager/lorawan_class_b_management.h"
+#include "../lorawan_manager/lorawan_send_management.h"
 /*
  * -----------------------------------------------------------------------------
  * --- PRIVATE MACROS-----------------------------------------------------------

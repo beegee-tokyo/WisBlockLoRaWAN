@@ -37,34 +37,36 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
-#include "smtc_modem_test_api.h"
-#include "smtc_modem_api.h"
+#include "../smtc_modem_api/smtc_modem_test_api.h"
+#include "../smtc_modem_api/smtc_modem_api.h"
 
-#include "smtc_modem_hal_dbg_trace.h"
-#include "smtc_modem_utilities.h"
-#include "radio_planner.h"
-#include "lorawan_api.h"
-#include "modem_core.h"
-#include "lr1mac_core.h"
-#include "smtc_real.h"
-#include "smtc_duty_cycle.h"
-#include "smtc_modem_hal.h"
-#include "smtc_secure_element.h"
-#include "smtc_lbt.h"
-#include "smtc_lora_cad_bt.h"
-#include "ralf.h"
-#include "radio_planner.h"
-#include "radio_planner_hook_id_defs.h"
-#include "modem_tx_protocol_manager.h"
+#include "logging/smtc_modem_hal_dbg_trace.h"
+#include "../smtc_modem_api/smtc_modem_utilities.h"
+#include "radio_planner/src/radio_planner.h"
+#include "lorawan_api/lorawan_api.h"
+#include "modem_utilities/modem_core.h"
+#include "lr1mac/src/lr1mac_core.h"
+#include "lr1mac/src/smtc_real/src/smtc_real.h"
+#include "lr1mac/src/services/smtc_duty_cycle.h"
+#include "../smtc_modem_hal/smtc_modem_hal.h"
+#include "smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
+#include "lr1mac/src/services/smtc_lbt.h"
+#include "lr1mac/src/services/smtc_lora_cad_bt.h"
+#include "smtc_ralf/src/ralf.h"
+#include "radio_planner/src/radio_planner.h"
+#include "radio_planner/src/radio_planner_hook_id_defs.h"
+#include "modem_supervisor/modem_tx_protocol_manager.h"
 #include "smtc_modem_test.h"
-#include "modem_event_utilities.h"
+#include "modem_utilities/modem_event_utilities.h"
 #if defined( SX128X )
 #include "sx128x_hal.h"
 #elif defined( SX126X )
-#include "sx126x_hal.h"
+#include "radio_drivers/sx126x_driver/src/sx126x_hal.h"
 #elif defined( LR11XX )
 #include "lr11xx_hal.h"
 #elif defined( SX127X )

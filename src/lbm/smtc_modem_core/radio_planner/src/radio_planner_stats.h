@@ -50,7 +50,7 @@ extern "C" {
 #include "radio_planner_types.h"
 
 #if defined( RP_STAT_PRINT_ENBALE )
-#include "smtc_modem_hal_dbg_trace.h"
+#include "../../logging/smtc_modem_hal_dbg_trace.h"
 #endif  // RP_STAT_PRINT_ENBALE
 
 /*

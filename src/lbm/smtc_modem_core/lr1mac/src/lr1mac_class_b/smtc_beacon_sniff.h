@@ -38,9 +38,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "lr1_stack_mac_layer.h"
-#include "lr1mac_defs.h"
-#include "radio_planner.h"
+#include "../lr1_stack_mac_layer.h"
+#include "../lr1mac_defs.h"
+#include "../../../radio_planner/src/radio_planner.h"
 #include "smtc_ping_slot.h"
 #ifdef __cplusplus
 extern "C" {

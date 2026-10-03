@@ -45,8 +45,8 @@ extern "C" {
 
 #include <stdio.h>
 #include <string.h>
-#include "ral_defs.h"
-#include "smtc_secure_element.h"
+#include "../../smtc_ral/src/ral_defs.h"
+#include "../../smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
 
 /*
  *-----------------------------------------------------------------------------------

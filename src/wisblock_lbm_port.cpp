@@ -1,3 +1,5 @@
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "wisblock_lbm_port.h"
 #include "WisBlockLoRaFlash.h"
 #include "wisblock_lbm_task.h"
@@ -6,7 +8,7 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "smtc_modem_hal.h" // vendored at src/lbm/smtc_modem_hal/smtc_modem_hal.h (LBM v4.9.0)
+#include "lbm/smtc_modem_hal/smtc_modem_hal.h" // vendored at src/lbm/smtc_modem_hal/smtc_modem_hal.h (LBM v4.9.0)
 
 /*
  * This file implements every function smtc_modem_hal.h declares. Grouped to

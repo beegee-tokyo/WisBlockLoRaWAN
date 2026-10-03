@@ -37,20 +37,22 @@
  * --- DEPENDENCIES -----------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../wb_lbm_config.h"
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
 
 #include "modem_supervisor_light.h"
-#include "lorawan_send_management.h"
-#include "smtc_modem_hal_dbg_trace.h"
-#include "lorawan_certification.h"
-#include "smtc_modem_hal.h"
-#include "modem_core.h"
-#include "lorawan_api.h"
-#include "smtc_modem_api.h"
-#include "smtc_modem_test_api.h"
-#include "smtc_duty_cycle.h"
-#include "modem_event_utilities.h"
+#include "../lorawan_manager/lorawan_send_management.h"
+#include "../logging/smtc_modem_hal_dbg_trace.h"
+#include "../lorawan_packages/lorawan_certification/lorawan_certification.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../modem_utilities/modem_core.h"
+#include "../lorawan_api/lorawan_api.h"
+#include "../../smtc_modem_api/smtc_modem_api.h"
+#include "../../smtc_modem_api/smtc_modem_test_api.h"
+#include "../lr1mac/src/services/smtc_duty_cycle.h"
+#include "../modem_utilities/modem_event_utilities.h"
 #include "modem_tx_protocol_manager.h"
 
 /*

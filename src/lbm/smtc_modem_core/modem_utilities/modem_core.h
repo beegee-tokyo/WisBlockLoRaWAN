@@ -47,10 +47,10 @@ extern "C" {
 #include <stdbool.h>  // bool type
 
 #include "fifo_ctrl.h"
-#include "smtc_modem_api.h"
-#include "smtc_modem_hal.h"
-#include "lr1mac_defs.h"
-#include "radio_planner.h"
+#include "../../smtc_modem_api/smtc_modem_api.h"
+#include "../../smtc_modem_hal/smtc_modem_hal.h"
+#include "../lr1mac/src/lr1mac_defs.h"
+#include "../radio_planner/src/radio_planner.h"
 
 /*
  * -----------------------------------------------------------------------------

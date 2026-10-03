@@ -1,8 +1,10 @@
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "LoRaP2PEngine.h"
 
 #include <math.h>
 
-#include "sx126x.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h
+#include "lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h
 #include "wisblock_radio_bsp_config.h"
 #include "wisblock_radio_hal.h"
 

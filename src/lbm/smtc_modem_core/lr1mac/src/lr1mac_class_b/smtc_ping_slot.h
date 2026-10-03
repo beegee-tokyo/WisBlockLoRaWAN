@@ -46,13 +46,13 @@ extern "C" {
 
 #include <stdint.h>   // C99 types
 #include <stdbool.h>  // bool type
-#include "lr1_stack_mac_layer.h"
-#include "lr1mac_defs.h"
+#include "../lr1_stack_mac_layer.h"
+#include "../lr1mac_defs.h"
 #if defined( SMTC_MULTICAST )
-#include "smtc_multicast.h"
+#include "../services/smtc_multicast.h"
 #endif  // SMTC_MULTICAST
-#include "radio_planner.h"
-#include "smtc_secure_element.h"
+#include "../../../radio_planner/src/radio_planner.h"
+#include "../../../smtc_modem_crypto/smtc_secure_element/smtc_secure_element.h"
 
 /*
  * -----------------------------------------------------------------------------

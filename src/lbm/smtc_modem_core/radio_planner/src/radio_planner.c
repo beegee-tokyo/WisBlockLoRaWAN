@@ -37,12 +37,14 @@
  * --- DEPENDENCIES ------------------------------------------------------------
  */
 
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include "radio_planner.h"
-#include "smtc_duty_cycle.h"
-#include "smtc_modem_hal_dbg_trace.h"
-#include "smtc_modem_hal.h"
+#include "../../lr1mac/src/services/smtc_duty_cycle.h"
+#include "../../logging/smtc_modem_hal_dbg_trace.h"
+#include "../../../smtc_modem_hal/smtc_modem_hal.h"
 
 #if defined( ADD_LBM_GEOLOCATION )
 #include "lr11xx_system.h"  // For blocking command abort

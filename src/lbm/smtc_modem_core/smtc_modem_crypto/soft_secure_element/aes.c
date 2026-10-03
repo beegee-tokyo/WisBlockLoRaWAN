@@ -34,6 +34,8 @@
 /* define if you have a fast memcpy function on your system */
 #if 0
 #define HAVE_MEMCPY
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "../../../../wb_lbm_config.h"
 #include <string.h>
 #if defined( _MSC_VER )
 #include <intrin.h>
