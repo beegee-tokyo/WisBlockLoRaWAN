@@ -137,7 +137,7 @@ void onTxDone(const WisBlockTxResult &result)
 {
 	waitingForCad = false;
 	Serial.printf("[P2P] TX %s\n", result.success ? "OK" : "FAILED");
-	lora.startP2PReceive(UPLINK_INTERVAL_MS / 2); // listen for 1/2 of sleep time after each TX
+	lora.startP2PReceive(UPLINK_INTERVAL_MS -1000); // / 2); // listen for 1/2 of sleep time after each TX
 	Serial.flush();
 }
 

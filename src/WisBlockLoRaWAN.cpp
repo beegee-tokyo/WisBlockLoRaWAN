@@ -25,7 +25,7 @@ void WisBlockLoRaWAN::begin()
 	// gracefully.
 	WisBlockLoRaFlash::init();
 
-	wisblockConfigLoad(config); // falls back to factory defaults internally
+	configFromFlash = wisblockConfigLoad(config); // falls back to factory defaults internally, see hasValidConfig()
 
 	// Sets up SPI + NSS/RESET/BUSY/DIO1 GPIOs and performs the initial
 	// hardware reset, using the compile-time-selected RAKwireless board
@@ -67,7 +67,7 @@ void WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig &hwConfig)
 	// RAKwireless board preset - see WisBlockLoRaHwConfig.h and
 	// wisblock_radio_hal.h's "Board flexibility" doc comment.
 	WisBlockLoRaFlash::init();
-	wisblockConfigLoad(config);
+	configFromFlash = wisblockConfigLoad(config);
 	// See the ordering FIX note in plain begin() above - radio init before
 	// LbmPort init, not after.
 	WisBlockRadioHal::init(hwConfig);
@@ -360,6 +360,18 @@ void WisBlockLoRaWAN::setP2PRxBoostedGain(bool enabled)
 	applyP2PSettings();
 }
 
+void WisBlockLoRaWAN::setP2PIqInversion(bool enabled)
+{
+	config.p2p.iqInversion = enabled;
+	applyP2PSettings();
+}
+
+void WisBlockLoRaWAN::setP2PSyncWord(uint16_t syncWord)
+{
+	config.p2p.syncWord = syncWord;
+	applyP2PSettings();
+}
+
 bool WisBlockLoRaWAN::sendP2P(const uint8_t *data, uint8_t length)
 {
 	return p2p.send(data, length);
@@ -399,12 +411,18 @@ void WisBlockLoRaWAN::sleepRadio()
 
 bool WisBlockLoRaWAN::saveConfig()
 {
-	return wisblockConfigSave(config);
+	bool ok = wisblockConfigSave(config);
+	if (ok)
+	{
+		configFromFlash = true; // a valid user slot exists now
+	}
+	return ok;
 }
 
 bool WisBlockLoRaWAN::restoreConfig()
 {
 	bool ok = wisblockConfigLoad(config);
+	configFromFlash = ok;
 	applyLoRaWANSettings();
 	applyP2PSettings();
 	return ok;
@@ -425,7 +443,12 @@ bool WisBlockLoRaWAN::restoreFactoryDefaults()
 	config = factory;
 	applyLoRaWANSettings();
 	applyP2PSettings();
-	return wisblockConfigSave(config); // also becomes the new *user* config - see ATR's doc comment
+	bool ok = wisblockConfigSave(config); // also becomes the new *user* config - see ATR's doc comment
+	if (ok)
+	{
+		configFromFlash = true;
+	}
+	return ok;
 }
 
 void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)

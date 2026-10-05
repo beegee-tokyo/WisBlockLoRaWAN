@@ -14,6 +14,9 @@
 #ifdef NRF52_SERIES
 #include <nrf_nvic.h>
 #endif
+#ifdef ARDUINO_ARCH_ESP32
+#include <Ticker.h>
+#endif
 
 /** Wake up events, more events can be defined in app.h */
 #define NO_EVENT 0

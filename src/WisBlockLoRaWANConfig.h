@@ -22,8 +22,12 @@
 // the incompatibility with older saved blobs explicit and intentional rather than incidental.
 // A config saved by an older library version is safely detected as invalid (falls back to
 // factory defaults) either way - see wisblockConfigLoad().
-#define WISBLOCK_CONFIG_VERSION 3
-
+//
+// Version 4: WisBlockP2PSettings gained iqInversion + syncWord (AT+IQINVER / AT+SYNCWORD).
+// Version 3 blobs are NOT discarded: wisblockConfigLoad()/wisblockConfigLoadFactory() read
+// them with the old layout and fill the new fields with their defaults, so keys and other
+// settings survive a library update. They are rewritten as version 4 on the next save.
+#define WISBLOCK_CONFIG_VERSION 4
 struct WisBlockPersistedConfig
 {
 	uint32_t magic = WISBLOCK_CONFIG_MAGIC;

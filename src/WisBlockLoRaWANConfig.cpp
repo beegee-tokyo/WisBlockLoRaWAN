@@ -28,6 +28,74 @@ static uint16_t computeCrc(const WisBlockPersistedConfig &cfg)
 	return wisblockConfigCrc16(base + offset, len);
 }
 
+// ---------------------------------------------------------------------------
+// Version 3 -> 4 migration. Layout of the version 3 blob (WisBlockP2PSettings
+// before iqInversion/syncWord were appended). Must stay byte-for-byte what
+// version 3 wrote - do not edit.
+// ---------------------------------------------------------------------------
+namespace
+{
+struct WisBlockP2PSettingsV3
+{
+	uint32_t frequencyHz;
+	uint8_t spreadingFactor;
+	WisBlockP2PBandwidth bandwidth;
+	WisBlockP2PCodingRate codingRate;
+	uint16_t preambleLength;
+	int8_t txPowerDbm;
+	bool cadEnabled;
+	uint16_t symbolTimeout;
+	bool rxBoostedGainEnabled;
+};
+
+struct WisBlockPersistedConfigV3
+{
+	uint32_t magic;
+	uint16_t version;
+	uint16_t crc16;
+	WisBlockWorkMode workMode;
+	bool lowPowerEnabled;
+	char alias[32];
+	char firmwarever[32];
+	WisBlockLoRaWANSettings lorawan;
+	WisBlockP2PSettingsV3 p2p;
+};
+
+// Reads `key` as a version 3 blob. On success fills `out` (new P2P fields at their defaults).
+bool loadV3(const char *key, WisBlockPersistedConfig &out)
+{
+	WisBlockPersistedConfigV3 old;
+	if (!WisBlockLoRaFlash::read(key, reinterpret_cast<uint8_t *>(&old), sizeof(old)))
+	{
+		return false;
+	}
+	const uint8_t *base = reinterpret_cast<const uint8_t *>(&old);
+	size_t offset = offsetof(WisBlockPersistedConfigV3, workMode);
+	if (old.magic != WISBLOCK_CONFIG_MAGIC || old.version != 3 ||
+		old.crc16 != wisblockConfigCrc16(base + offset, sizeof(old) - offset))
+	{
+		return false;
+	}
+	WisBlockPersistedConfig cfg; // defaults, including the new P2P fields
+	cfg.workMode = old.workMode;
+	cfg.lowPowerEnabled = old.lowPowerEnabled;
+	memcpy(cfg.alias, old.alias, sizeof(cfg.alias));
+	memcpy(cfg.firmwarever, old.firmwarever, sizeof(cfg.firmwarever));
+	cfg.lorawan = old.lorawan;
+	cfg.p2p.frequencyHz = old.p2p.frequencyHz;
+	cfg.p2p.spreadingFactor = old.p2p.spreadingFactor;
+	cfg.p2p.bandwidth = old.p2p.bandwidth;
+	cfg.p2p.codingRate = old.p2p.codingRate;
+	cfg.p2p.preambleLength = old.p2p.preambleLength;
+	cfg.p2p.txPowerDbm = old.p2p.txPowerDbm;
+	cfg.p2p.cadEnabled = old.p2p.cadEnabled;
+	cfg.p2p.symbolTimeout = old.p2p.symbolTimeout;
+	cfg.p2p.rxBoostedGainEnabled = old.p2p.rxBoostedGainEnabled;
+	out = cfg;
+	return true;
+}
+} // namespace
+
 bool wisblockConfigLoad(WisBlockPersistedConfig &out)
 {
 	WisBlockPersistedConfig fromFlash;
@@ -38,6 +106,12 @@ bool wisblockConfigLoad(WisBlockPersistedConfig &out)
 		fromFlash.crc16 == computeCrc(fromFlash))
 	{
 		out = fromFlash;
+		return true;
+	}
+
+	// Saved by the previous library version -> keep it, new fields get defaults.
+	if (loadV3(WISBLOCK_CONFIG_FLASH_KEY, out))
+	{
 		return true;
 	}
 
@@ -74,6 +148,11 @@ bool wisblockConfigLoadFactory(WisBlockPersistedConfig &out)
 		fromFlash.crc16 == computeCrc(fromFlash))
 	{
 		out = fromFlash;
+		return true;
+	}
+
+	if (loadV3(WISBLOCK_FACTORY_FLASH_KEY, out))
+	{
 		return true;
 	}
 

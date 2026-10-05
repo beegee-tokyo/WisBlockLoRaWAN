@@ -219,6 +219,14 @@ struct WisBlockP2PSettings
 	// setP2PRxBoostedGain() if your link budget doesn't need it and you'd
 	// rather have the lower RX current.
 	bool rxBoostedGainEnabled = true;
+	/** Invert the IQ signals on TX and RX (RUI3 AT+IQINVER). Both ends of a link must match. */
+	bool iqInversion = false;
+	/**
+	 * 16-bit LoRa sync word register value (RUI3 AT+SYNCWORD). 0x1424 = "private" (the SX126x
+	 * power-on default, also what RUI3 P2P uses), 0x3444 = "public" (LoRaWAN). Both ends of a
+	 * link must match.
+	 */
+	uint16_t syncWord = 0x1424;
 };
 
 /** Result of a CAD (Channel Activity Detection) operation. */

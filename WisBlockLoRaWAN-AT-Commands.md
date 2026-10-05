@@ -130,7 +130,15 @@ _Commands starting with `ATC+` are application defined custom commands, see [Cus
     + [AT+LSTMULC](#atlstmulc)
   * [P2P Instructions](#p2p-instructions)
     + [AT+NWM](#atnwm)
+    + [AT+PFREQ](#atpfreq)
+    + [AT+PSF](#atpsf)
+    + [AT+PBW](#atpbw)
+    + [AT+PCR](#atpcr)
+    + [AT+PPL](#atppl)
+    + [AT+PTP](#atptp)
     + [AT+P2P](#atp2p)
+    + [AT+IQINVER](#atiqinver)
+    + [AT+SYNCWORD](#atsyncword)
     + [AT+CAD](#atcad)
     + [AT+RXBOOST](#atrxboost)
     + [AT+PSEND](#atpsend)
@@ -1451,11 +1459,143 @@ _Unlike RUI3, the device does **not restart**. The mode change is active immedia
 
 [Back](#content)
 
+### AT+PFREQ
+
+Description: P2P mode frequency
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PFREQ=?` | - | `AT+PFREQ=<frequency in Hz>` | OK |
+| `AT+PFREQ=<Input>` | `<frequency in Hz>` | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+PFREQ=868100000
+OK
+
+AT+PFREQ=?
+AT+PFREQ=868100000
+OK
+```
+
+_`AT_PARAM_ERROR` is returned for a value that is not a decimal number from `150000000` to `960000000`. The default is 916000000. The value must be inside the frequency range your radio hardware supports._
+
+[Back](#content)
+
+### AT+PSF
+
+Description: P2P mode spreading factor
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PSF=?` | - | `AT+PSF=<6 - 12>` | OK |
+| `AT+PSF=<Input>` | `6` - `12` | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+PSF=9
+OK
+```
+
+_The default is 7._
+
+[Back](#content)
+
+### AT+PBW
+
+Description: P2P mode bandwidth
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PBW=?` | - | `AT+PBW=<0 - 9>` | OK |
+| `AT+PBW=<Input>` | `0` - `9` | - | OK<br/>`AT_PARAM_ERROR` |
+|  | *Input* = bandwidth **index** (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz |  |  |
+
+**Example:**
+
+```text
+AT+PBW=1
+OK
+```
+
+_The default is 0 (125 kHz)._
+
+[Back](#content)
+
+### AT+PCR
+
+Description: P2P mode coding rate
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PCR=?` | - | `AT+PCR=<0 - 3>` | OK |
+| `AT+PCR=<Input>` | `0` - `3` | - | OK<br/>`AT_PARAM_ERROR` |
+|  | *Input* = coding rate **index** (RUI3 numbering): 0 = 4/5, 1 = 4/6, 2 = 4/7, 3 = 4/8 |  |  |
+
+**Example:**
+
+```text
+AT+PCR=0
+OK
+```
+
+## _⚠️ WARNING_
+----
+_**`AT+PCR` counts from 0, the `<cr>` field of `AT+P2P` counts from 1.** `AT+PCR=0` and `AT+P2P=...:1:...` both select 4/5. The bandwidth index is the same in `AT+PBW` and `AT+P2P`._
+
+----
+
+_The default is 0 (4/5)._
+
+[Back](#content)
+
+### AT+PPL
+
+Description: P2P mode preamble length
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PPL=?` | - | `AT+PPL=<5 - 65535>` | OK |
+| `AT+PPL=<Input>` | `5` - `65535` | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+PPL=12
+OK
+```
+
+_The preamble length in symbols. The default is 8. For `AT+PRECVDC` the transmitter's preamble length decides how long the receiver can sleep, see [AT+PRECVDC](#atprecvdc)._
+
+[Back](#content)
+
+### AT+PTP
+
+Description: P2P mode TX power
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PTP=?` | - | `AT+PTP=<5 - 22>` | OK |
+| `AT+PTP=<Input>` | `5` - `22` | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+PTP=20
+OK
+```
+
+_The TX power in dBm. The default is 14. `AT+P2P` accepts the same value as its last field._
+
+[Back](#content)
+
 ### AT+P2P
 
 Description: LoRa P2P radio parameters
 
-This command sets or gets all P2P radio parameters with one command. It replaces the single commands `AT+PFREQ`, `AT+PSF`, `AT+PBW`, `AT+PCR`, `AT+PPL` and `AT+PTP` of RUI3.
+This command sets or gets the main P2P radio parameters with one command. The same values can be set one by one with [AT+PFREQ](#atpfreq), [AT+PSF](#atpsf), [AT+PBW](#atpbw), [AT+PCR](#atpcr), [AT+PPL](#atppl) and [AT+PTP](#atptp). The bandwidth index is the same in both. Mind that the coding rate is counted differently, see the warning at `AT+PCR`.
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
@@ -1463,7 +1603,7 @@ This command sets or gets all P2P radio parameters with one command. It replaces
 | `AT+P2P=<Input>` | `<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | - | OK<br/>`AT_PARAM_ERROR` |
 |  | *freq* = frequency in Hz |  |  |
 |  | *sf* = spreading factor 7 - 12 |  |  |
-|  | *bw* = bandwidth **index**: 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 62.5 kHz, 4 = 41.67 kHz, 5 = 31.25 kHz, 6 = 20.83 kHz, 7 = 15.63 kHz, 8 = 10.42 kHz, 9 = 7.81 kHz |  |  |
+|  | *bw* = bandwidth **index**, same as [AT+PBW](#atpbw) (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz |  |  |
 |  | *cr* = coding rate **index**: 1 = 4/5, 2 = 4/6, 3 = 4/7, 4 = 4/8 |  |  |
 |  | *preamble* = preamble length in symbols |  |  |
 |  | *txpower* = TX power in dBm |  |  |
@@ -1481,7 +1621,7 @@ OK
 
 ## _⚠️ WARNING_
 ----
-_**The bandwidth and coding rate are indexes, not kHz values and not the RUI3 numbering.** RUI3 uses `125` / `250` / `500` for the bandwidth and `0` - `3` for the coding rate in `AT+P2P`. Here `AT+P2P=868000000:7:125:1:8:14` would select an invalid bandwidth._
+_**The bandwidth and coding rate are indexes, not kHz values.** RUI3 uses `125` / `250` / `500` for the bandwidth and `0` - `3` for the coding rate in `AT+P2P`. Here `AT+P2P=868000000:7:125:1:8:14` is rejected with `AT_PARAM_ERROR` because the bandwidth index is above 9. The bandwidth index is the same as in `AT+PBW`. **The coding rate is not**: `<cr>` counts from 1 (1 = 4/5 ... 4 = 4/8), `AT+PCR` counts from 0._
 
 ----
 
@@ -1491,9 +1631,53 @@ _Parameters that are left out (from the end of the list) are replaced by the def
 
 _The settings are applied to the radio immediately and stored with `AT+SAVE`. The default frequency is 916000000._
 
-_`AT+ENCRY`, `AT+ENCKEY`, `AT+PBR`, `AT+PFDEV`, `AT+IQINVER` and `AT+SYNCWORD` are not implemented._
+_`AT+ENCRY`, `AT+ENCKEY`, `AT+PBR` and `AT+PFDEV` are not implemented._
 
 ----
+
+[Back](#content)
+
+### AT+IQINVER
+
+Description: P2P IQ inversion
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+IQINVER=?` | - | `AT+IQINVER=<0 or 1>` | OK |
+| `AT+IQINVER=<Input>` | 0 (off) or 1 (on) | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+IQINVER=1
+OK
+```
+
+_IQ inversion is applied to transmit and receive. Both sides of a P2P link must use the same value. The default is 0._
+
+[Back](#content)
+
+### AT+SYNCWORD
+
+Description: P2P sync word
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+SYNCWORD=?` | - | `AT+SYNCWORD=<4 hex digits>` | OK |
+| `AT+SYNCWORD=<Input>` | `<4 hex digits>` | - | OK<br/>`AT_PARAM_ERROR` |
+
+**Example:**
+
+```text
+AT+SYNCWORD=3444
+OK
+
+AT+SYNCWORD=?
+AT+SYNCWORD=3444
+OK
+```
+
+_The 16 bit LoRa sync word, exactly 4 hex digits without `0x`, upper or lower case. `1424` is the private sync word (default, same as RUI3 P2P), `3444` is the public one used by LoRaWAN. Both sides of a P2P link must use the same value._
 
 [Back](#content)
 
@@ -1722,7 +1906,7 @@ These RUI3 commands are **not** available. They return `AT_ERROR`.
 | Class B | `AT+BGW` |
 | Information | `AT+RSSI`, `AT+ARSSI`, `AT+SNR` |
 | Regional | `AT+CHE`, `AT+CHS` |
-| P2P | `AT+PFREQ`, `AT+PSF`, `AT+PBW`, `AT+PCR`, `AT+PPL`, `AT+PTP`, `AT+PBR`, `AT+PFDEV`, `AT+ENCRY`, `AT+ENCKEY`, `AT+PCRYPT`, `AT+PKEY`, `AT+CRYPIV`, `AT+IQINVER`, `AT+SYNCWORD`, `AT+RFFREQUENCY`, `AT+TXOUTPUTPOWER`, `AT+BANDWIDTH`, `AT+SPREADINGFACTOR`, `AT+CODINGRATE`, `AT+PREAMBLELENGTH`, `AT+SYMBOLTIMEOUT`, `AT+FIXLENGTHPAYLOAD` |
+| P2P | `AT+PBR`, `AT+PFDEV`, `AT+ENCRY`, `AT+ENCKEY`, `AT+PCRYPT`, `AT+PKEY`, `AT+CRYPIV`, `AT+RFFREQUENCY`, `AT+TXOUTPUTPOWER`, `AT+BANDWIDTH`, `AT+SPREADINGFACTOR`, `AT+CODINGRATE`, `AT+PREAMBLELENGTH`, `AT+SYMBOLTIMEOUT`, `AT+FIXLENGTHPAYLOAD` |
 | RF test | `AT+TRSSI`, `AT+TTONE`, `AT+TTX`, `AT+TRX`, `AT+TCONF`, `AT+TTH`, `AT+TOFF`, `AT+CERTIF`, `AT+CW`, `AT+TRTH` |
 
 Commands that exist **only** in this library: `AT+STATUS`, `AT+FPENDING`, `AT+RXBOOST`, `AT+PRECVDC`, `AT+LOWPOWER`, `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY`, `AT+FIRMWAREVER`.

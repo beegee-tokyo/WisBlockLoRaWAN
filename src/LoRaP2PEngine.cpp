@@ -226,8 +226,17 @@ void LoRaP2PEngine::applyRadioParams()
 	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
 	pktParams.pld_len_in_bytes = 255; // max; overridden per-TX in send(), irrelevant for RX (explicit header)
 	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = false;
+	pktParams.invert_iq_is_on = settings.iqInversion;
 	sx126x_set_lora_pkt_params(kCtx, &pktParams);
+
+	// 16-bit LoRa sync word (SX126x register 0x0740/0x0741). The driver's own
+	// sx126x_set_lora_sync_word() only takes the 8-bit short form (0x12/0x34 ->
+	// 0x1424/0x3444), so write the full 16-bit value directly.
+	{
+		const uint16_t kRegLoraSyncWord = 0x0740;
+		uint8_t sw[2] = {(uint8_t)(settings.syncWord >> 8), (uint8_t)(settings.syncWord & 0xFF)};
+		sx126x_write_register(kCtx, kRegLoraSyncWord, sw, 2);
+	}
 
 	// CRITICAL, previously missing: SetTxParams alone (below) only sets the
 	// requested power level and ramp time - it does NOT select which PA
@@ -293,7 +302,7 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
 	pktParams.pld_len_in_bytes = length;
 	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = false;
+	pktParams.invert_iq_is_on = settings.iqInversion;
 	sx126x_set_lora_pkt_params(kCtx, &pktParams);
 
 	sx126x_write_buffer(kCtx, 0, data, length);
@@ -318,7 +327,7 @@ void LoRaP2PEngine::startReceive(uint32_t timeoutMs)
 	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
 	pktParams.pld_len_in_bytes = 255; // ignored on RX with explicit header; actual length comes from sx126x_get_rx_buffer_status
 	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = false;
+	pktParams.invert_iq_is_on = settings.iqInversion;
 	sx126x_set_lora_pkt_params(kCtx, &pktParams);
 
 	sx126x_set_dio_irq_params(kCtx, kAllIrqsForRx, kAllIrqsForRx, 0, 0);
@@ -338,7 +347,7 @@ void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeM
 	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
 	pktParams.pld_len_in_bytes = 255; // ignored on RX with explicit header; actual length comes from sx126x_get_rx_buffer_status
 	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = false;
+	pktParams.invert_iq_is_on = settings.iqInversion;
 	sx126x_set_lora_pkt_params(kCtx, &pktParams);
 
 	// Same IRQ routing as startReceive() - a packet arriving during a duty

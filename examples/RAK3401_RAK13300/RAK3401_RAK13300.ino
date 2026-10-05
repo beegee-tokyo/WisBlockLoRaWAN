@@ -18,6 +18,7 @@
  * WisBlockLoRaHwConfig.h and wisblock_radio_hal.h's "Board flexibility" doc
  * comment for why this flexible begin() overload doesn't exist for RP2040.
  */
+#define RAK3401
 #include <WisBlockLoRaWAN.h>
 
 WisBlockLoRaWAN lora;

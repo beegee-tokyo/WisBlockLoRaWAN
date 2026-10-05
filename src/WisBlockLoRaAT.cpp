@@ -54,6 +54,57 @@ namespace
 		port->flush();
 	}
 
+	// --- P2P parameter helpers (RUI3 numbering) ---------------------------
+	//
+	// The AT interface uses RUI3's index values, which are NOT the same
+	// numbers as this library's enums:
+	//   AT+PBW:  0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83,
+	//            7=31.25, 8=41.67, 9=62.5 kHz   (WisBlockP2PBandwidth lists
+	//            the narrow bands in the opposite order: 3=62.5 ... 9=7.81)
+	//   AT+PCR:  0=4/5, 1=4/6, 2=4/7, 3=4/8     (WisBlockP2PCodingRate is 1..4)
+	// For the bandwidth the mapping is its own inverse: 0..2 stay, 3..9 -> 12-x.
+	inline uint8_t p2pBwToggle(uint8_t v)
+	{
+		return v >= 3 ? (uint8_t)(12 - v) : v;
+	}
+
+	// Strict unsigned decimal parse: digits only, no sign/space/trailing text,
+	// result within [minV, maxV]. Used by all the AT+P* setters below so that
+	// a damaged or empty value is rejected instead of silently becoming 0.
+	bool parseUintStrict(const char *s, uint32_t minV, uint32_t maxV, uint32_t &out)
+	{
+		if (s == nullptr || s[0] == '\0' || strlen(s) > 10)
+		{
+			return false;
+		}
+		for (const char *p = s; *p; p++)
+		{
+			if (*p < '0' || *p > '9')
+			{
+				return false;
+			}
+		}
+		unsigned long long v = strtoull(s, nullptr, 10);
+		if (v < minV || v > maxV)
+		{
+			return false;
+		}
+		out = (uint32_t)v;
+		return true;
+	}
+
+	// RUI3 P2P limits (AT+PFREQ/PSF/PBW/PCR/PPL/PTP)
+	const uint32_t kP2pFreqMin = 150000000UL;
+	const uint32_t kP2pFreqMax = 960000000UL;
+	const uint32_t kP2pSfMin = 6;
+	const uint32_t kP2pSfMax = 12;
+	const uint32_t kP2pBwMax = 9;
+	const uint32_t kP2pCrMax = 3;
+	const uint32_t kP2pPreambleMin = 5;
+	const uint32_t kP2pPreambleMax = 65535;
+	const uint32_t kP2pTxPowerMin = 5;
+	const uint32_t kP2pTxPowerMax = 22;
+
 } // namespace
 
 WisBlockLoRaAT *WisBlockLoRaAT::activeInstanceForRx = nullptr;
@@ -100,6 +151,14 @@ const WisBlockLoRaAT::AtCommandEntry WisBlockLoRaAT::atCommandTable[] = {
 	{"+P2P", &WisBlockLoRaAT::atP2p},
 	{"+CAD", &WisBlockLoRaAT::atCad},
 	{"+RXBOOST", &WisBlockLoRaAT::atRxBoost},
+	{"+PFREQ", &WisBlockLoRaAT::atPFreq},
+	{"+PSF", &WisBlockLoRaAT::atPSf},
+	{"+PBW", &WisBlockLoRaAT::atPBw},
+	{"+PCR", &WisBlockLoRaAT::atPCr},
+	{"+PPL", &WisBlockLoRaAT::atPPl},
+	{"+PTP", &WisBlockLoRaAT::atPTp},
+	{"+IQINVER", &WisBlockLoRaAT::atIqInver},
+	{"+SYNCWORD", &WisBlockLoRaAT::atSyncWord},
 	{"+PSEND", &WisBlockLoRaAT::atPSend},
 	{"+PRECV", &WisBlockLoRaAT::atPRecv},
 	{"+PRECVDC", &WisBlockLoRaAT::atPRecvDc},
@@ -1200,13 +1259,14 @@ void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 	if (op == AtOp::Query)
 	{
 		// Same field order as the write branch below: <freqHz>:<sf>:<bw>:<cr>:<preamble>:<txpower>
+		// <bw> is the same index as AT+PBW (RUI3 numbering), <cr> is the library index 1..4.
 		const WisBlockP2PSettings &s = lora->getP2PSettings();
 		port->printf("AT+P2P=");
 		port->print(s.frequencyHz);
 		port->print(":");
 		port->print(s.spreadingFactor);
 		port->print(":");
-		port->print((int)s.bandwidth);
+		port->print((int)p2pBwToggle((uint8_t)s.bandwidth));
 		port->print(":");
 		port->print((int)s.codingRate);
 		port->print(":");
@@ -1227,7 +1287,7 @@ void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 		tok = strtok(nullptr, ":");
 		uint8_t sf = tok ? (uint8_t)atoi(tok) : 7;
 		tok = strtok(nullptr, ":");
-		WisBlockP2PBandwidth bw = tok ? (WisBlockP2PBandwidth)atoi(tok) : WISBLOCK_BW_125;
+		int bwIndex = tok ? atoi(tok) : 0; // AT+PBW numbering, 0 = 125 kHz
 		tok = strtok(nullptr, ":");
 		WisBlockP2PCodingRate cr = tok ? (WisBlockP2PCodingRate)atoi(tok) : WISBLOCK_CR_4_5;
 		tok = strtok(nullptr, ":");
@@ -1235,17 +1295,230 @@ void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 		tok = strtok(nullptr, ":");
 		int8_t txp = tok ? (int8_t)atoi(tok) : 14;
 
-		if (freq == 0)
+		if (freq == 0 || bwIndex < 0 || bwIndex > (int)kP2pBwMax)
 		{
-			replyError("AT_PARAM_ERROR"); // bad frequency
+			replyError("AT_PARAM_ERROR"); // bad frequency or bandwidth index
 			return;
 		}
 		lora->setP2PFrequency(freq);
 		lora->setP2PSpreadingFactor(sf);
-		lora->setP2PBandwidth(bw);
+		lora->setP2PBandwidth((WisBlockP2PBandwidth)p2pBwToggle((uint8_t)bwIndex));
 		lora->setP2PCodingRate(cr);
 		lora->setP2PPreambleLength(preamble);
 		lora->setP2PTxPower(txp);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+// --- Individual P2P parameter commands (RUI3: AT+PFREQ, PSF, PBW, PCR, PPL, PTP,
+// IQINVER, SYNCWORD). AT+PBW uses the same bandwidth index as the <bw> field of AT+P2P;
+// AT+PCR counts from 0, the <cr> field of AT+P2P from 1. ---
+
+void WisBlockLoRaAT::atPFreq(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PFREQ=");
+		port->println(lora->getP2PSettings().frequencyHz);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, kP2pFreqMin, kP2pFreqMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PFrequency(v);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPSf(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PSF=");
+		port->println((int)lora->getP2PSettings().spreadingFactor);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, kP2pSfMin, kP2pSfMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PSpreadingFactor((uint8_t)v);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPBw(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		// 0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83, 7=31.25, 8=41.67, 9=62.5 kHz
+		port->printf("AT+PBW=");
+		port->println((int)p2pBwToggle((uint8_t)lora->getP2PSettings().bandwidth));
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, 0, kP2pBwMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PBandwidth((WisBlockP2PBandwidth)p2pBwToggle((uint8_t)v));
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPCr(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		// 0=4/5, 1=4/6, 2=4/7, 3=4/8
+		port->printf("AT+PCR=");
+		port->println((int)lora->getP2PSettings().codingRate - 1);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, 0, kP2pCrMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PCodingRate((WisBlockP2PCodingRate)(v + 1));
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPPl(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PPL=");
+		port->println((int)lora->getP2PSettings().preambleLength);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, kP2pPreambleMin, kP2pPreambleMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PPreambleLength((uint16_t)v);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPTp(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PTP=");
+		port->println((int)lora->getP2PSettings().txPowerDbm);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, kP2pTxPowerMin, kP2pTxPowerMax, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PTxPower((int8_t)v);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atIqInver(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+IQINVER=");
+		port->println(lora->getP2PSettings().iqInversion ? "1" : "0");
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, 0, 1, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PIqInversion(v != 0);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atSyncWord(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		// 4 hex digits, e.g. AT+SYNCWORD=1424 (private, default) or 3444 (public)
+		port->printf("AT+SYNCWORD=");
+		char buf[8];
+		snprintf(buf, sizeof(buf), "%04X", (unsigned)lora->getP2PSettings().syncWord);
+		port->println(buf);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		bool ok = value != nullptr && strlen(value) == 4;
+		for (int i = 0; ok && i < 4; i++)
+		{
+			ok = isxdigit((unsigned char)value[i]) != 0;
+		}
+		if (!ok)
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PSyncWord((uint16_t)strtoul(value, nullptr, 16));
 		replyOk();
 	}
 	else

@@ -250,6 +250,14 @@ private:
 	void atP2p(AtOp op, const char *value);
 	void atCad(AtOp op, const char *value);
 	void atRxBoost(AtOp op, const char *value);
+	void atPFreq(AtOp op, const char *value);
+	void atPSf(AtOp op, const char *value);
+	void atPBw(AtOp op, const char *value);
+	void atPCr(AtOp op, const char *value);
+	void atPPl(AtOp op, const char *value);
+	void atPTp(AtOp op, const char *value);
+	void atIqInver(AtOp op, const char *value);
+	void atSyncWord(AtOp op, const char *value);
 	void atPSend(AtOp op, const char *value);
 	void atPRecv(AtOp op, const char *value);
 	void atPRecvDc(AtOp op, const char *value);

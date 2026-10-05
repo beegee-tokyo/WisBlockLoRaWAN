@@ -234,6 +234,10 @@ public:
 	 * as every other P2P radio parameter).
 	 */
 	void setP2PRxBoostedGain(bool enabled);
+	/** Invert IQ on TX and RX (RUI3 AT+IQINVER). Both ends of a link must use the same value. */
+	void setP2PIqInversion(bool enabled);
+	/** 16-bit LoRa sync word (RUI3 AT+SYNCWORD): 0x1424 private (default), 0x3444 public. Both ends must match. */
+	void setP2PSyncWord(uint16_t syncWord);
 	bool sendP2P(const uint8_t *data, uint8_t length);
 	void startP2PReceive(uint32_t timeoutMs = 0);
 	/** See LoRaP2PEngine::startReceiveDutyCycle()'s doc comment for the full picture. */
@@ -300,6 +304,22 @@ public:
 	 * no factory backup has ever been saved.
 	 */
 	bool restoreFactoryDefaults();
+	/**
+	 * Tells whether the library is running on a valid saved configuration (TRUE), or on the
+	 * built-in defaults (FALSE). Use it right after begin() to decide whether the application has
+	 * to set up the configuration (and then call saveConfig()) or can simply use what is stored:
+	 *
+	 *   lora.begin();
+	 *   if (!lora.hasValidConfig()) { ...set everything up...; lora.saveConfig(); }
+	 *
+	 * FALSE after begin() means: nothing was ever saved (new or chip-erased device), the stored
+	 * data is corrupted, or it was written by an incompatible library version. TRUE means begin()
+	 * found and loaded a valid user slot. The result follows the user slot afterwards:
+	 * saveConfig() and restoreFactoryDefaults() that succeed make it TRUE, restoreConfig() sets it
+	 * to what it returns. Changing a setting does not change it, only saving does. It says nothing
+	 * about the content: a saved configuration can still lack the keys you need.
+	 */
+	bool hasValidConfig() const { return configFromFlash; }
 	const WisBlockPersistedConfig &getConfig() const { return config; }
 
 	// --- Low power ----------------------------------------------------
@@ -365,6 +385,7 @@ private:
 	LoRaWANEngine lorawan;
 	LoRaP2PEngine p2p;
 	bool began = false;
+	bool configFromFlash = false; // see hasValidConfig()
 	bool backgroundTaskActive = false;
 	bool lorawanEngineStarted = false;
 

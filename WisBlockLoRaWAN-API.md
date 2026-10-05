@@ -23,6 +23,146 @@ _**Differences to RUI3 that matter when porting code**_
 
 ----
 
+## Migration from SX126x-Arduino
+
+This section is for code written for the [SX126x-Arduino](https://github.com/beegee-tokyo/SX126x-Arduino) library (`Radio.xxx()` for LoRa P2P, `lmh_xxx()` for LoRaWAN). The two libraries cover the same ground, but WisBlockLoRaWAN is built around a single object and a settings model instead of direct radio calls.
+
+### Main differences
+
+| SX126x-Arduino | WisBlockLoRaWAN | Comment |
+| --- | --- | --- |
+| `Radio.xxx()` function table, `RadioEvents_t` struct | One object `WisBlockLoRaWAN lora;` with methods and `lora.onXxx()` callback registration | There is no direct access to the radio: no `Radio.Write()` / `Radio.Read()` registers, no `SetTxContinuousWave()`, no FSK modem. |
+| `SetTxConfig()` + `SetRxConfig()` + `SetChannel()` | One setter per parameter (`setP2PFrequency()`, `setP2PSpreadingFactor()`, ...) | The settings are shared by TX and RX, so they cannot differ. Each setter is applied to the radio immediately. |
+| Settings live in the sketch only | Settings live in the library and can be **stored in flash** | Call `saveConfig()` to keep them. After `begin()`, [hasValidConfig()](#hasvalidconfig) tells whether stored settings were found. |
+| LoRaWAN: `LoRaMacHelper` (`lmh_xxx()`) with LoRaMac-node | LoRaWAN: same object, Semtech LoRa Basics Modem | See [LoRaWAN](#lorawan-from-sx126x-arduino) below. |
+| Callbacks are called from the library's own IRQ task | Callbacks run from `lora.handleEvents()` (in `loop()`), or in the library task after `enableBackgroundTask()` | Keep callbacks short. Set a flag or give a semaphore and do the work in `loop()`, as the `LoRaP2PPingPong` example does. |
+| P2P and LoRaWAN are two independent ways to use the radio | `setWorkMode(WISBLOCK_MODE_LORA_P2P)` or `setWorkMode(WISBLOCK_MODE_LORAWAN)` selects what the radio does | One mode at a time. |
+| Boards: `lora_rak4630_init()`, `lora_rak3112_init()`, `lora_rak13300_init()`, `lora_hardware_init(hwConfig)` | `lora.begin()` (board selected at compile time) or `lora.begin(WisBlockLoRaHwConfig)` | See the `RAK3401_RAK13300` example for a custom hardware configuration. |
+
+### LoRa P2P: initialization and events
+
+| SX126x-Arduino | WisBlockLoRaWAN | Comment |
+| --- | --- | --- |
+| `lora_rak4630_init()` ... `Radio.Init(&RadioEvents)` | `lora.begin(); lora.setWorkMode(WISBLOCK_MODE_LORA_P2P);` | |
+| `RadioEvents.TxDone` | `lora.onP2PTxFinished(cb)` | `void cb(const WisBlockTxResult &result)`, with `result.success` and `result.airtimeMs`. |
+| `RadioEvents.RxDone(payload, size, rssi, snr)` | `lora.onP2PRxFinished(cb)` | `void cb(const WisBlockRxResult &result)`, with `result.data`, `result.length`, `result.rssi`, `result.snr`. `result.port` is 0 in P2P. |
+| `RadioEvents.RxTimeout` | `onP2PRxFinished` callback with `result.length == 0` | There is no separate timeout callback. |
+| `RadioEvents.TxTimeout` | `onP2PRxFinished` callback with `result.length == 0` | A TX that fails is reported the same way. A sketch that waits for `onP2PTxFinished` should also treat an empty RX result as "TX failed". |
+| `RadioEvents.RxError` | *not available* | **A packet with a CRC error is currently delivered to the RX callback like a good packet.** Check the content yourself (known message, own checksum). |
+| `RadioEvents.CadDone(bool)` | `lora.onP2PCadResult(cb)` | `void cb(WisBlockCADResult result)`: `WISBLOCK_CAD_CHANNEL_DETECTED` or `WISBLOCK_CAD_CHANNEL_CLEAR`. |
+| `RadioEvents.PreAmpDetect`, `FhssChangeChannel` | *not available* | |
+
+### LoRa P2P: radio functions
+
+| SX126x-Arduino | WisBlockLoRaWAN | Comment |
+| --- | --- | --- |
+| `Radio.Rx(timeoutMs)` | `lora.startP2PReceive(timeoutMs)` | `0` = continuous receive, as in SX126x-Arduino. After a timeout the RX callback is called with `length == 0`. |
+| `Radio.RxBoosted(timeoutMs)` | `lora.setP2PRxBoostedGain(true)` + `startP2PReceive()` | Boosted RX is a setting here (default on), not a separate call. |
+| `Radio.Send(buffer, size)` | `bool ok = lora.sendP2P(data, length)` | At most 255 bytes. Result in `onP2PTxFinished`. |
+| `Radio.Standby()` | `lora.stopP2PReceive()` | |
+| `Radio.Sleep()` | `lora.sleepRadio()` | The library wakes the radio and reconfigures it by itself on the next RX, TX or CAD. |
+| `Radio.StartCad()` | `lora.startP2PCad()` | Result in `onP2PCadResult`. The CAD parameters are fixed. |
+| `Radio.SetCadParams()` | *not available* | |
+| `Radio.IsChannelFree()` | `lora.setP2PCad(true)` | Listen-before-talk: a CAD runs before every `sendP2P()`. |
+| `Radio.SetRxDutyCycle(rx, sleep)` | `lora.startP2PReceiveDutyCycle(rxTimeMs, sleepTimeMs)` | `computeP2PRxDutyCycleTiming()` calculates matching times for a given transmitter preamble length. |
+| `Radio.SetPublicNetwork(true / false)` | `lora.setP2PSyncWord(0x3444 / 0x1424)` | The default is `0x1424` (private). |
+| `Radio.SetCustomSyncWord(word)` | `lora.setP2PSyncWord(word)` | 16 bit value. |
+| `Radio.GetSyncWord()` | `lora.getP2PSettings().syncWord` | |
+| `Radio.TimeOnAir()` | `result.airtimeMs` in `onP2PTxFinished` | Reported after the TX, there is no call to calculate it in advance. |
+| `Radio.Rssi()` | *not available* | The RSSI and SNR of each received packet are in the RX result. |
+| `Radio.Random()`, `CheckRfFrequency()`, `SetMaxPayloadLength()`, `SetTxContinuousWave()`, `Write()` / `Read()` | *not available* | |
+| `Radio.IrqProcess()`, `Radio.BgIrqProcess()` | `lora.handleEvents()` in `loop()`, or `lora.enableBackgroundTask()` | |
+| `Radio.ReInit()`, `Radio.IrqProcessAfterDeepSleep()` | *not available* | Deep sleep wake-up handling of SX126x-Arduino has no counterpart. |
+
+### LoRa P2P: SetTxConfig() / SetRxConfig() parameters
+
+| Parameter | WisBlockLoRaWAN | Comment |
+| --- | --- | --- |
+| `modem` | - | LoRa only, no FSK. |
+| `power` [dBm] | `setP2PTxPower(dbm)` | Limited to -9 ... 22 dBm. |
+| `bandwidth` | `setP2PBandwidth(WisBlockP2PBandwidth)` | **Same index numbers as SX126x-Arduino** (0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 62.5 kHz ... 9 = 7.81 kHz), also as `WISBLOCK_BW_125` ... `WISBLOCK_BW_007`. The `AT+PBW` command and the `<bw>` field of `AT+P2P` use the RUI3 numbering instead, see the [AT command manual](WisBlockLoRaWAN-AT-Commands.md). |
+| `datarate` (spreading factor) | `setP2PSpreadingFactor(sf)` | The library does not check the range, use 7 ... 12. `AT+PSF` accepts 6 ... 12. |
+| `coderate` | `setP2PCodingRate(WisBlockP2PCodingRate)` | **Same numbers as SX126x-Arduino** (1 = 4/5 ... 4 = 4/8), also as `WISBLOCK_CR_4_5` ... `WISBLOCK_CR_4_8`. `AT+PCR` counts from 0. |
+| `preambleLen` | `setP2PPreambleLength(symbols)` | |
+| `iqInverted` | `setP2PIqInversion(bool)` | Applied to TX and RX. |
+| `fixLen`, `payloadLen` | - | Always variable length (explicit header). |
+| `crcOn` | - | Always on. |
+| `freqHopOn`, `hopPeriod` | - | Not available. |
+| `symbTimeout`, `rxContinuous` | `startP2PReceive(timeoutMs)` | `0` = continuous, any other value = single RX with that timeout. |
+| `timeout` (TX) | - | Handled by the library. |
+| `bandwidthAfc`, `fdev` | - | FSK only, not available. |
+| `SetChannel(freq)` | `setP2PFrequency(hz)` | |
+
+### LoRaWAN (from SX126x-Arduino)
+
+| SX126x-Arduino | WisBlockLoRaWAN | Comment |
+| --- | --- | --- |
+| `lmh_init(&callbacks, params, otaa, class, region)` | `lora.begin(); lora.setWorkMode(WISBLOCK_MODE_LORAWAN);` and the setters below | There is no single init call with a parameter struct. |
+| `otaa` (`true` / `false`) | `lora.setJoinMode(WISBLOCK_JOIN_OTAA / WISBLOCK_JOIN_ABP)` | |
+| `region` (`LORAMAC_REGION_xxx`) | `lora.setRegion(WISBLOCK_RUI3_BAND_xxx)` | RUI3 band numbering. `LORAMAC_REGION_AS923` + `lmh_setAS923Version()` become `WISBLOCK_RUI3_BAND_AS923_1` ... `_4`. `LORAMAC_REGION_CN779` and LA915 are not supported. |
+| `lmh_setSubBandChannels(n)` | `lora.setChannelMask(1 << (n - 1))` | Sub-band `n` of US915 / AU915 / CN470. `0` = all channels. |
+| `nodeClass` / `lmh_class_request(c)` | `lora.setDeviceClass(WISBLOCK_CLASS_A / _B / _C)` | Returns `false` while the device is not joined, and is applied automatically after the join. |
+| `lmh_setDevEui()`, `lmh_setAppEui()`, `lmh_setAppKey()` | `lora.setOTAAKeys(devEui, joinEui, appKey)` | One call for all three. `AppEUI` is called `joinEui`. Both libraries take the arrays in the order the network server shows them (most significant byte first), so existing arrays can be reused. |
+| `lmh_setDevAddr()`, `lmh_setNwkSKey()`, `lmh_setAppSKey()` | `lora.setABPKeys(devAddr, nwkSKey, appSKey)` | |
+| `lmh_param_t.adr_enable`, `tx_data_rate` | `lora.setADR(bool)`, `lora.setDataRate(dr)` | Return `false` while not joined, applied automatically after the join. |
+| `lmh_param_t.tx_power` | `lora.setTxPower(index)` | Index, region specific. |
+| `lmh_param_t.nb_trials` | `lora.setMaxJoinAttempts(n)` | `0` = retry forever. `lora.setJoinReattemptInterval(seconds)` sets the pause between attempts. |
+| `lmh_param_t.enable_public_network`, `duty_cycle` | *not available* | Handled by LoRa Basics Modem. |
+| `lmh_join()` | `lora.join()` | Asynchronous. `lora.setAutoJoin(true)` joins automatically at start. |
+| `lmh_join_status_get()` | `lora.isJoined()`, `lora.joinState()` | |
+| `lmh_send(&data, LMH_CONFIRMED_MSG / LMH_UNCONFIRMED_MSG)` | `lora.setConfirmedUplinks(bool)`, then `lora.sendLoRaWAN(port, data, length)` | Confirmed or not is a setting, not a parameter of the send call. |
+| `lmh_send_blocking()` | *not available* | Wait for `onLoRaWANTxFinished`. |
+| `lmh_setConfRetries()`, `lmh_setSingleChannelGateway()`, `lmh_reset_mac()` | *not available* | |
+| `lmh_datarate_set(dr, adr)` | `lora.setDataRate(dr)`, `lora.setADR(adr)` | |
+| `lmh_getDevAddr()` | `lora.getDevAddr()` | |
+| `callbacks.lmh_has_joined` | `lora.onJoinSuccess(cb)` | `void cb()` |
+| `callbacks.lmh_has_joined_failed` | `lora.onJoinFailed(cb)` | `void cb()`. The library retries by itself. |
+| `callbacks.lmh_RxData(&data)` | `lora.onLoRaWANRxFinished(cb)` | `void cb(const WisBlockRxResult &result)`: `result.port`, `result.data`, `result.length`, `result.rssi`, `result.snr`. |
+| `callbacks.lmh_unconf_finished` | `lora.onLoRaWANTxFinished(cb)` | `void cb(const WisBlockTxResult &result)`: `result.success` is true when the uplink was sent, `result.airtimeMs` is its airtime. |
+| `callbacks.lmh_conf_result(bool)` | *not available* | `onLoRaWANTxFinished` is also called for confirmed uplinks, but `result.success` only says that the frame was sent, not that the network acknowledged it. |
+| `callbacks.lmh_ConfirmClass` | *not available* | `setDeviceClass()` returns whether the request was accepted. |
+| `callbacks.BoardGetBatteryLevel`, `BoardGetUniqueId`, `BoardGetRandomSeed` | *not needed* | Not used by LoRa Basics Modem. |
+
+### Example
+
+SX126x-Arduino:
+
+```cpp
+lora_rak4630_init();
+RadioEvents.TxDone = OnTxDone;
+RadioEvents.RxDone = OnRxDone;
+RadioEvents.RxTimeout = OnRxTimeout;
+Radio.Init(&RadioEvents);
+Radio.SetChannel(868300000);
+Radio.SetTxConfig(MODEM_LORA, 14, 0, 0, 7, 1, 8, false, true, 0, 0, false, 3000);
+Radio.SetRxConfig(MODEM_LORA, 0, 7, 1, 0, 8, 0, false, 0, true, 0, 0, false, true);
+Radio.Rx(0);
+...
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) { ... }
+```
+
+WisBlockLoRaWAN:
+
+```cpp
+lora.begin();
+lora.setWorkMode(WISBLOCK_MODE_LORA_P2P);
+lora.setP2PFrequency(868300000);
+lora.setP2PTxPower(14);
+lora.setP2PBandwidth(WISBLOCK_BW_125);   // same index as before: 0
+lora.setP2PSpreadingFactor(7);
+lora.setP2PCodingRate(WISBLOCK_CR_4_5);  // same index as before: 1
+lora.setP2PPreambleLength(8);
+lora.setP2PIqInversion(false);
+lora.setP2PSyncWord(0x1424);             // private network, the default
+lora.onP2PTxFinished(onTxDone);
+lora.onP2PRxFinished(onRxDone);          // RX timeout and failed TX: result.length == 0
+lora.startP2PReceive(0);
+...
+void onRxDone(const WisBlockRxResult &result) { ... result.data, result.length ... }
+```
+
+Set all parameters, including IQ inversion and the sync word, in the sketch (or check them with [hasValidConfig()](#hasvalidconfig)). A value stored in flash earlier stays active if the sketch does not set it.
+
 ## Quick Start
 
 ```cpp
@@ -752,6 +892,22 @@ SX1262 boosted RX gain. Default `true`.
 
 ```cpp
 bool rxBoostedGainEnabled
+```
+
+#### iqInversion
+
+Inverts the IQ signals on TX and RX. Both ends of a link must match. Default `false`. Set with `setP2PIqInversion()` or `AT+IQINVER`.
+
+```cpp
+bool iqInversion
+```
+
+#### syncWord
+
+16 bit LoRa sync word. `0x1424` private (default), `0x3444` public (LoRaWAN). Both ends of a link must match. Set with `setP2PSyncWord()` or `AT+SYNCWORD`.
+
+```cpp
+uint16_t syncWord
 ```
 
 ### WisBlockPersistedConfig
@@ -2304,6 +2460,32 @@ lora.setP2PRxBoostedGain(false);
 | **Function** | `void setP2PRxBoostedGain(bool enabled)` |
 | **Parameters** | **enabled** - TRUE or FALSE |
 
+### setP2PIqInversion()
+
+Inverts the IQ signals for transmit and receive. Both sides of a P2P link must use the same setting. Default is off. Applied to the radio immediately.
+
+```cpp
+lora.setP2PIqInversion(true);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setP2PIqInversion(bool enabled)` |
+| **Parameters** | **enabled** - TRUE or FALSE |
+
+### setP2PSyncWord()
+
+Sets the 16 bit LoRa sync word. `0x1424` is the private sync word (default), `0x3444` the public one used by LoRaWAN. Both sides of a P2P link must use the same value. Applied to the radio immediately.
+
+```cpp
+lora.setP2PSyncWord(0x3444);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setP2PSyncWord(uint16_t syncWord)` |
+| **Parameters** | **syncWord** - 16 bit sync word, for example `0x1424` or `0x3444` |
+
 ### getP2PSettings()
 
 Returns the P2P settings that are applied to the radio.
@@ -2559,7 +2741,7 @@ lora.onP2PCadResult(callback);
 
 ## Configuration Storage
 
-The configuration is stored in the flash of the MCU with a magic number, a version and a CRC. A missing or invalid configuration (first boot, changed library version) is replaced by the factory defaults. There are two slots: the regular **user** slot and a separate **factory** slot.
+The configuration is stored in the flash of the MCU with a magic number, a version and a CRC. A missing or invalid configuration (first boot, changed library version) is replaced by the built-in default settings, [hasValidConfig()](#hasvalidconfig) tells which case applies. There are two slots: the regular **user** slot and a separate **factory** slot.
 
 ### saveConfig()
 
@@ -2622,6 +2804,40 @@ bool ok = lora.restoreFactoryDefaults();
 | **Function** | `bool restoreFactoryDefaults()` |
 | **Returns** | bool |
 | **Return Values** | **TRUE** loaded<br/>**FALSE** no factory slot saved, configuration untouched |
+
+### hasValidConfig()
+
+Tells whether the library runs on a **valid saved configuration** or on its built-in defaults. Call it after `begin()` to let the application decide whether it has to set up the configuration or can use the stored one, for example on a new device or one that was erased.
+
+```cpp
+lora.begin();
+if (!lora.hasValidConfig())
+{
+  // First start of a new or erased device: set everything up once and keep it
+  lora.setWorkMode(WISBLOCK_MODE_LORA_P2P);
+  lora.setP2PFrequency(868300000);
+  lora.setP2PSpreadingFactor(7);
+  // ...
+  lora.saveConfig();
+}
+// Callbacks, join() or startP2PReceive() are never stored, they are needed after every boot
+lora.onP2PRxFinished(onRxDone);
+lora.startP2PReceive(0);
+```
+
+| | |
+| --- | --- |
+| **Function** | `bool hasValidConfig() const` |
+| **Returns** | bool |
+| **Return Values** | **TRUE** a valid saved configuration was loaded by `begin()` (or has been saved since)<br/>**FALSE** the library runs on the built-in defaults |
+
+## _💡 NOTE_
+----
+- _FALSE after `begin()` means: nothing was ever saved (new device or erased flash), the stored data is damaged, or it was written by an incompatible library version. A normal firmware upload typically keeps the stored configuration, so FALSE is not expected after a plain re-flash._
+- _The value follows the user slot: a successful `saveConfig()` or `restoreFactoryDefaults()` makes it TRUE, `restoreConfig()` sets it to what it returns. Changing a setting does not change it._
+- _It only says that a valid configuration exists. It does not say that the content is complete, for example that the OTAA keys were set. If the application needs that, check `lora.getConfig()` as well._
+
+----
 
 ### getConfig()
 
