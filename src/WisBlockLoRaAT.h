@@ -26,6 +26,11 @@ enum WisBlockAtStatus
 	WISBLOCK_AT_PARAM_ERROR,
 };
 
+/**
+ * @brief AT command interface of the library
+ *
+ * Reads AT commands from a serial port and runs them on the WisBlockLoRaWAN object. Commands follow the RUI3 AT command set, see WisBlockLoRaWAN-AT-Commands.md. Applications can add their own ATC+ commands.
+ */
 class WisBlockLoRaAT
 {
 public:
@@ -59,16 +64,35 @@ public:
 	 */
 	using CustomAtHandler = WisBlockAtStatus (*)(Stream &port, const char *cmd, char *args);
 
-	/** `lora` must already have had begin() called. `port` is the Serial/UART used for AT I/O. */
+	/**
+	 * @brief Connect the AT parser to the library and a serial port
+	 *
+	 * `lora` must already have had begin() called. `port` is the Serial/UART used for AT I/O.
+	 *
+	 * @param lora Library object, begin() must have been called
+	 * @param port Serial port used for the AT commands
+	 */
 	void begin(WisBlockLoRaWAN &lora, Stream &port);
 
-	/** Call every loop(); reads available bytes, parses complete lines terminated by \r or \n. */
+	/**
+	 * @brief Read the serial port and execute the received AT commands
+	 *
+	 * Call every loop(); reads available bytes, parses complete lines terminated by CR or LF.
+	 */
 	void handleSerial();
 
-	/** Parses and executes a single, already-complete command line (no CR/LF). Returns the response text. */
+	/**
+	 * @brief Parse and execute one complete command line
+	 *
+	 * Parses and executes a single, already-complete command line (no CR/LF). Returns the response text.
+	 *
+	 * @param line Command line without CR/LF
+	 */
 	void processLine(const char *line);
 
 	/**
+	 * @brief Register a handler for lines that are not AT commands
+	 *
 	 * Registers a callback for lines that aren't one of this library's own
 	 * AT commands (don't start with "AT") - lets the application handle
 	 * its own custom serial protocol on the same port without it being
@@ -76,6 +100,8 @@ public:
 	 * command this library recognizes still get the usual
 	 * "ERROR: unknown command" reply, on the assumption a near-miss "AT..."
 	 * line was meant for this parser, just malformed/unsupported.
+	 *
+	 * @param cb Function called with every line that does not start with AT
 	 */
 	void onUnhandledData(UnhandledDataCb cb) { unhandledDataCb = cb; }
 
@@ -83,6 +109,8 @@ public:
 	static const uint8_t MAX_CUSTOM_AT_COMMANDS = 16;
 
 	/**
+	 * @brief Register an application specific AT command (ATC+NAME)
+	 *
 	 * Registers a custom "ATC+<CMD>" AT command - the same idea as RUI3's
 	 * api.system.atMode.add() (see RAKSystem.h), letting application code
 	 * add its own AT commands to this parser instead of (ab)using
@@ -101,6 +129,11 @@ public:
 	 * Returns false if `cmd` or `handler` is null, `cmd` is empty, the
 	 * MAX_CUSTOM_AT_COMMANDS table is already full, or `cmd` is already
 	 * registered.
+	 *
+	 * @param cmd Command name without the ATC+ prefix
+	 * @param usage Help text for the command
+	 * @param handler Function that executes the command
+	 * @return true if the command was registered
 	 */
 	bool addCustomATCommand(const char *cmd, const char *usage, CustomAtHandler handler);
 
@@ -110,6 +143,8 @@ public:
 	typedef void (*RxWakeCallback)(void);
 
 	/**
+	 * @brief Register the function that is called when USB data arrives
+	 *
 	 * Registers a function that is called whenever USB CDC RX data arrives.
 	 * Call it BEFORE enableBackgroundRx(). The callback runs in the USB
 	 * driver's task (or TinyUSB task) context, so it must be short and
@@ -120,10 +155,14 @@ public:
 	 *
 	 * Required on ESP32 (RAK3312/RAK3112); optional on nRF52 (without it,
 	 * commands are processed directly in the TinyUSB callback).
+	 *
+	 * @param cb Function called in the USB driver context, it must only set a flag or wake up a task
 	 */
 	void setRxWakeCallback(RxWakeCallback cb);
 
 	/**
+	 * @brief Hook the USB receive notification of the serial port
+	 *
 	 * Hooks the USB CDC RX notification of the physical USB CDC Serial
 	 * (TinyUSB's tud_cdc_rx_cb on RAK4631, the native USB CDC RX event on
 	 * RAK3312). `port` (passed to begin()) must be that Serial.
@@ -142,10 +181,14 @@ public:
 	 * Not available on RAK11310 (RP2040) - handleSerial() polling remains
 	 * the only option there. Returns false if unsupported on this
 	 * platform/build, or on ESP32 if no wake callback was registered.
+	 *
+	 * @return true if the hook is installed
 	 */
 	bool enableBackgroundRx();
 
 	/**
+	 * @brief Called from the USB receive callback when data arrives
+	 *
 	 * Called by the platform-specific USB CDC RX callback (tud_cdc_rx_cb on
 	 * RAK4631, the ARDUINO_HW_CDC_EVENTS handler on RAK3312) - public
 	 * because those are free functions outside this class, not because
@@ -153,11 +196,15 @@ public:
 	 */
 	static void onBackgroundRxData();
 
-	// Shared byte-accumulation logic: reads everything currently available
-	// from `port` and feeds it into the line buffer, dispatching
-	// processLine() on each complete line. Used by both handleSerial()
-	// (loop()-polled) and the background RX path (called from the USB CDC
-	// RX callback instead).
+	/**
+	 * @brief Read all available bytes and execute every complete line
+	 *
+	 * Shared byte-accumulation logic: reads everything currently available
+	 * from `port` and feeds it into the line buffer, dispatching
+	 * processLine() on each complete line. Used by both handleSerial()
+	 * (loop()-polled) and the background RX path (called from the USB CDC
+	 * RX callback instead).
+	 */
 	void processIncomingBytes();
 
 private:
@@ -201,82 +248,464 @@ private:
 	UnhandledDataCb unhandledDataCb = nullptr;
 	bool backgroundRxActive = false;
 
+	/**
+	 * @brief Send a text line followed by OK
+	 *
+	 * @param msg Text to send
+	 */
 	void reply(const char *msg);
+	/**
+	 * @brief Send the OK reply
+	 */
 	void replyOk();
+	/**
+	 * @brief Send an error reply
+	 *
+	 * @param reason Error token (AT_ERROR, AT_PARAM_ERROR) or an explanation that is followed by AT_ERROR
+	 */
 	void replyError(const char *reason = nullptr);
+	/**
+	 * @brief Print the mode and the settings of the active mode
+	 */
 	void handleStatusQuery();
 
-	// Looks up a "ATC+<CMD>..." line's command name against customCommands[]
-	// and, on a match, calls its handler and replies OK/AT_ERROR/
-	// AT_PARAM_ERROR accordingly. Returns false (no reply sent) if no
-	// custom command matches `cmd`, so the caller can fall back to the
-	// usual "unknown command" reply.
+	/**
+	 * @brief Run a registered ATC+ command
+	 *
+	 * Looks up a "ATC+<CMD>..." line's command name against customCommands[]
+	 * and, on a match, calls its handler and replies OK/AT_ERROR/
+	 * AT_PARAM_ERROR accordingly. Returns false (no reply sent) if no
+	 * custom command matches `cmd`, so the caller can fall back to the
+	 * usual "unknown command" reply.
+	 *
+	 * @param cmd Complete upper case command, e.g. ATC+LED
+	 * @param op Operation (query, write or run)
+	 * @param value Text after the '='
+	 * @return true if a registered command handled the line
+	 */
 	bool dispatchCustomCommand(const char *cmd, AtOp op, char *value);
 
+	/**
+	 * @brief Convert a hex string to bytes
+	 *
+	 * @param hex Hex string, exactly 2 characters per byte
+	 * @param out Receives the bytes
+	 * @param outLen Number of bytes expected
+	 * @return true if the string was valid
+	 */
 	static bool parseHex(const char *hex, uint8_t *out, size_t outLen);
 
 	// --- Built-in AT command handlers -------------------------------------
-	// One method per command name in atCommandTable[] (a get/set pair - e.g.
-	// "AT+NWM=?" and "AT+NWM=1" - is one handler, not two), each replicating
-	// exactly what its old if/else-if branch(es) in processLine() used to
-	// do. `value` is only meaningful when op == AtOp::Write; null otherwise.
+	/**
+	 * @brief Handler for AT+NWM (LoRa network work mode)
+	 *
+	 * One method per command name in atCommandTable[] (a get/set pair - e.g.
+	 * "AT+NWM=?" and "AT+NWM=1" - is one handler, not two), each replicating
+	 * exactly what its old if/else-if branch(es) in processLine() used to
+	 * do. `value` is only meaningful when op == AtOp::Write; null otherwise.
+	 *
+	 * @param op Operation: query (AT+NWM=?), write (AT+NWM=value) or run (AT+NWM)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atNwm(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+DEVEUI (Device EUI)
+	 *
+	 * @param op Operation: query (AT+DEVEUI=?), write (AT+DEVEUI=value) or run (AT+DEVEUI)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atDevEui(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+APPEUI (Application identifier (JoinEUI))
+	 *
+	 * @param op Operation: query (AT+APPEUI=?), write (AT+APPEUI=value) or run (AT+APPEUI)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAppEui(AtOp op, const char *value); // also serves the "+JOINEUI" alias row
+	/**
+	 * @brief Handler for AT+APPKEY (Application key)
+	 *
+	 * @param op Operation: query (AT+APPKEY=?), write (AT+APPKEY=value) or run (AT+APPKEY)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAppKey(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+DEVADDR (Device address)
+	 *
+	 * @param op Operation: query (AT+DEVADDR=?), write (AT+DEVADDR=value) or run (AT+DEVADDR)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atDevAddr(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+NWKSKEY (Network session key)
+	 *
+	 * @param op Operation: query (AT+NWKSKEY=?), write (AT+NWKSKEY=value) or run (AT+NWKSKEY)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atNwkSKey(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+APPSKEY (Application session key)
+	 *
+	 * @param op Operation: query (AT+APPSKEY=?), write (AT+APPSKEY=value) or run (AT+APPSKEY)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAppSKey(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+BAND (Active region)
+	 *
+	 * @param op Operation: query (AT+BAND=?), write (AT+BAND=value) or run (AT+BAND)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atBand(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+MASK (Set the channel mask, close or open the channel)
+	 *
+	 * @param op Operation: query (AT+MASK=?), write (AT+MASK=value) or run (AT+MASK)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atMask(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LBT (LoRaWAN "Listen Before Talk" (LBT))
+	 *
+	 * @param op Operation: query (AT+LBT=?), write (AT+LBT=value) or run (AT+LBT)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLbt(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LBTRSSI (LoRaWAN "Listen Before Talk" RSSI (LBTRSSI))
+	 *
+	 * @param op Operation: query (AT+LBTRSSI=?), write (AT+LBTRSSI=value) or run (AT+LBTRSSI)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLbtRssi(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LBTSCANTIME (LoRaWAN "Listen Before Talk" Scantime (LBTSCANTIME))
+	 *
+	 * @param op Operation: query (AT+LBTSCANTIME=?), write (AT+LBTSCANTIME=value) or run (AT+LBTSCANTIME)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLbtScanTime(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PGSLOT (Periodicity)
+	 *
+	 * @param op Operation: query (AT+PGSLOT=?), write (AT+PGSLOT=value) or run (AT+PGSLOT)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPgSlot(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+BFREQ (Beacon frequency)
+	 *
+	 * @param op Operation: query (AT+BFREQ=?), write (AT+BFREQ=value) or run (AT+BFREQ)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atBFreq(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+BTIME (Beacon time)
+	 *
+	 * @param op Operation: query (AT+BTIME=?), write (AT+BTIME=value) or run (AT+BTIME)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atBTime(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+DR (Data rate)
+	 *
+	 * @param op Operation: query (AT+DR=?), write (AT+DR=value) or run (AT+DR)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atDr(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+CLASS (LoRa Class)
+	 *
+	 * @param op Operation: query (AT+CLASS=?), write (AT+CLASS=value) or run (AT+CLASS)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atClass(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+NJM (Network join mode)
+	 *
+	 * @param op Operation: query (AT+NJM=?), write (AT+NJM=value) or run (AT+NJM)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atNjm(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+JOIN (Join LoRaWAN Network)
+	 *
+	 * @param op Operation: query (AT+JOIN=?), write (AT+JOIN=value) or run (AT+JOIN)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atJoin(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+NJS (Network join status)
+	 *
+	 * @param op Operation: query (AT+NJS=?), write (AT+NJS=value) or run (AT+NJS)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atNjs(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+ADR (Adaptive Rate)
+	 *
+	 * @param op Operation: query (AT+ADR=?), write (AT+ADR=value) or run (AT+ADR)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAdr(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+TXP (Transmit power)
+	 *
+	 * @param op Operation: query (AT+TXP=?), write (AT+TXP=value) or run (AT+TXP)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atTxp(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+CFM (Confirm mode)
+	 *
+	 * @param op Operation: query (AT+CFM=?), write (AT+CFM=value) or run (AT+CFM)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atCfm(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+FPENDING (Fetch pending downlinks)
+	 *
+	 * @param op Operation: query (AT+FPENDING=?), write (AT+FPENDING=value) or run (AT+FPENDING)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atFPending(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+SEND (Send data)
+	 *
+	 * @param op Operation: query (AT+SEND=?), write (AT+SEND=value) or run (AT+SEND)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atSend(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LINKCHECK (Verify network link status)
+	 *
+	 * @param op Operation: query (AT+LINKCHECK=?), write (AT+LINKCHECK=value) or run (AT+LINKCHECK)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLinkCheck(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+TIMEREQ (Time request)
+	 *
+	 * @param op Operation: query (AT+TIMEREQ=?), write (AT+TIMEREQ=value) or run (AT+TIMEREQ)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atTimeReq(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+P2P (LoRa P2P radio parameters)
+	 *
+	 * @param op Operation: query (AT+P2P=?), write (AT+P2P=value) or run (AT+P2P)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atP2p(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+CAD (Channel Activity Detection before send)
+	 *
+	 * @param op Operation: query (AT+CAD=?), write (AT+CAD=value) or run (AT+CAD)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atCad(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+RXBOOST (RX boosted gain)
+	 *
+	 * @param op Operation: query (AT+RXBOOST=?), write (AT+RXBOOST=value) or run (AT+RXBOOST)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atRxBoost(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PFREQ (P2P mode frequency)
+	 *
+	 * @param op Operation: query (AT+PFREQ=?), write (AT+PFREQ=value) or run (AT+PFREQ)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPFreq(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PSF (P2P mode spreading factor)
+	 *
+	 * @param op Operation: query (AT+PSF=?), write (AT+PSF=value) or run (AT+PSF)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPSf(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PBW (P2P mode bandwidth)
+	 *
+	 * @param op Operation: query (AT+PBW=?), write (AT+PBW=value) or run (AT+PBW)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPBw(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PCR (P2P mode coding rate)
+	 *
+	 * @param op Operation: query (AT+PCR=?), write (AT+PCR=value) or run (AT+PCR)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPCr(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PPL (P2P mode preamble length)
+	 *
+	 * @param op Operation: query (AT+PPL=?), write (AT+PPL=value) or run (AT+PPL)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPPl(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PTP (P2P mode TX power)
+	 *
+	 * @param op Operation: query (AT+PTP=?), write (AT+PTP=value) or run (AT+PTP)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPTp(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+IQINVER (P2P IQ inversion)
+	 *
+	 * @param op Operation: query (AT+IQINVER=?), write (AT+IQINVER=value) or run (AT+IQINVER)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atIqInver(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+SYNCWORD (P2P sync word)
+	 *
+	 * @param op Operation: query (AT+SYNCWORD=?), write (AT+SYNCWORD=value) or run (AT+SYNCWORD)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atSyncWord(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PSEND (P2P send data)
+	 *
+	 * @param op Operation: query (AT+PSEND=?), write (AT+PSEND=value) or run (AT+PSEND)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPSend(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PRECV (P2P receive)
+	 *
+	 * @param op Operation: query (AT+PRECV=?), write (AT+PRECV=value) or run (AT+PRECV)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPRecv(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PRECVDC (P2P receive with hardware duty cycle)
+	 *
+	 * @param op Operation: query (AT+PRECVDC=?), write (AT+PRECVDC=value) or run (AT+PRECVDC)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atPRecvDc(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LOWPOWER (Low power flag)
+	 *
+	 * @param op Operation: query (AT+LOWPOWER=?), write (AT+LOWPOWER=value) or run (AT+LOWPOWER)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLowPower(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+SAVE (Save configuration)
+	 *
+	 * @param op Operation: query (AT+SAVE=?), write (AT+SAVE=value) or run (AT+SAVE)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atSave(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+RESTORE (Restore saved configuration)
+	 *
+	 * @param op Operation: query (AT+RESTORE=?), write (AT+RESTORE=value) or run (AT+RESTORE)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atRestore(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+FACTORY (Save factory backup)
+	 *
+	 * @param op Operation: query (AT+FACTORY=?), write (AT+FACTORY=value) or run (AT+FACTORY)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atFactory(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+STATUS (Status dump)
+	 *
+	 * @param op Operation: query (AT+STATUS=?), write (AT+STATUS=value) or run (AT+STATUS)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atStatus(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+HWMODEL (The string of the hardware model)
+	 *
+	 * @param op Operation: query (AT+HWMODEL=?), write (AT+HWMODEL=value) or run (AT+HWMODEL)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atHwModel(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+HWID (The string of the hardware ID)
+	 *
+	 * @param op Operation: query (AT+HWID=?), write (AT+HWID=value) or run (AT+HWID)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atHwId(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+SN (Serial number)
+	 *
+	 * @param op Operation: query (AT+SN=?), write (AT+SN=value) or run (AT+SN)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atSn(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+VER (Version of the firmware)
+	 *
+	 * @param op Operation: query (AT+VER=?), write (AT+VER=value) or run (AT+VER)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atVer(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+ALIAS (Alias name of the device)
+	 *
+	 * @param op Operation: query (AT+ALIAS=?), write (AT+ALIAS=value) or run (AT+ALIAS)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAlias(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+FIRMWAREVER (Free-form firmware version label)
+	 *
+	 * @param op Operation: query (AT+FIRMWAREVER=?), write (AT+FIRMWAREVER=value) or run (AT+FIRMWAREVER)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atFirmwareVer(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+ADDMULC (Add multicast group)
+	 *
+	 * @param op Operation: query (AT+ADDMULC=?), write (AT+ADDMULC=value) or run (AT+ADDMULC)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atAddMulc(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+RMVMULC (Remove multicast group)
+	 *
+	 * @param op Operation: query (AT+RMVMULC=?), write (AT+RMVMULC=value) or run (AT+RMVMULC)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atRmvMulc(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+LSTMULC (Multicast list)
+	 *
+	 * @param op Operation: query (AT+LSTMULC=?), write (AT+LSTMULC=value) or run (AT+LSTMULC)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atLstMulc(AtOp op, const char *value);
+	/**
+	 * @brief Handler for ATZ (MCU Reset)
+	 *
+	 * @param op Operation: query (ATZ=?), write (ATZ=value) or run (ATZ)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atZ(AtOp op, const char *value);
+	/**
+	 * @brief Handler for ATR (Restore factory defaults)
+	 *
+	 * @param op Operation: query (ATR=?), write (ATR=value) or run (ATR)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atR(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+BOOT (Bootloader mode)
+	 *
+	 * @param op Operation: query (AT+BOOT=?), write (AT+BOOT=value) or run (AT+BOOT)
+	 * @param value Text after the '=' (null for query and run)
+	 */
 	void atBoot(AtOp op, const char *value);
 
 	// The USB CDC RX callbacks are plain C-style hooks (TinyUSB/ESP32 core

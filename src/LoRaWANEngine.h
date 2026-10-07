@@ -24,10 +24,22 @@ public:
 	using TimeRequestCb = void (*)(bool success, const WisBlockTimeAnswer &);
 	using LinkCheckCb = void (*)(bool success, const WisBlockLinkCheckResult &);
 
+	/**
+	 * @brief Start the LoRaWAN engine
+	 *
+	 * @param settings LoRaWAN settings to apply
+	 */
 	void begin(const WisBlockLoRaWANSettings &settings);
+	/**
+	 * @brief Apply new LoRaWAN settings to the running engine
+	 *
+	 * @param settings LoRaWAN settings to apply
+	 */
 	void applySettings(const WisBlockLoRaWANSettings &settings);
 
 	/**
+	 * @brief Start a fresh join attempt cycle
+	 *
 	 * Starts a fresh join attempt cycle. Always resets the internal
 	 * attempt counter back to 0 (see setMaxJoinAttempts()'s doc comment) -
 	 * appropriate for an application- or user-triggered "join now", but
@@ -46,13 +58,27 @@ public:
 	 * doesn't reset the counter it's tracking against.
 	 */
 	void join();
-	/** RUI3's AT+JOIN=0:... ("stop joining"). See this method's implementation for what it
+	/**
+	 * @brief Stop a running join procedure
+	 *
+	 * RUI3's AT+JOIN=0:... ("stop joining"). See this method's implementation for what it
 	 * actually cancels - both an in-progress OTAA join and this library's own custom-interval
-	 * retry timer, if either is active. */
+	 * retry timer, if either is active.
+	 */
 	void stopJoin();
+	/**
+	 * @brief Check if the device is joined
+	 * @return true if joined
+	 */
 	bool isJoined() const;
+	/**
+	 * @brief Get the join state
+	 * @return Current join state
+	 */
 	WisBlockJoinState joinState() const;
 	/**
+	 * @brief Get the device address of the current session
+	 *
 	 * The device's own current network-assigned DevAddr - for OTAA, learned from the Join
 	 * Accept (not otherwise recoverable; see WisBlockOTAAKeys::appKey's doc comment for the
 	 * same write-only reasoning that also applies to the actual session keys derived
@@ -61,9 +87,13 @@ public:
 	 * whatever setABPKeys() configured, since that's a fixed input for ABP rather than
 	 * something the network assigns. Returns whatever was last configured for ABP (0 for a
 	 * not-yet-joined OTAA device - there's nothing to report yet) before a successful join.
+	 *
+	 * @return Device address
 	 */
 	uint32_t getDevAddr() const;
 	/**
+	 * @brief Enable or disable the automatic join at start
+	 *
 	 * RUI3-compatible AT+JOIN / api.lorawan.join parameters. See
 	 * WisBlockLoRaWANSettings' doc comments for the persisted fields these
 	 * setters write - all three are stored and take effect on the next
@@ -98,17 +128,44 @@ public:
 	 * on that aren't affected; checking joinState() from inside that
 	 * callback is how to tell whether this specific failure was the final
 	 * one.
+	 *
+	 * @param enabled true to join automatically
 	 */
 	void setAutoJoin(bool enabled) { settings.autoJoin = enabled; }
+	/**
+	 * @brief Check if the automatic join is enabled
+	 * @return true if enabled
+	 */
 	bool getAutoJoin() const { return settings.autoJoin; }
-	/** Clamped to RUI3's own valid range (7-255s) - a value outside it is clamped rather than
-	 * rejected, since "closest valid value" is more useful here than refusing the call outright. */
+	/**
+	 * @brief Set the pause between join attempts
+	 *
+	 * Clamped to RUI3's own valid range (7-255s) - a value outside it is clamped rather than
+	 * rejected, since "closest valid value" is more useful here than refusing the call outright.
+	 *
+	 * @param seconds Pause in seconds (7 - 255)
+	 */
 	void setJoinReattemptInterval(uint8_t seconds);
+	/**
+	 * @brief Get the pause between join attempts
+	 * @return Pause in seconds
+	 */
 	uint8_t getJoinReattemptInterval() const { return settings.joinReattemptIntervalS; }
+	/**
+	 * @brief Set the maximum number of join attempts
+	 *
+	 * @param attempts Number of attempts, 0 = retry forever
+	 */
 	void setMaxJoinAttempts(uint8_t attempts) { settings.maxJoinAttempts = attempts; }
+	/**
+	 * @brief Get the maximum number of join attempts
+	 * @return Number of attempts, 0 = retry forever
+	 */
 	uint8_t getMaxJoinAttempts() const { return settings.maxJoinAttempts; }
 
 	/**
+	 * @brief Queue an uplink
+	 *
 	 * Queues an uplink with LBM. Unlike a bare pass-through to
 	 * smtc_modem_request_uplink(), this refuses outright (returns false, no
 	 * LBM call made at all) only when a second send() arrives while one is
@@ -143,11 +200,25 @@ public:
 	 * could land during any of several several-second delays this feature
 	 * can introduce and be indistinguishable from a genuine double-send
 	 * race, dropped even though the application did nothing wrong.
+	 *
+	 * @param port LoRaWAN port (1 - 223)
+	 * @param data Payload
+	 * @param length Payload length in bytes
+	 * @param confirmed true for a confirmed uplink
+	 * @return true if the uplink was accepted
 	 */
 	bool send(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed);
 
+	/**
+	 * @brief Set the device class
+	 *
+	 * @param deviceClass Requested class (A, B or C)
+	 * @return true if the class was applied
+	 */
 	bool setDeviceClass(WisBlockDeviceClass deviceClass);
 	/**
+	 * @brief Select the sub-band (channel mask)
+	 *
 	 * Pre-selects a sub-band for regions with more channels than a typical 8-channel gateway
 	 * supports (US915, AU915, CN470, CN470_RP_1_0) - no effect elsewhere (EU868, AS923, ...).
 	 * Mirrors RUI3's AT+MASK / api.lorawan.mask: bit N (0-indexed) enables sub-band N+1 (8
@@ -162,10 +233,19 @@ public:
 	 * Safe to call before joining (in fact that's the intended use) - unlike setDeviceClass()/
 	 * setADR(), this does not require the device to already be joined, since it only affects
 	 * which channels this device itself considers when choosing one to transmit on.
+	 *
+	 * @param mask Channel mask, bit N enables sub-band N+1
+	 * @return true if the mask was accepted
 	 */
 	bool setChannelMask(uint16_t mask);
+	/**
+	 * @brief Get the channel mask
+	 * @return Current channel mask
+	 */
 	uint16_t getChannelMask() const;
 	/**
+	 * @brief Enable or disable listen before talk
+	 *
 	 * RUI3-compatible AT+LBT / AT+LBTRSSI / AT+LBTSCANTIME (support Korea, Japan). The
 	 * underlying Listen-Before-Talk mechanism itself (a sniff-before-transmit check on the
 	 * radio) is already fully implemented in the vendored LBM stack and needs nothing added
@@ -179,10 +259,19 @@ public:
 	 *
 	 * Safe to call before joining, like setChannelMask() - LBT is a local transmit-gating
 	 * decision this device makes for itself, not something that requires having joined first.
+	 *
+	 * @param enabled true to enable LBT
+	 * @return true if the setting was applied
 	 */
 	bool setLbtEnabled(bool enabled);
+	/**
+	 * @brief Check if listen before talk is enabled
+	 * @return true if enabled
+	 */
 	bool getLbtEnabled() const;
 	/**
+	 * @brief Set the LBT RSSI threshold
+	 *
 	 * FIX/finding worth knowing, not a bug: every region in this vendored LBM tree defines its
 	 * own "region-appropriate" LBT threshold constant (e.g. LBT_THRESHOLD_DBM_KR_920), but none
 	 * of them are ever actually read by anything in LBM itself (confirmed - no caller anywhere
@@ -199,14 +288,34 @@ public:
 	 * library doesn't expose - RUI3 doesn't either, so it stays at LBM's own default), so
 	 * changing one here reads the other back from LBM first rather than risking clobbering it
 	 * with a stale cached value.
+	 *
+	 * @param thresholdDbm RSSI threshold in dBm
+	 * @return true if the setting was applied
 	 */
 	bool setLbtThreshold(int16_t thresholdDbm);
+	/**
+	 * @brief Get the LBT RSSI threshold
+	 * @return Threshold in dBm
+	 */
 	int16_t getLbtThreshold() const;
-	/** Listen duration in ms before deciding a channel is clear - LBM's own generic default is
-	 * ~5ms. See setLbtThreshold()'s doc comment for why this and the threshold share one call. */
+	/**
+	 * @brief Set the LBT scan time
+	 *
+	 * Listen duration in ms before deciding a channel is clear - LBM's own generic default is
+	 * ~5ms. See setLbtThreshold()'s doc comment for why this and the threshold share one call.
+	 *
+	 * @param scanTimeMs Scan time in ms
+	 * @return true if the setting was applied
+	 */
 	bool setLbtScanTime(uint32_t scanTimeMs);
+	/**
+	 * @brief Get the LBT scan time
+	 * @return Scan time in ms
+	 */
 	uint32_t getLbtScanTime() const;
 	/**
+	 * @brief Enable or disable adaptive data rate
+	 *
 	 * FIX (root cause of a confirmed, reproducible bug: setADR(false) with
 	 * a fixed DR "silently" not taking effect - the frame's ADR bit stayed
 	 * 1, the network's own ADR engine kept issuing LinkADRReq, and the
@@ -238,15 +347,36 @@ public:
 	 * very likely succeed on its own with no application action needed -
 	 * but until it does, don't assume ADR is actually off just because
 	 * you called this.
+	 *
+	 * @param enabled true to enable ADR
+	 * @return true if the setting is active on the radio now
 	 */
 	bool setADR(bool enabled);
+	/**
+	 * @brief Set the TX power
+	 *
+	 * @param txPowerIndex TX power index, region specific
+	 */
 	void setTxPower(uint8_t txPowerIndex);
-	/** See setADR()'s doc comment - same underlying mechanism and same meaning for the return value. */
+	/**
+	 * @brief Set the data rate
+	 *
+	 * See setADR()'s doc comment - same underlying mechanism and same meaning for the return value.
+	 *
+	 * @param dataRate Data rate index, region specific
+	 * @return true if the data rate is active on the radio now
+	 */
 	bool setDataRate(uint8_t dataRate);
 
-	/** Requests link check; answer arrives later as an SMTC_MODEM_EVENT_LINK_CHECK event. */
+	/**
+	 * @brief Request a link check with the next uplink
+	 *
+	 * Requests link check; answer arrives later as an SMTC_MODEM_EVENT_LINK_CHECK event.
+	 */
 	void requestLinkCheck();
 	/**
+	 * @brief Get the last link check result
+	 *
 	 * Pull-style alternative to onLinkCheckAnswer(): fetches the most
 	 * recently received link check answer directly from LBM
 	 * (smtc_modem_get_lorawan_link_check_data), rather than waiting for the
@@ -254,9 +384,14 @@ public:
 	 * yet (LBM has nothing cached to return). Safe to call at any time,
 	 * not just right after a request - the value stays cached until the
 	 * next successful link check answer overwrites it.
+	 *
+	 * @param out Receives the result
+	 * @return true if a result is available
 	 */
 	bool getLinkCheckResult(WisBlockLinkCheckResult &out) const;
 	/**
+	 * @brief Set the link check mode
+	 *
 	 * RUI3-compatible AT+LINKCHECK mode: 0 = disabled, 1 = request a link
 	 * check on the very next uplink only (auto-reverts to 0 once that
 	 * uplink is queued), 2 = request one automatically on every uplink
@@ -264,17 +399,39 @@ public:
 	 * send() - see its doc comment - so it applies uniformly regardless of
 	 * whether the uplink was triggered via the AT layer or a direct
 	 * WisBlockLoRaWAN::sendLoRaWAN() call, matching RUI3's own behavior.
+	 *
+	 * @param mode 0 = off, 1 = once, 2 = with every uplink
 	 */
 	void setLinkCheckMode(uint8_t mode) { linkCheckMode = mode; }
+	/**
+	 * @brief Get the link check mode
+	 * @return Link check mode
+	 */
 	uint8_t getLinkCheckMode() const { return linkCheckMode; }
-	/** See WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment. Takes effect
-	 * immediately (just a locally-read behavior flag, not something pushed to LBM). */
+	/**
+	 * @brief Enable or disable automatic fetching of pending downlinks
+	 *
+	 * See WisBlockLoRaWANSettings::fetchPendingDownlinks's doc comment. Takes effect
+	 * immediately (just a locally-read behavior flag, not something pushed to LBM).
+	 *
+	 * @param enabled true to fetch automatically
+	 */
 	void setFetchPendingDownlinks(bool enabled) { settings.fetchPendingDownlinks = enabled; }
+	/**
+	 * @brief Check if pending downlinks are fetched automatically
+	 * @return true if enabled
+	 */
 	bool getFetchPendingDownlinks() const { return settings.fetchPendingDownlinks; }
-	/** Requests device time; answer arrives later as an SMTC_MODEM_EVENT_LORAWAN_MAC_TIME event. */
+	/**
+	 * @brief Request the network time with the next uplink
+	 *
+	 * Requests device time; answer arrives later as an SMTC_MODEM_EVENT_LORAWAN_MAC_TIME event.
+	 */
 	void requestDeviceTime();
 
 	/**
+	 * @brief Set the Class B ping slot periodicity
+	 *
 	 * RUI3-compatible AT+PGSLOT / Class B unicast ping slot periodicity, 0-7. Matches RUI3's own
 	 * numbering exactly (0 = ~1s period, 7 = 128s, the maximum) - LBM's own
 	 * smtc_modem_class_b_ping_slot_periodicity_t enum already uses this identical ordering, so
@@ -284,10 +441,19 @@ public:
 	 * scheduling downlinks for the old periodicity, breaking Class B reception rather than
 	 * just being a no-op. Values above 7 are clamped rather than rejected, matching this
 	 * library's convention elsewhere for simple numeric range setters.
+	 *
+	 * @param periodicity Periodicity (0 - 7)
+	 * @return true if the value was accepted
 	 */
 	bool setPingSlotPeriodicity(uint8_t periodicity);
+	/**
+	 * @brief Get the Class B ping slot periodicity
+	 * @return Periodicity (0 - 7)
+	 */
 	uint8_t getPingSlotPeriodicity() const;
 	/**
+	 * @brief Get the Class B beacon frequency and data rate
+	 *
 	 * RUI3-compatible AT+BFREQ (read-only): the data rate and frequency (Hz) of the next Class B
 	 * beacon reception opportunity for the current region. Resolved via
 	 * smtc_real_get_beacon_dr()/smtc_real_get_beacon_frequency() using the last valid received
@@ -295,14 +461,26 @@ public:
 	 * regions, e.g. US915/AU915, hop the beacon frequency over time; most others use one fixed
 	 * frequency and the reference instant doesn't change the answer). Returns 0/0 before any
 	 * beacon has ever been received.
+	 *
+	 * @param frequencyHz Receives the frequency in Hz
+	 * @param dr Receives the data rate
+	 * @return true if the values are available
 	 */
 	bool getBeaconFrequencyAndDr(uint32_t &frequencyHz, uint8_t &dr) const;
-	/** RUI3-compatible AT+BTIME (read-only): seconds since the GPS epoch, taken from the last
+	/**
+	 * @brief Get the time of the last Class B beacon
+	 *
+	 * RUI3-compatible AT+BTIME (read-only): seconds since the GPS epoch, taken from the last
 	 * valid received beacon's own embedded time field - not this device's local clock, and not
-	 * updated at all until at least one beacon has actually been received. 0 if none yet. */
+	 * updated at all until at least one beacon has actually been received. 0 if none yet.
+	 *
+	 * @return Seconds since the GPS epoch, 0 if no beacon was received
+	 */
 	uint32_t getBeaconTime() const;
 
 	/**
+	 * @brief Configure a multicast group
+	 *
 	 * RUI3-compatible AT+ADDMULC / api.lorawan.multicast.addGroup. Configures a LoRaWAN
 	 * multicast group and immediately starts its Class B or C RX session (RUI3's own
 	 * AT+ADDMULC bundles both steps into one call, rather than exposing LBM's underlying
@@ -327,39 +505,105 @@ public:
 	 * `groupId`/`deviceClass` are out of range, the device isn't already in `deviceClass`, or
 	 * LBM rejects the configuration (e.g. a crypto failure, or `frequencyHz`/`dataRate` not
 	 * valid for the current region).
+	 *
+	 * @param groupId Group ID
+	 * @param deviceClass Class B or C
+	 * @param devAddr Multicast address
+	 * @param nwkSKey Network session key, 16 bytes
+	 * @param appSKey Application session key, 16 bytes
+	 * @param frequencyHz Frequency in Hz
+	 * @param dataRate Data rate
+	 * @param periodicity Ping slot periodicity, Class B only
+	 * @return true if the group was configured
 	 */
 	bool setMulticastGroup( uint8_t groupId, WisBlockDeviceClass deviceClass, uint32_t devAddr,
 							 const uint8_t nwkSKey[16], const uint8_t appSKey[16], uint32_t frequencyHz,
 							 uint8_t dataRate, uint8_t periodicity = 0 );
-	/** RUI3-compatible AT+RMVMULC (by group ID rather than RUI3's own DevAddr - see
+	/**
+	 * @brief Remove a multicast group
+	 *
+	 * RUI3-compatible AT+RMVMULC (by group ID rather than RUI3's own DevAddr - see
 	 * WisBlockLoRaWAN.h's setMulticastGroup()/findMulticastGroupByDevAddr() for the
 	 * DevAddr-keyed convenience layer AT+RMVMULC itself is built on). Stops the group's RX
 	 * session (if running) and clears this library's own record of it - there is no LBM call
 	 * to "unset" a group's address/keys on its side; a later setMulticastGroup() on this same
 	 * `groupId` simply overwrites them before starting a new session. Returns false (nothing
 	 * changed) if `groupId` is out of range or wasn't configured.
+	 *
+	 * @param groupId Group ID
+	 * @return true if the group was removed
 	 */
 	bool removeMulticastGroup( uint8_t groupId );
-	/** RUI3-compatible AT+LSTMULC (by group ID rather than DevAddr - see removeMulticastGroup()'s
-	 * doc comment). Returns nullptr if `groupId` is out of range or wasn't configured. */
+	/**
+	 * @brief Get a multicast group
+	 *
+	 * RUI3-compatible AT+LSTMULC (by group ID rather than DevAddr - see removeMulticastGroup()'s
+	 * doc comment). Returns nullptr if `groupId` is out of range or wasn't configured.
+	 *
+	 * @param groupId Group ID
+	 * @return Pointer to the group, or null if not configured
+	 */
 	const WisBlockMulticastGroup *getMulticastGroup( uint8_t groupId ) const;
-	/** Linear search over the up-to-WISBLOCK_MULTICAST_GROUP_COUNT configured groups for one matching
+	/**
+	 * @brief Find a multicast group by its address
+	 *
+	 * Linear search over the up-to-WISBLOCK_MULTICAST_GROUP_COUNT configured groups for one matching
 	 * `devAddr` - what RUI3's own DevAddr-keyed AT+RMVMULC/AT+ADDMULC (re-configure an
 	 * existing group) need underneath this class's group-ID-keyed API. Returns -1 if none
-	 * match. */
+	 * match.
+	 *
+	 * @param devAddr Multicast address
+	 * @return Group ID, or a negative value if not found
+	 */
 	int findMulticastGroupByDevAddr( uint32_t devAddr ) const;
 
-	/** Pumps smtc_modem_run_engine() + drains smtc_modem_get_event(). Call every loop().
+	/**
+	 * @brief Run the LoRa Basics Modem engine and process its events
+	 *
+	 * Pumps smtc_modem_run_engine() + drains smtc_modem_get_event(). Call every loop().
 	 * Returns the ms budget smtc_modem_run_engine() itself reports before it must be
 	 * called again - required for background task mode (WisBlockLbmTask) to self-schedule
-	 * its next wake; safe to ignore in loop()-polled usage. */
+	 * its next wake; safe to ignore in loop()-polled usage.
+	 *
+	 * @return Time in ms until this function must be called again
+	 */
 	uint32_t handleEvents();
 
+	/**
+	 * @brief Register the join success callback
+	 *
+	 * @param cb Function called after a successful join
+	 */
 	void onJoinSuccess(JoinSuccessCb cb) { joinSuccessCb = cb; }
+	/**
+	 * @brief Register the join failed callback
+	 *
+	 * @param cb Function called after a failed join attempt
+	 */
 	void onJoinFailed(JoinFailedCb cb) { joinFailedCb = cb; }
+	/**
+	 * @brief Register the TX finished callback
+	 *
+	 * @param cb Function called after an uplink
+	 */
 	void onTxFinished(TxFinishedCb cb) { txFinishedCb = cb; }
+	/**
+	 * @brief Register the RX callback
+	 *
+	 * @param cb Function called for every received downlink
+	 */
 	void onRxFinished(RxFinishedCb cb) { rxFinishedCb = cb; }
+	/**
+	 * @brief Register the network time answer callback
+	 *
+	 * @param cb Function called with the answer to requestDeviceTime()
+	 */
 	void onTimeRequestAnswer(TimeRequestCb cb) { timeRequestCb = cb; }
+	/**
+	 * @brief Register the link check answer callback
+	 *
+	 * @param cb Function called with the answer to requestLinkCheck()
+	 */
 	void onLinkCheckAnswer(LinkCheckCb cb) { linkCheckCb = cb; }
 
 private:
@@ -477,12 +721,26 @@ private:
 	TimeRequestCb timeRequestCb = nullptr;
 	LinkCheckCb linkCheckCb = nullptr;
 
+	/**
+	 * @brief Apply the ADR setting and the data rate to the modem
+	 * @return true if everything is active on the radio now
+	 */
 	bool applyAdrProfile(); // builds the custom dr_custom_distribution_data table when ADR is off; see setADR()'s doc comment for the return value
-	// FIX: shared by send() and the deferred-send replay in handleEvents()'s SMTC_MODEM_EVENT_TXDONE
-	// case (see deferredSend's doc comment) - the actual smtc_modem_request_uplink() call plus the
-	// uplinkPending/lastTxDr/lastTxPhyPayloadLen bookkeeping that has to happen identically either way.
-	// Doesn't repeat send()'s isJoined()/data-null/uplinkPending guards - callers are expected to have
-	// already established it's safe to actually dispatch.
+	/**
+	 * @brief Hand an uplink to the modem
+	 *
+	 * FIX: shared by send() and the deferred-send replay in handleEvents()'s SMTC_MODEM_EVENT_TXDONE
+	 * case (see deferredSend's doc comment) - the actual smtc_modem_request_uplink() call plus the
+	 * uplinkPending/lastTxDr/lastTxPhyPayloadLen bookkeeping that has to happen identically either way.
+	 * Doesn't repeat send()'s isJoined()/data-null/uplinkPending guards - callers are expected to have
+	 * already established it's safe to actually dispatch.
+	 *
+	 * @param port LoRaWAN port
+	 * @param data Payload
+	 * @param length Payload length in bytes
+	 * @param confirmed true for a confirmed uplink
+	 * @return true if the modem accepted the uplink
+	 */
 	bool dispatchUplink(uint8_t port, const uint8_t *data, uint8_t length, bool confirmed);
 };
 

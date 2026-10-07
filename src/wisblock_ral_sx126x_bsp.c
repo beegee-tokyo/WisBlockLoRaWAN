@@ -39,7 +39,7 @@
  * WisBlockRadioHal::init() from the active WisBlockLoRaHwConfig) instead of
  * being hardcoded to the WisBlock modules' values - see
  * wisblock_radio_bsp_config.h. This file otherwise stays MCU-agnostic (no
- * #if defined(ARDUINO_ARCH_*) guards): a board's *radio module* wiring
+ * ARDUINO_ARCH_* preprocessor guards): a board's *radio module* wiring
  * (this file's concern) and its *MCU* (wisblock_radio_hal.cpp's concern) are
  * independent axes, and WisBlockLoRaHwConfig now describes the former
  * directly instead of this file assuming it always matches WisBlock's.
@@ -140,6 +140,12 @@ static const uint32_t ral_sx126x_convert_tx_dbm_to_ua_reg_mode_ldo_hp[] = {
 	119800,	 //  22 dBm
 };
 
+/**
+ * @brief Get the regulator mode (LDO or DC-DC) of the radio (RAL BSP, see ral_sx126x_bsp.h)
+ *
+ * @param context Radio context
+ * @param reg_mode Receives the regulator mode
+ */
 void ral_sx126x_bsp_get_reg_mode( const void* context, sx126x_reg_mod_t* reg_mode )
 {
 	(void)context;
@@ -158,6 +164,12 @@ void ral_sx126x_bsp_get_reg_mode( const void* context, sx126x_reg_mod_t* reg_mod
 	*reg_mode = wisblock_radio_hal_get_bsp_config()->useLdo ? SX126X_REG_MODE_LDO : SX126X_REG_MODE_DCDC;
 }
 
+/**
+ * @brief Tell if DIO2 controls the RF switch
+ *
+ * @param context Radio context
+ * @param dio2_is_set_as_rf_switch Receives true if DIO2 drives the RF switch
+ */
 void ral_sx126x_bsp_get_rf_switch_cfg( const void* context, bool* dio2_is_set_as_rf_switch )
 {
 	(void)context;
@@ -167,6 +179,13 @@ void ral_sx126x_bsp_get_rf_switch_cfg( const void* context, bool* dio2_is_set_as
 	*dio2_is_set_as_rf_switch = wisblock_radio_hal_get_bsp_config()->dio2AntSwitch;
 }
 
+/**
+ * @brief Get the PA configuration and output power for a requested TX power and frequency
+ *
+ * @param context Radio context
+ * @param input_params Requested power and frequency
+ * @param output_params Receives the PA configuration, the power and the ramp time
+ */
 void ral_sx126x_bsp_get_tx_cfg( const void* context, const ral_sx126x_bsp_tx_cfg_input_params_t* input_params,
 								 ral_sx126x_bsp_tx_cfg_output_params_t* output_params )
 {
@@ -197,6 +216,14 @@ void ral_sx126x_bsp_get_tx_cfg( const void* context, const ral_sx126x_bsp_tx_cfg
 	output_params->chip_output_pwr_in_dbm_expected = (int8_t)power;
 }
 
+/**
+ * @brief Get the oscillator configuration of the radio
+ *
+ * @param context Radio context
+ * @param xosc_cfg Receives the oscillator type
+ * @param supply_voltage Receives the TCXO supply voltage
+ * @param startup_time_in_tick Receives the oscillator start-up time in ticks
+ */
 void ral_sx126x_bsp_get_xosc_cfg( const void* context, ral_xosc_cfg_t* xosc_cfg,
 								   sx126x_tcxo_ctrl_voltages_t* supply_voltage, uint32_t* startup_time_in_tick )
 {
@@ -213,6 +240,13 @@ void ral_sx126x_bsp_get_xosc_cfg( const void* context, ral_xosc_cfg_t* xosc_cfg,
 	*startup_time_in_tick = cfg->tcxoStartupTimeInTick;
 }
 
+/**
+ * @brief Get the crystal trimming capacitor values
+ *
+ * @param context Radio context
+ * @param trimming_cap_xta Receives the XTA value
+ * @param trimming_cap_xtb Receives the XTB value
+ */
 void ral_sx126x_bsp_get_trim_cap( const void* context, uint8_t* trimming_cap_xta, uint8_t* trimming_cap_xtb )
 {
 	(void)context;
@@ -222,6 +256,12 @@ void ral_sx126x_bsp_get_trim_cap( const void* context, uint8_t* trimming_cap_xta
 	// leave the driver's defaults in place.
 }
 
+/**
+ * @brief Tell if the RX boosted gain is used
+ *
+ * @param context Radio context
+ * @param rx_boost_is_activated Receives true if the boosted gain is on
+ */
 void ral_sx126x_bsp_get_rx_boost_cfg( const void* context, bool* rx_boost_is_activated )
 {
 	(void)context;
@@ -231,6 +271,12 @@ void ral_sx126x_bsp_get_rx_boost_cfg( const void* context, bool* rx_boost_is_act
 	*rx_boost_is_activated = false;
 }
 
+/**
+ * @brief Get the over current protection value
+ *
+ * @param context Radio context
+ * @param ocp_in_step_of_2_5_ma Receives the value in steps of 2.5 mA
+ */
 void ral_sx126x_bsp_get_ocp_value( const void* context, uint8_t* ocp_in_step_of_2_5_ma )
 {
 	(void)context;
@@ -238,6 +284,15 @@ void ral_sx126x_bsp_get_ocp_value( const void* context, uint8_t* ocp_in_step_of_
 	// Leave the driver's default Over-Current-Protection value in place.
 }
 
+/**
+ * @brief Get the CAD detection peak value
+ *
+ * @param context Radio context
+ * @param sf Spreading factor
+ * @param bw Bandwidth
+ * @param nb_symbol Number of CAD symbols
+ * @param in_out_cad_det_peak Default value, can be replaced by a tuned one
+ */
 void ral_sx126x_bsp_get_lora_cad_det_peak( const void* context, ral_lora_sf_t sf, ral_lora_bw_t bw,
 											ral_lora_cad_symbs_t nb_symbol, uint8_t* in_out_cad_det_peak )
 {
@@ -252,6 +307,15 @@ void ral_sx126x_bsp_get_lora_cad_det_peak( const void* context, ral_lora_sf_t sf
 	(void)in_out_cad_det_peak;
 }
 
+/**
+ * @brief Get the estimated current for a TX configuration
+ *
+ * @param context Radio context
+ * @param tx_cfg_output_params TX configuration
+ * @param radio_reg_mode Regulator mode
+ * @param pwr_consumption_in_ua Receives the current in uA
+ * @return RAL_STATUS_OK on success
+ */
 ral_status_t ral_sx126x_bsp_get_instantaneous_tx_power_consumption(
 	const void* context, const ral_sx126x_bsp_tx_cfg_output_params_t* tx_cfg_output_params,
 	sx126x_reg_mod_t radio_reg_mode, uint32_t* pwr_consumption_in_ua )
@@ -287,6 +351,15 @@ ral_status_t ral_sx126x_bsp_get_instantaneous_tx_power_consumption(
 	return RAL_STATUS_OK;
 }
 
+/**
+ * @brief Get the estimated current in GFSK RX
+ *
+ * @param context Radio context
+ * @param radio_reg_mode Regulator mode
+ * @param rx_boosted true if the boosted gain is on
+ * @param pwr_consumption_in_ua Receives the current in uA
+ * @return RAL_STATUS_OK on success
+ */
 ral_status_t ral_sx126x_bsp_get_instantaneous_gfsk_rx_power_consumption( const void* context,
 																		  sx126x_reg_mod_t radio_reg_mode,
 																		  bool rx_boosted,
@@ -304,6 +377,15 @@ ral_status_t ral_sx126x_bsp_get_instantaneous_gfsk_rx_power_consumption( const v
 	return RAL_STATUS_OK;
 }
 
+/**
+ * @brief Get the estimated current in LoRa RX
+ *
+ * @param context Radio context
+ * @param radio_reg_mode Regulator mode
+ * @param rx_boosted true if the boosted gain is on
+ * @param pwr_consumption_in_ua Receives the current in uA
+ * @return RAL_STATUS_OK on success
+ */
 ral_status_t ral_sx126x_bsp_get_instantaneous_lora_rx_power_consumption( const void* context,
 																		  sx126x_reg_mod_t radio_reg_mode,
 																		  bool rx_boosted,

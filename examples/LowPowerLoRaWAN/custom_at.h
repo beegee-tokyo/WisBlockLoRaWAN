@@ -1,19 +1,21 @@
 /**
  * @file custom_at.h
- * @brief Example custom AT command - ATC+SENDINT=<seconds> - registered
- * with WisBlockLoRaAT::addCustomATCommand() (see WisBlockLoRaAT.h).
+ * @brief Example custom AT commands ATC+SENDINT and ATC+STATUS
+ *
+ * @details Example of application specific AT commands, registered with
+ * WisBlockLoRaAT::addCustomATCommand() (see WisBlockLoRaAT.h). ATC+SENDINT=`<seconds>` sets and
+ * gets the periodic send interval, ATC+STATUS shows all relevant device settings.
  *
  * Demonstrates the three things a "real" custom command usually needs:
  *   1. a value the rest of the application can read back (getCustomAtSettings()),
- *   2. persistence across reboots, in a struct that's meant to grow over
- *      time as more custom AT commands get added (CustomAtSettings below),
+ *   2. persistence across reboots, in a struct that is meant to grow over time as more custom AT
+ *      commands get added (CustomAtSettings below),
  *   3. wiring it into the AT parser with one call from setup().
  *
  * @version 0.1
  * @date 2026-09-22
  *
  * @copyright Copyright (c) 2026
- *
  */
 #ifndef CUSTOM_AT_H
 #define CUSTOM_AT_H
@@ -52,7 +54,7 @@ struct CustomAtSettings
 
 	/// AT+SENDINT= - application-defined periodic send interval, in
 	/// seconds. 0 (the default) means "no automatic sending" - it's up to
-	/// the application (see LowPowerLoRaWAN.cpp's loop()) to decide what 0
+	/// the application (see loop() in LowPowerLoRaWAN.ino) to decide what 0
 	/// actually does, this command only stores the value.
 	uint32_t sendIntervalS = 0;
 
@@ -63,20 +65,25 @@ struct CustomAtSettings
 };
 
 /**
- * Registers this file's custom AT command(s) (currently just ATC+SENDINT)
- * on `atParser`, and loads any previously-saved CustomAtSettings from flash.
- * Call once from setup(), after both lora.begin() (WisBlockLoRaFlash must
- * already be initialized - see WisBlockLoRaFlash.h) and atParser.begin().
+ * @brief Register the custom AT commands and load their saved settings
+ *
+ * Registers this file's custom AT commands (ATC+SENDINT and ATC+STATUS) on `atParser` and loads any
+ * previously saved CustomAtSettings from flash. Call once from setup(), after both lora.begin()
+ * (WisBlockLoRaFlash must already be initialized, see WisBlockLoRaFlash.h) and atParser.begin().
+ *
+ * @param atParser AT command parser the custom commands are added to
  */
 void registerCustomATCommands(WisBlockLoRaAT &atParser);
 
 /**
- * Read-only access to the current settings for the rest of the application
- * (e.g. to decide whether/when to send based on sendIntervalS). Reflects
- * whatever was last loaded from flash or set via ATC+SENDINT=, not
- * necessarily what's currently on flash if a write ever silently failed -
- * see the comment in custom_at.cpp's handleSendInt() for why that's the
- * chosen tradeoff here.
+ * @brief Get the current custom settings
+ *
+ * Read-only access to the current settings for the rest of the application (e.g. to decide
+ * whether and when to send based on sendIntervalS). Reflects whatever was last loaded from flash or
+ * set with ATC+SENDINT=, not necessarily what is on flash if a write ever silently failed. See
+ * handleSendInt() in custom_at.cpp for why that is the chosen tradeoff.
+ *
+ * @return Reference to the current settings
  */
 const CustomAtSettings &getCustomAtSettings();
 

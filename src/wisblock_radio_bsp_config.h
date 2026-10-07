@@ -36,11 +36,15 @@ extern "C"
 	};
 
 	/**
+	 * @brief Get the board support configuration of the active board
+	 *
 	 * Returns the active board's radio BSP config, as last set by
 	 * WisBlockRadioHal::init(). Only valid after that has run once (which
 	 * WisBlockLoRaWAN::begin() always does before anything else touches the
 	 * radio) - wisblock_radio_hal.cpp seeds it with the RAK4631 preset before
 	 * the first init() so this is never read uninitialized either way.
+	 *
+	 * @return Pointer to the configuration
 	 */
 	const struct WisBlockLoRaRadioBspConfig *wisblock_radio_hal_get_bsp_config( void );
 

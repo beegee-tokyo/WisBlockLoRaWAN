@@ -1,22 +1,22 @@
 /**
- * RAK3401_RAK13300.ino
- * Minimal OTAA join + periodic uplink, Class A, on a RAK3400 WisDuo module
- * used as a WisBlock Core module with a RAK13300 (or RAK13302, same wiring)
- * SX1262 transceiver module - i.e. "RAK3401" in the sense this library uses
- * the name (see WisBlockLoRaHwConfig.h).
+ * @file RAK3401_RAK13300.ino
+ * @brief OTAA join and periodic uplink on a RAK3401 (RAK3400 with RAK13300 / RAK13302 SX1262 module)
  *
- * This is the same OTAA/join/uplink flow as BasicLoRaWAN.ino, the only
- * difference is this single line in setup():
+ * @details Minimal OTAA join and periodic uplink (Class A, EU868) on a RAK3400 WisDuo module used as
+ * WisBlock Core module together with a RAK13300 (or RAK13302, same wiring) SX1262 transceiver
+ * module. "RAK3401" is the name this library uses for this combination (see WisBlockLoRaHwConfig.h).
+ *
+ * The flow is the same as in BasicLoRaWAN.ino, without the AT command interface and without the
+ * network time and link check callbacks. The only hardware specific line is in setup():
  *
  *     lora.begin(wisblockLoRaHwConfigRAK3401());   // instead of plain lora.begin()
  *
- * Everything else - every other API call, the AT command layer if you add
- * it, the examples under examples/ - works exactly the same regardless of
- * which begin() you call, since it's only the radio wiring that differs.
+ * It selects the radio wiring. Every other API call, the AT command layer if you add it and the
+ * other examples work the same regardless of which begin() you call.
  *
- * Only builds for nRF52840 targets (RAK3400 is an nRF52840 module) - see
- * WisBlockLoRaHwConfig.h and wisblock_radio_hal.h's "Board flexibility" doc
- * comment for why this flexible begin() overload doesn't exist for RP2040.
+ * Only builds for nRF52840 targets (the RAK3400 is an nRF52840 module). See WisBlockLoRaHwConfig.h
+ * and the "Board flexibility" comment in wisblock_radio_hal.h for why this begin() overload does
+ * not exist for the RP2040.
  */
 #define RAK3401
 #include <WisBlockLoRaWAN.h>
@@ -32,11 +32,21 @@ uint8_t appKey[16] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 uint32_t lastUplinkMs = 0;
 const uint32_t UPLINK_INTERVAL_MS = 60000;
 
+/**
+ * @brief LoRaWAN join success callback
+ *
+ * Prints a message. Uplinks start after this in loop().
+ */
 void onJoined()
 {
 	Serial.println("[LoRaWAN] Join succeeded");
 }
 
+/**
+ * @brief LoRaWAN join failed callback
+ *
+ * Prints a message. A failed join is retried by the library, so no new join is started here.
+ */
 void onJoinFailed()
 {
 	// Don't call lora.join() here - a failed join is already retried
@@ -45,17 +55,37 @@ void onJoinFailed()
 	Serial.println("[LoRaWAN] Join attempt failed, retrying automatically...");
 }
 
+/**
+ * @brief LoRaWAN TX finished callback
+ *
+ * Prints the result and the airtime of the uplink.
+ *
+ * @param result TX result with success flag and airtime in ms
+ */
 void onTxDone(const WisBlockTxResult &result)
 {
 	Serial.printf("[LoRaWAN] TX %s, airtime %lu ms\n", result.success ? "OK" : "FAILED", result.airtimeMs);
 }
 
+/**
+ * @brief LoRaWAN downlink received callback
+ *
+ * Prints length, port, RSSI and SNR of the downlink.
+ *
+ * @param result RX result with payload, length, port, RSSI and SNR
+ */
 void onRxDone(const WisBlockRxResult &result)
 {
 	Serial.printf("[LoRaWAN] RX %u bytes on port %u, RSSI %d SNR %d\n",
 				  result.length, result.port, result.rssi, result.snr);
 }
 
+/**
+ * @brief Arduino setup function
+ *
+ * Starts the library with the RAK3401 hardware configuration, sets the OTAA keys, region, class
+ * and ADR, registers the callbacks, saves the configuration and starts the join.
+ */
 void setup()
 {
 	Serial.begin(115200);
@@ -84,6 +114,11 @@ void setup()
 	lora.join();
 }
 
+/**
+ * @brief Arduino loop function
+ *
+ * Handles library events and sends a 4 byte uplink on port 1 every 60 seconds once joined.
+ */
 void loop()
 {
 	lora.handleEvents();

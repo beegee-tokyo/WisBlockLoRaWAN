@@ -3510,3 +3510,162 @@ can actually be observed end-to-end.
 
 - New `WisBlockLoRaWAN::hasValidConfig()`: after `begin()` it tells whether a valid saved configuration was found (TRUE) or the built-in defaults are in use (FALSE, for example a new or erased device). The application can set up and `saveConfig()` the configuration only once. Documented in the API document.
 - New section "Migration from SX126x-Arduino" in the API document: events, radio functions, TxConfig/RxConfig parameters, LoRaMacHelper (`lmh_xxx`) calls and an example.
+
+## 2026-10-06 - Documentation pass: example file headers corrected, a description for every function in the examples and in the library API
+
+### Scope
+
+Two requests: (1) check the file description headers of all examples and correct the wrong ones, (2) add a function description to every function in the examples and to the API functions of
+the library, because the comments are used for automatic documentation generation (Doxygen).
+Comments only, with the two small exceptions listed under "Changes that are not comments".
+
+### What was wrong with the example file headers
+
+- `LowPowerLoRaP2P.ino`, `LowPowerLoRaWAN.ino` and `RX-Duty-LoRaP2P.ino` all carried the header of
+  `BasicLoRaWAN.ino` ("OTAA join, Class A, periodic uplink ... all LoRaWAN callbacks wired"), copied
+  without change. None of the three matches: two are LoRa P2P examples, the third is the low power
+  version with Cayenne LPP, custom AT commands and a wake-up timer.
+- `LoRaP2PPingPong.ino` had `@file plePingPong.cpp` (damaged name, wrong extension) and only the
+  brief "PingPong example".
+- `ATCommandInterface.ino` claimed "fully background, non-polled operation on RAK4631/RAK3312" and
+  that `enableBackgroundRx()` "falls back automatically". Since the wake callback change this is
+  wrong for the ESP32: `enableBackgroundRx()` returns false without a wake callback and the commands
+  are processed by `handleSerial()` in `loop()`. Corrected.
+- `ATCommandInterface.ino`, `BasicLoRaP2P.ino`, `BasicLoRaWAN.ino`, `LowPowerLoRaP2P.ino`,
+  `LowPowerLoRaWAN.ino`, `RAK3401_RAK13300.ino` and `RX-Duty-LoRaP2P.ino` had no `@file` / `@brief`
+  tags at all (plain text with the file name in the first line), so Doxygen could not list them as
+  documented files. All of them now have `@file`, `@brief` and `@details`.
+- `custom_at.h` / `custom_at.cpp` mentioned only `ATC+SENDINT`, but `ATC+STATUS` is registered as
+  well. The header text and a stale reference to `LowPowerLoRaWAN.cpp` (now `.ino`) were fixed.
+- Statements in the new headers were checked against the code, not copied. Two of them were wrong in
+  the first draft and were corrected before finishing: `LowPowerLoRaWAN.ino` does not always join
+  automatically (auto join is only enabled if it is not enabled yet), and the pending downlink
+  handling depends on `GET_PENDING_DLP` (library or empty uplinks from `loop()`).
+- Headers that were already correct (`main.h` of the three low power examples, `wisblock_cayenne.h`,
+  `wisblock_cayenne.cpp`) were left alone. Existing `@author`, `@version`, `@date` and `@copyright`
+  lines were kept, and none were added to files that had none (the authorship is not mine to assign).
+
+### What was added
+
+- **Examples:** a Doxygen block (`@brief`, details, `@param`, `@return`) for all 87 functions,
+  including `setup()`, `loop()`, every callback, `taskEventSet()` / `taskEventClear()`, the
+  custom AT handlers and the Cayenne class and constructor.
+- **Library:** the checker found about 360 of 383 functions in `src/` (without the vendored
+  `src/lbm`) with no description, a missing `@param` or a missing `@return`. All of them are
+  documented now:
+  - `WisBlockLoRaWAN.h` (all 99 members and the class),
+  - `WisBlockLoRaAT.h` (all 73 members including every `atXxx()` handler, each one names its AT
+    command and uses the description from the AT command manual, and the class),
+  - `LoRaWANEngine.h`, `LoRaP2PEngine.h`, `WisBlockLoRaFlash.h`, `WisBlockLoRaHwConfig.h`,
+    `WisBlockLoRaWANConfig.h`, `WisBlockLoRaWANTypes.h`, `wisblock_radio_hal.h`,
+    `wisblock_radio_bsp_config.h`, `wisblock_lbm_task.h`, `wisblock_lbm_port.h`,
+  - the implementations that have no declaration to document: the Semtech HAL port functions in
+    `wisblock_lbm_port.cpp` (`smtc_modem_hal_*`), the radio BSP functions in
+    `wisblock_ral_sx126x_bsp.c` (`ral_sx126x_bsp_*`) and the internal helpers in the `.cpp` files.
+- Where a function already had a prose comment, that text was kept as the detailed description
+  and `@brief`, `@param` and `@return` were added around it. Nothing was rewritten or shortened.
+- `tools/Doxyfile` (new): the Doxygen settings used for the check, with relative paths. Run
+  `doxygen tools/Doxyfile` from the library root.
+
+### Changes that are not comments
+
+- `ATCommandInterface.ino`: the parameter of the one-line callbacks was renamed from `r` to `result`
+  (`onTxDone`, `onRxDone`, `onP2PTx`, `onP2PRx`, `onCad`). All other examples use `result`, and
+  Doxygen merges functions with the same signature from different example folders, so the
+  parameter names must match. No behavior change.
+- `custom_at.cpp`: two doc blocks removed again that duplicated the ones in `custom_at.h`
+  (`registerCustomATCommands()`, `getCustomAtSettings()`), because Doxygen reports a duplicated
+  `@param` otherwise.
+- Comment text that Doxygen reads as a command was reworded: `\r` / `\n` in
+  `WisBlockLoRaAT.h` (now "CR or LF"), a `#include` and a `#if` at the start of a comment word in
+  `wb_lbm_config.h` and `wisblock_ral_sx126x_bsp.c`, an unresolvable link in `WisBlockLoRaWANTypes.h`,
+  and a `@param channel` for a parameter that `addGNSS_H()` does not have.
+
+### Files changed
+
+In `examples/`: all `.ino` files, `custom_at.h`, `custom_at.cpp`, `wisblock_cayenne.h` (class comment) and
+`wisblock_cayenne.cpp` (one wrong `@param` line removed); the three `main.h` already had correct
+headers and were not touched. In `src/`: `WisBlockLoRaWAN.h`, `WisBlockLoRaAT.h`, `WisBlockLoRaAT.cpp`,
+`LoRaWANEngine.h`, `LoRaWANEngine.cpp`, `LoRaP2PEngine.h`, `LoRaP2PEngine.cpp`, `WisBlockLoRaFlash.h`,
+`WisBlockLoRaFlash.cpp`, `WisBlockLoRaHwConfig.h`, `WisBlockLoRaHwConfig.cpp`,
+`WisBlockLoRaWANConfig.h`, `WisBlockLoRaWANConfig.cpp`, `WisBlockLoRaWANTypes.h`,
+`wisblock_radio_hal.h`, `wisblock_radio_hal.cpp`, `wisblock_radio_hal_rak11310.cpp`,
+`wisblock_radio_bsp_config.h`, `wisblock_lbm_task.h`, `wisblock_lbm_task.cpp`,
+`wisblock_lbm_port.h`, `wisblock_lbm_port.cpp`, `wisblock_ral_sx126x_bsp.c`, `wb_lbm_config.h`;
+new: `tools/Doxyfile`; `Creation-Log-From-Claude-AI.md` (this entry).
+
+### Verification
+
+- Doxygen 1.9.8 run over `src` and `examples` (without `src/lbm`), then the XML output was read by a
+  script that lists every function without a description, with a parameter that has no `@param` or
+  with a return value that has no `@return`. Result: examples 87 functions, 0 findings; library 383
+  functions, 3 findings. The 3 are `spiSettings`, `spiSettings` (RP2040 file) and `spiLoraRak3401`:
+  Doxygen reads these *variable* definitions (`SPIClass x(args);`) as functions that have no return
+  value. They do have a description.
+- Doxygen warnings that point to real documentation errors: all fixed (see above). What remains:
+  "multiple @param documentation sections" for the same-named callbacks of different examples (the
+  merging described in `tools/Doxyfile`) and one `@param unused` for the two `periodic_wakeup()`
+  variants (nRF52 and ESP32) that Doxygen merges because preprocessing is off.
+- Comments only: every edited file was compiled with `-fsyntax-only` against the same incomplete
+  host stubs before and after the edits, and the compiler error counts are identical (for example
+  `WisBlockLoRaAT.cpp` 41 / 41, `wisblock_lbm_task.cpp` 50 / 50), i.e. no edit added an error. All
+  47 vendored C files and `wisblock_ral_sx126x_bsp.c` still compile with no include path and a
+  look-alike header directory first (`-Wcomment` clean), so the Arduino IDE include isolation from
+  the earlier entry is intact.
+
+**Not done**: not compiled with the real Arduino cores and not built on a board (nothing was
+touched that should change code, but the rename in `ATCommandInterface.ino` is real code).
+Macros, variables, enums and struct members are not documented, only functions and classes were
+requested, so Doxygen still lists them as "not documented". The descriptions of the Semtech HAL
+functions are short on purpose, the full contract is in `smtc_modem_hal.h`. Doxygen was run with
+preprocessing off, someone who turns it on without `PREDEFINED` macros will not see the functions
+inside the platform `#if` blocks.
+
+
+## 2026-10-02 to 2026-10-05 - Earlier work of the same series that was not logged yet
+
+Short entries, in the order they happened. The details of the first three items are in the
+`CHANGELOG.md` and in the API / AT command manuals.
+
+1. **AT input over USB: wake callback instead of processing in the USB driver.** New
+   `WisBlockLoRaAT::setRxWakeCallback()`; `enableBackgroundRx()` only calls that callback and the
+   application calls `handleSerial()` from its own task. The library no longer references
+   `g_task_sem` / `g_task_event_type` of the sketch, and `begin()` installs no hidden USB hook.
+   `enableBackgroundRx()` returns false on the ESP32 without a callback. Event flags in the low
+   power examples are set with `taskEventSet()` / `taskEventClear()` (critical section) because a
+   plain `|=` from several tasks can lose an event. The simple examples poll `handleSerial()`.
+   Honest history: processing the commands inside the ESP32 HWCDC event task overflowed its stack
+   (stack canary watchpoint in `arduino_hw_cdc_`); a task of the library with a bigger stack then
+   produced lost and garbled replies and random hangs. The cause of the second problem was never
+   proven. A theory that `HWCDC::flush()` discards queued bytes was checked against the core source,
+   and the version that works still flushes, so it is at most a part of the answer. Processing in
+   `loop()` works on RAK3312 and RAK4631 (tested by the user).
+2. **Arduino IDE build.** The IDE only puts `src/` on the include path and cannot pass `-D` flags, so
+   the vendored LBM headers were not found and the IDE picked same-named headers of another
+   installed library. Fixed with relative `#include` paths in the LBM tree
+   (`tools/make_lbm_includes_relative.py`) and the build flags in `src/wb_lbm_config.h`. A first
+   attempt with 85 forwarding headers in `src/` was reverted at the user's request, because it
+   looked like files of the other library. Compiles for RAK3312 and RAK4631 (tested by the user).
+3. **P2P AT commands `AT+PFREQ`, `AT+PSF`, `AT+PBW`, `AT+PCR`, `AT+PPL`, `AT+PTP`, `AT+IQINVER`,
+   `AT+SYNCWORD`**, new P2P settings `iqInversion` and `syncWord` (engine writes the 16 bit sync
+   word register and uses the IQ setting for TX and RX), configuration version 4 with an automatic
+   conversion of version 3 data (keys survive the update, tested against the original headers with
+   both flash behaviors). `AT+IQINVER` and `AT+SYNCWORD` were tested by the user on two devices.
+   Later the `<bw>` field of `AT+P2P` was changed to the `AT+PBW` index numbering; `<cr>` still
+   counts 1 - 4 while `AT+PCR` counts 0 - 3.
+4. **`WisBlockLoRaWAN::hasValidConfig()`** and the section "Migration from SX126x-Arduino" in the API
+   document (written from the SX126x-Arduino headers and checked against this library's code).
+   Found while writing it: a P2P packet with a CRC error is delivered to the RX callback like a
+   good one, the engine does not check the CRC flag. Documented, not changed.
+5. **`LoRaP2PPingPong` example (first version, by Claude).** The logic was checked with a host
+   simulation of several nodes on one channel (airtime, collisions, reboot, master loss). On the
+   real devices (RAK3112 and RAK4631) the nodes never received each other, and it was never found
+   out why. The assumption that an IQ inversion or sync word saved in flash earlier differed
+   between the two devices fits the symptom and was reproduced in the simulation, but it was not
+   confirmed on hardware. The user replaced the example with a version ported from SX126x-Arduino
+   that works; that version is the one in the repository now.
+6. **Open points seen while reading the code, none of them verified on hardware:** changing P2P
+   settings with `AT+` commands while the radio is in receive mode may not take effect until
+   the receive is restarted (the engine writes the settings without leaving receive mode, and the
+   SX126x datasheet allows some of those commands only in standby); `AT+PTP` accepts 5 - 22 dBm as
+   in RUI3 while the engine itself allows -9 - 22 dBm.

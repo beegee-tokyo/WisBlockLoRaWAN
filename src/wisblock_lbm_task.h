@@ -53,6 +53,8 @@
 namespace WisBlockLbmTask
 {
 /**
+ * @brief Start the background task that drives the LoRa engine
+ *
  * Starts the background task. `eventHandler` is called (from the task,
  * normal task context - not an ISR) every time the semaphore is given, OR
  * when the previous call's returned wait budget elapses, whichever comes
@@ -66,16 +68,31 @@ namespace WisBlockLbmTask
  * Returns false if FreeRTOS isn't available on this platform/build, or if
  * task/semaphore creation failed - the caller should fall back to manual
  * handleEvents() polling in that case.
+ *
+ * @param eventHandler Function called every time the task is woken up, it returns the time in ms until it must be called again
+ * @return true if the task is running, false if FreeRTOS is not available
  */
 bool start(uint32_t (*eventHandler)());
 
-/** True if start() has previously succeeded. */
+/**
+ * @brief Check if the background task is running
+ *
+ * True if start() has previously succeeded.
+ *
+ * @return true if start() succeeded
+ */
 bool isActive();
 
-/** Wakes the background task. Safe to call from ISR context (e.g. the DIO1 IRQ). */
+/**
+ * @brief Wake up the background task from an interrupt
+ *
+ * Wakes the background task. Safe to call from ISR context (e.g. the DIO1 IRQ).
+ */
 void notifyFromISR();
 
 /**
+ * @brief Wake up the background task from a normal task
+ *
  * Wakes the background task from ordinary (non-ISR) task context - the
  * application's own loop() task, an AT-command handler, etc. FIX: nothing
  * previously did this. join()/sendLoRaWAN()/etc. all queue work directly
@@ -97,19 +114,31 @@ void notifyFromISR();
 void notify();
 
 /**
+ * @brief Start the software timer of the LoRa Basics Modem
+ *
  * Replaces WisBlockLbmPort's millis()-polled software timer when task mode
  * is active: schedules `callback(context)` to run once, `milliseconds`
  * from now, then wakes the background task so handleEvents() gets pumped
  * right after - matching the two-step sequence (fire timer callback, then
  * call handleEvents()) the polled tick()-based mechanism already did, just
  * driven by an RTOS timer instead of a busy loop.
+ *
+ * @param milliseconds Time until the callback is called
+ * @param callback Function called when the timer expires
+ * @param context Context passed to the callback
  */
 void scheduleTimer(uint32_t milliseconds, void (*callback)(void *context), void *context);
 
-/** Cancels a pending scheduleTimer() call, if any. */
+/**
+ * @brief Cancel the software timer
+ *
+ * Cancels a pending scheduleTimer() call, if any.
+ */
 void cancelTimer();
 
 /**
+ * @brief Take the lock that guards the access to the LoRa Basics Modem
+ *
  * Guards all access into LBM's smtc_modem_api. Needed because background
  * task mode means this module's own event task calls
  * smtc_modem_run_engine() from one FreeRTOS task, while AT commands
@@ -124,6 +153,9 @@ void cancelTimer();
  * against in the first place.
  */
 void lock();
+/**
+ * @brief Release the lock taken with lock()
+ */
 void unlock();
 } // namespace WisBlockLbmTask
 

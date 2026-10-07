@@ -76,8 +76,12 @@ enum WisBlockRUI3Band : uint8_t
 };
 
 /**
+ * @brief Convert a RUI3 AT+BAND index to a library region
+ *
  * Converts a RUI3 AT+BAND index (WisBlockRUI3Band, as used by WisBlockLoRaWAN::setRegion() and
  * AT+BAND) to this library's internal SWL2001/LBM-mirroring WisBlockRegion enum.
+ * @param band Region in RUI3 numbering
+ * @param outRegion Receives the region
  * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_LA915,
  * WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion equivalent in this
  * vendored LBM build.
@@ -85,8 +89,11 @@ enum WisBlockRUI3Band : uint8_t
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);
 
 /**
+ * @brief Convert a library region to a RUI3 AT+BAND index
+ *
  * Inverse of wisblockRUI3BandToRegion() - converts this library's internal WisBlockRegion enum to
  * the RUI3 AT+BAND numbering (WisBlockRUI3Band) used by WisBlockLoRaWAN::getRegion() and AT+BAND.
+ * @param region Region of the library
  * @return WISBLOCK_RUI3_BAND_UNKNOWN for WisBlockRegion values with no RUI3 band index
  * (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4).
  */
@@ -167,7 +174,7 @@ struct WisBlockLoRaWANSettings
 	uint8_t txPower = 0; // index, region-specific meaning
 	bool confirmedUplinks = false;
 	/** Sub-band pre-selection for US915/AU915/CN470/CN470_RP_1_0 (ignored elsewhere) - see
-	 * LoRaWANEngine::setChannelMask()/WisBlockLoRaWAN::setChannelMask() for the encoding.
+	 * LoRaWANEngine::setChannelMask() and WisBlockLoRaWAN::setChannelMask() for the encoding.
 	 * 0 = no restriction (all channels enabled), matching AT+MASK's own ALL=0000 convention. */
 	uint16_t channelMask = 0;
 	/** RUI3-compatible AT+PGSLOT (Class B unicast ping slot periodicity, 0-7) - see

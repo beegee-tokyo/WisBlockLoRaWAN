@@ -43,6 +43,9 @@ constexpr uint32_t kAntPwrSettleUs = 1000;
 WisBlockLoRaHwConfig activeConfig;
 WisBlockLoRaRadioBspConfig activeBspConfig;
 SPIClass *activeSpi = nullptr;
+/**
+ * @brief SPI settings of the radio: 8 MHz, MSB first, mode 0
+ */
 SPISettings spiSettings(8000000UL, MSBFIRST, SPI_MODE0);
 
 // --- Sleep-state tracking -------------------------------------------------
@@ -79,6 +82,11 @@ RadioMode radioMode = RadioMode::Awake;
 // combinations this covers (useRxenAntPwr and/or useDio3AntSwitch).
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief Drive the pin that powers the antenna switch
+ *
+ * @param on true to power the antenna switch
+ */
 void driveAntennaPower(bool on)
 {
 	if (activeConfig.useRxenAntPwr && activeConfig.radioRxEn >= 0)
@@ -92,18 +100,27 @@ void driveAntennaPower(bool on)
 	// toggle here for that case.
 }
 
-// If both radioTxEn and radioRxEn are wired as direct RF-switch steering
-// lines (not just one of them as antenna-switch *power* - see
-// WisBlockLoRaHwConfig.h's doc comment), the driver has to flip them itself
-// before every RX or TX, matching SX126x-Arduino's SX126xRXena()/SX126xTXena().
-// None of this library's own WisBlock presets need this (they all use
-// useRxenAntPwr instead, with DIO2 doing the actual TX/RX steering), but a
-// custom eByte E22-style board might.
+/**
+ * @brief Check if the board needs the TX and RX enable pins of the RF switch to be driven by the host
+ *
+ * If both radioTxEn and radioRxEn are wired as direct RF-switch steering
+ * lines (not just one of them as antenna-switch *power* - see
+ * WisBlockLoRaHwConfig.h's doc comment), the driver has to flip them itself
+ * before every RX or TX, matching SX126x-Arduino's SX126xRXena()/SX126xTXena().
+ * None of this library's own WisBlock presets need this (they all use
+ * useRxenAntPwr instead, with DIO2 doing the actual TX/RX steering), but a
+ * custom eByte E22-style board might.
+ *
+ * @return true if the host switches between TX and RX
+ */
 bool usesManualTxRxSteering()
 {
 	return !activeConfig.useRxenAntPwr && activeConfig.radioTxEn >= 0 && activeConfig.radioRxEn >= 0;
 }
 
+/**
+ * @brief Set the RF switch pins for receiving
+ */
 void steerForRx()
 {
 	if (usesManualTxRxSteering())
@@ -113,6 +130,9 @@ void steerForRx()
 	}
 }
 
+/**
+ * @brief Set the RF switch pins for transmitting
+ */
 void steerForTx()
 {
 	if (usesManualTxRxSteering())
@@ -122,10 +142,14 @@ void steerForTx()
 	}
 }
 
-// Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
-// for BUSY (assumed already low or clearing quickly); asleep case restores
-// antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
-// the special NSS-pulse wake sequence.
+/**
+ * @brief Wait until the radio can accept a command, and wake it up if it sleeps
+ *
+ * Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
+ * for BUSY (assumed already low or clearing quickly); asleep case restores
+ * antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
+ * the special NSS-pulse wake sequence.
+ */
 void checkDeviceReady()
 {
 	if (radioMode != RadioMode::Asleep)
@@ -187,6 +211,9 @@ void checkDeviceReady()
 	radioMode = RadioMode::Awake;
 }
 
+/**
+ * @brief Configure all radio pins of the active board
+ */
 void configurePins()
 {
 	pinMode(activeConfig.pinNss, OUTPUT);
@@ -226,6 +253,11 @@ void configurePins()
 	// unconfigured, matching the reference implementation.
 }
 
+/**
+ * @brief Store the board description and derive the BSP configuration from it
+ *
+ * @param hwConfig Radio wiring of the board
+ */
 void setActiveConfig(const WisBlockLoRaHwConfig &hwConfig)
 {
 	activeConfig = hwConfig;

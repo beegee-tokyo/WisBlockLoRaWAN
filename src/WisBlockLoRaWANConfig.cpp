@@ -19,6 +19,12 @@ uint16_t wisblockConfigCrc16(const uint8_t *data, size_t len)
 	return crc;
 }
 
+/**
+ * @brief Calculate the CRC16 of a stored configuration
+ *
+ * @param cfg Configuration
+ * @return CRC16 of the data behind the CRC field
+ */
 static uint16_t computeCrc(const WisBlockPersistedConfig &cfg)
 {
 	// CRC covers everything after the crc16 field itself.
@@ -61,7 +67,15 @@ struct WisBlockPersistedConfigV3
 	WisBlockP2PSettingsV3 p2p;
 };
 
-// Reads `key` as a version 3 blob. On success fills `out` (new P2P fields at their defaults).
+/**
+ * @brief Load a configuration saved by library version 3 and convert it to the current layout
+ *
+ * Reads `key` as a version 3 blob. On success fills `out` (new P2P fields at their defaults).
+ *
+ * @param key Flash key of the block
+ * @param out Receives the converted configuration
+ * @return true if a valid version 3 block was found
+ */
 bool loadV3(const char *key, WisBlockPersistedConfig &out)
 {
 	WisBlockPersistedConfigV3 old;

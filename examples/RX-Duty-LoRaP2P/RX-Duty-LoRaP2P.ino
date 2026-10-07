@@ -1,8 +1,20 @@
 /**
- * BasicLoRaWAN.ino
- * OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.
- * Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h
- * has the right pins for your revision and LBM is vendored in (see README).
+ * @file RX-Duty-LoRaP2P.ino
+ * @brief LoRa P2P example with RX duty cycle for low power reception
+ *
+ * @details LoRa P2P mode (916 MHz, SF7, BW 125 kHz, CR 4/5, 22 dBm, CAD enabled, boosted RX gain off).
+ * The node listens with the radio's RX duty cycle mode: it alternates short receive windows and sleep
+ * periods instead of listening all the time. The on/off times are calculated in setup() with
+ * lora.computeP2PRxDutyCycleTiming() for a transmitting node that sends a preamble of 100 symbols,
+ * so the transmitter must use a long enough preamble.
+ *
+ * A timer wakes up the loop() task every UPLINK_INTERVAL_MS (30 seconds). Then a channel activity
+ * detection (CAD) runs and, if the channel is clear, a 7 byte packet is sent. When the TX is finished
+ * the RX duty cycle is started again. Received packets are printed.
+ *
+ * Supports RAK4631 (nRF52840) and RAK3312 (ESP32-S3). The library background task handles the LoRa
+ * events. AT commands: USB receive only wakes up loop() through a wake callback (atRxWake()), the
+ * command is processed in loop() by at_serial.handleSerial().
  */
 #include "main.h"
 
@@ -38,6 +50,15 @@ static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
 #define EVENT_UNLOCK()
 #endif
 
+/**
+ * @brief Set event flags
+ *
+ * The event flags are set from several tasks (LBM task, USB event task, timers) and cleared from
+ * loop(), possibly on different cores. A plain `flags |= x` is a read-modify-write that can lose an
+ * event when two of them overlap, so all updates run in a critical section.
+ *
+ * @param bits Event flag bits to set, e.g. STATUS
+ */
 static inline void taskEventSet(uint16_t bits)
 {
 	EVENT_LOCK();
@@ -45,7 +66,13 @@ static inline void taskEventSet(uint16_t bits)
 	EVENT_UNLOCK();
 }
 
-/** @param mask Inverted event mask, e.g. N_AT_CMD */
+/**
+ * @brief Clear event flags
+ *
+ * Counterpart of taskEventSet(), runs in a critical section as well.
+ *
+ * @param mask Inverted event mask, e.g. N_AT_CMD (all bits set except the one to clear)
+ */
 static inline void taskEventClear(uint16_t mask)
 {
 	EVENT_LOCK();
@@ -64,9 +91,11 @@ SemaphoreHandle_t g_task_sem = NULL;
 /** Timer to wakeup task frequently and send message */
 TimerHandle_t g_task_wakeup_timer;
 /**
- * @brief Timer event that wakes up the loop task frequently
+ * @brief Timer callback that wakes up the loop task regularly (nRF52)
  *
- * @param unused
+ * Switches on the green LED, sets the STATUS event and gives the semaphore.
+ *
+ * @param unused FreeRTOS timer handle, not used
  */
 void periodic_wakeup(TimerHandle_t unused)
 {
@@ -86,9 +115,9 @@ SemaphoreHandle_t g_task_sem = NULL;
 /** Timer to wakeup task frequently and send message */
 Ticker g_task_wakeup_timer;
 /**
- * @brief Timer event that wakes up the loop task frequently
+ * @brief Timer callback that wakes up the loop task regularly (ESP32)
  *
- * @param unused
+ * Switches on the green LED, sets the STATUS event and gives the semaphore.
  */
 void periodic_wakeup(void)
 {
@@ -107,11 +136,10 @@ void periodic_wakeup(void)
 
 #if defined ARDUINO_ARCH_NRF52 || defined ESP32
 /**
- * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives.
+ * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives
  *
- * Runs in the USB driver's task context, so it only flags the event and wakes
- * loop(). The AT command itself is parsed and executed in loop() by
- * at_serial.handleSerial().
+ * Runs in the USB driver's task context, so it only sets the AT_CMD event and wakes up loop(). The
+ * AT command itself is parsed and executed in loop() by at_serial.handleSerial().
  */
 void atRxWake(void)
 {
@@ -138,6 +166,14 @@ void atRxWake(void)
 }
 #endif
 
+/**
+ * @brief LoRa P2P TX finished callback
+ *
+ * Prints the result, sets the LORA_TX_FIN event and wakes up the loop() task, which restarts the RX
+ * duty cycle.
+ *
+ * @param result TX result, result.success is true if the packet was sent
+ */
 void onTxDone(const WisBlockTxResult &result)
 {
 	waitingForCad = false;
@@ -153,6 +189,14 @@ void onTxDone(const WisBlockTxResult &result)
 	Serial.flush();
 }
 
+/**
+ * @brief LoRa P2P RX finished callback
+ *
+ * Prints the received packet (length, RSSI, SNR and data). A length of 0 means the receive window
+ * ended without a packet. The radio is put into sleep afterwards.
+ *
+ * @param result RX result with payload, length, RSSI and SNR
+ */
 void onRxDone(const WisBlockRxResult &result)
 {
 	if (result.length > 0)
@@ -180,6 +224,13 @@ void onRxDone(const WisBlockRxResult &result)
 	Serial.flush();
 }
 
+/**
+ * @brief LoRa P2P channel activity detection (CAD) result callback
+ *
+ * Sends a 7 byte packet if the channel is clear, otherwise the transmission of this cycle is skipped.
+ *
+ * @param result CAD result, WISBLOCK_CAD_CHANNEL_CLEAR or WISBLOCK_CAD_CHANNEL_DETECTED
+ */
 void onCad(WisBlockCADResult result)
 {
 	waitingForCad = false;
@@ -196,6 +247,14 @@ void onCad(WisBlockCADResult result)
 	Serial.flush();
 }
 
+/**
+ * @brief Arduino setup function
+ *
+ * Starts the serial port, configures LoRa P2P, calculates the RX duty cycle timing, registers the
+ * callbacks, saves the configuration, starts the library background task and the AT command
+ * interface, creates the wake-up semaphore and the periodic wake-up timer and starts the RX duty
+ * cycle.
+ */
 void setup()
 {
 	pinMode(LED_BLUE, OUTPUT);
@@ -308,6 +367,13 @@ void setup()
 	lora.startP2PReceiveDutyCycle(rxTimeMs, sleepTimeMs); // Start listening with RXDutyCycle
 }
 
+/**
+ * @brief Arduino loop function
+ *
+ * Sleeps on the semaphore until an event wakes it up. A STATUS event (timer) starts a CAD, an AT_CMD
+ * event (USB data) lets at_serial.handleSerial() process the AT command, a LORA_TX_FIN event
+ * restarts the RX duty cycle.
+ */
 void loop()
 {
 	// Switch off green LED to show we go to sleep

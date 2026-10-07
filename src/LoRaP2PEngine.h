@@ -21,12 +21,36 @@ public:
 	using RxFinishedCb = void (*)(const WisBlockRxResult &);
 	using CadResultCb = void (*)(WisBlockCADResult);
 
+	/**
+	 * @brief Reset and configure the radio for P2P
+	 *
+	 * @param settings P2P settings to apply
+	 */
 	void begin(const WisBlockP2PSettings &settings);
+	/**
+	 * @brief Apply new P2P settings to the radio
+	 *
+	 * @param settings P2P settings to apply
+	 */
 	void applySettings(const WisBlockP2PSettings &settings);
 
+	/**
+	 * @brief Send a packet
+	 *
+	 * @param data Payload
+	 * @param length Payload length in bytes
+	 * @return true if the transmission was started
+	 */
 	bool send(const uint8_t *data, uint8_t length); // optionally preceded by CAD, see settings.cadEnabled
+	/**
+	 * @brief Start receiving
+	 *
+	 * @param timeoutMs Receive timeout in ms, 0 = continuous
+	 */
 	void startReceive(uint32_t timeoutMs);		 // 0 = continuous RX
 	/**
+	 * @brief Start receiving with the SX126x RX duty cycle mode
+	 *
 	 * SX1262 hardware RX duty-cycling (SetRxDutyCycle): the chip
 	 * autonomously alternates RX_time / sleep_time on its own, without any
 	 * MCU-side wake/resend cycle - genuinely lower average current than
@@ -48,12 +72,23 @@ public:
 	 * @param sleepTimeMs How long the chip sleeps between RX phases.
 	 */
 	void startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs);
+	/**
+	 * @brief Stop receiving and put the radio into standby
+	 */
 	void stopReceive();
 
-	/** Read-only access to the currently applied P2P radio settings - frequency, SF, bandwidth, preamble length, etc. */
+	/**
+	 * @brief Get the P2P settings
+	 *
+	 * Read-only access to the currently applied P2P radio settings - frequency, SF, bandwidth, preamble length, etc.
+	 *
+	 * @return Current P2P settings
+	 */
 	const WisBlockP2PSettings &getSettings() const { return settings; }
 
 	/**
+	 * @brief Calculate the RX duty cycle timing
+	 *
 	 * Computes safe rxTimeMs/sleepTimeMs for startReceiveDutyCycle() from
 	 * the *currently configured* bandwidth/SF/preamble length (getSettings()) -
 	 * see startReceiveDutyCycle()'s doc comment for the underlying
@@ -96,6 +131,8 @@ public:
 	bool computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols = 5) const;
 
 	/**
+	 * @brief Calculate the RX duty cycle timing for a known transmitter preamble
+	 *
 	 * Same computation as above, but against an explicitly given
 	 * transmitter preamble length instead of this radio's own
 	 * settings.preambleLength - use this one. See the other overload's
@@ -104,15 +141,25 @@ public:
 	 * it can detect, only the transmitter's actual over-the-air preamble
 	 * length does.
 	 *
+	 * @param rxTimeMs Receives the RX window in ms
+	 * @param sleepTimeMs Receives the sleep time in ms
+	 * @param marginSymbols Safety margin in symbols
 	 * @param txPreambleLengthSymbols The *transmitting* node's actual
 	 *   configured preamble length, in symbols - not this radio's own.
+	 *
+	 * @return true if a usable timing exists
 	 */
 	bool computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, uint32_t &rxTimeMs, uint32_t &sleepTimeMs,
 								   uint8_t marginSymbols = 5) const;
 
+	/**
+	 * @brief Start a channel activity detection
+	 */
 	void startCad(); // one-shot CAD; result delivered via onCadResult callback
 
 	/**
+	 * @brief Put the radio into sleep mode
+	 *
 	 * Puts the radio into low-power sleep (SX126x SetSleep, cold-start).
 	 *
 	 * FIX: was previously warm-start (configuration retained across sleep).
@@ -140,13 +187,34 @@ public:
 	 */
 	void sleep();
 
-	/** Checks/clears radio IRQ status and dispatches callbacks. Call every loop().
+	/**
+	 * @brief Check the radio interrupts and call the callbacks
+	 *
+	 * Checks/clears radio IRQ status and dispatches callbacks. Call every loop().
 	 * Always returns a large fixed value (P2P mode has no self-scheduling contract like
-	 * LoRaWAN's smtc_modem_run_engine() - it's purely IRQ-driven) - see LoRaWANEngine::handleEvents(). */
+	 * LoRaWAN's smtc_modem_run_engine() - it's purely IRQ-driven) - see LoRaWANEngine::handleEvents().
+	 *
+	 * @return Time in ms until this function must be called again
+	 */
 	uint32_t handleEvents();
 
+	/**
+	 * @brief Register the TX finished callback
+	 *
+	 * @param cb Function called after a transmission
+	 */
 	void onTxFinished(TxFinishedCb cb) { txFinishedCb = cb; }
+	/**
+	 * @brief Register the RX callback
+	 *
+	 * @param cb Function called for every received packet, and with length 0 on an RX timeout
+	 */
 	void onRxFinished(RxFinishedCb cb) { rxFinishedCb = cb; }
+	/**
+	 * @brief Register the CAD callback
+	 *
+	 * @param cb Function called with the result of a CAD
+	 */
 	void onCadResult(CadResultCb cb) { cadResultCb = cb; }
 
 private:
@@ -162,12 +230,19 @@ private:
 	// clears it once the reconfigure has run.
 	bool needsReconfigureAfterSleep = false;
 
+	/**
+	 * @brief Write the stored settings to the radio
+	 */
 	void applyRadioParams(); // pushes settings into sx126x_set_lora_mod_params / sx126x_set_lora_pkt_params
-	/** Re-runs everything begin() does except sx126x_reset() - the part of
+	/**
+	 * @brief Configure the radio again after it woke up from sleep
+	 *
+	 * Re-runs everything begin() does except sx126x_reset() - the part of
 	 * initial setup a cold-start sleep wipes. No-op if not currently needed
 	 * (i.e. the radio was never put to cold sleep, or already reconfigured
 	 * since the last wake) - safe to call unconditionally at the top of
-	 * every send()/startReceive()/startCad(). */
+	 * every send()/startReceive()/startCad().
+	 */
 	void reconfigureAfterColdSleep();
 };
 

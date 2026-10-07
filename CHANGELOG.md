@@ -10,3 +10,9 @@ lib_deps =
 ```
 For Arduino IDE, download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.
 
+## Documentation
+
+- The file headers of all examples were corrected (three low power / P2P examples carried the header of `BasicLoRaWAN.ino`, the PingPong example had a damaged `@file` name, several had no Doxygen tags at all).
+- Every function of the examples and of the library API now has a Doxygen description with `@param` and `@return`. `tools/Doxyfile` generates the documentation: `doxygen tools/Doxyfile`.
+- `ATCommandInterface.ino`: the callback parameters were renamed from `r` to `result`, no change in behavior.
+

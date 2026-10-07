@@ -9,17 +9,23 @@
 
 namespace
 {
-// Common to all four presets below: every WisBlock-family SX1262 module
-// this library has been tested against uses the SX1262's own DIO2 for RF
-// switching, a TCXO on DIO3 (not a crystal), the DC-DC regulator, and a
-// single RXEN pin doubling as antenna-switch power (no separate TXEN).
-//
-// FIX: the TCXO startup time used everywhere in this library before this
-// file existed (LoRaP2PEngine.cpp, wisblock_ral_sx126x_bsp.c) was encoded
-// directly as "50 << 6" (50ms in 15.625us ticks) but *commented* as "5ms" -
-// the tick value, not the stale comment, is what was actually programmed
-// into the chip on every real build so far. Reproduced here as 50000us to
-// keep behavior identical; only the misleading comment is corrected.
+/**
+ * @brief Fill in the settings that are the same for all RAKwireless WisBlock cores
+ *
+ * Common to all four presets below: every WisBlock-family SX1262 module
+ * this library has been tested against uses the SX1262's own DIO2 for RF
+ * switching, a TCXO on DIO3 (not a crystal), the DC-DC regulator, and a
+ * single RXEN pin doubling as antenna-switch power (no separate TXEN).
+ *
+ * FIX: the TCXO startup time used everywhere in this library before this
+ * file existed (LoRaP2PEngine.cpp, wisblock_ral_sx126x_bsp.c) was encoded
+ * directly as "50 << 6" (50ms in 15.625us ticks) but *commented* as "5ms" -
+ * the tick value, not the stale comment, is what was actually programmed
+ * into the chip on every real build so far. Reproduced here as 50000us to
+ * keep behavior identical; only the misleading comment is corrected.
+ *
+ * @param cfg Configuration to fill in
+ */
 void applyCommonWisBlockDefaults(WisBlockLoRaHwConfig &cfg)
 {
 	cfg.chipType = WISBLOCK_LORA_CHIP_SX1262;
@@ -88,10 +94,14 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11310()
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
 namespace
 {
-// RAK3400's default SPI0 is already committed elsewhere on the module, so
-// the RAK13300/RAK13302 transceiver is wired to a second SPIM peripheral
-// instead - pins are MISO=29, SCK=3, MOSI=30 (Adafruit nRF52 core's
-// SPIClass(NRF_SPIM_Type*, miso, sck, mosi) constructor order).
+/**
+ * @brief Second SPI peripheral used for the radio of the RAK3401
+ *
+ * RAK3400's default SPI0 is already committed elsewhere on the module, so
+ * the RAK13300/RAK13302 transceiver is wired to a second SPIM peripheral
+ * instead - pins are MISO=29, SCK=3, MOSI=30 (Adafruit nRF52 core's
+ * SPIClass(NRF_SPIM_Type*, miso, sck, mosi) constructor order).
+ */
 SPIClass spiLoraRak3401(NRF_SPIM1, 29, 3, 30);
 } // namespace
 

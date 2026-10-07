@@ -56,6 +56,11 @@ void (*registeredTimerCallback)(void *context) = nullptr;
 void *registeredTimerContext = nullptr;
 bool active = false;
 
+/**
+ * @brief Background task: waits for a wake-up event and runs the event handler
+ *
+ * @param pvParameters Not used
+ */
 void eventTask(void *pvParameters)
 {
 	(void)pvParameters;
@@ -88,9 +93,15 @@ void eventTask(void *pvParameters)
 	}
 }
 
-// Runs in the FreeRTOS Timer Service Task context (a normal task, not an
-// ISR) - safe to call the LBM-registered callback directly and to use the
-// non-ISR semaphore give.
+/**
+ * @brief Callback of the FreeRTOS software timer, calls the callback registered by the LoRa Basics Modem
+ *
+ * Runs in the FreeRTOS Timer Service Task context (a normal task, not an
+ * ISR) - safe to call the LBM-registered callback directly and to use the
+ * non-ISR semaphore give.
+ *
+ * @param handle Timer handle (not used)
+ */
 void swTimerExpired(TimerHandle_t handle)
 {
 	(void)handle;

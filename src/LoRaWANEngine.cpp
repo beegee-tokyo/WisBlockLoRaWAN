@@ -19,48 +19,59 @@ constexpr uint8_t kStackId = 0; // single-stack device; LBM supports multi-stack
 // twice.
 bool lbmInitialized = false;
 
-// smtc_modem_init()'s callback contract (smtc_modem_utilities.h): "The
-// callback will be called each time a modem event is raised internally" -
-// it carries no event data itself, it's purely a notification hook meant to
-// wake whatever task drains smtc_modem_get_event() (relevant under an RTOS;
-// LBM's own examples use it to set an event flag for their main loop). This
-// bare-metal Arduino port already drains events unconditionally every
-// loop() via LoRaWANEngine::handleEvents(), so there's nothing useful to do
-// here - the callback only needs to exist because smtc_modem_init() requires
-// a non-null function pointer.
+/**
+ * @brief Event notification callback required by the modem, not needed because the events are polled
+ *
+ * smtc_modem_init()'s callback contract (smtc_modem_utilities.h): "The
+ * callback will be called each time a modem event is raised internally" -
+ * it carries no event data itself, it's purely a notification hook meant to
+ * wake whatever task drains smtc_modem_get_event() (relevant under an RTOS;
+ * LBM's own examples use it to set an event flag for their main loop). This
+ * bare-metal Arduino port already drains events unconditionally every
+ * loop() via LoRaWANEngine::handleEvents(), so there's nothing useful to do
+ * here - the callback only needs to exist because smtc_modem_init() requires
+ * a non-null function pointer.
+ */
 void onModemEventNotify(void)
 {
 }
 
-// FIX (root cause of a persistent, 100%-reproducible bug: setADR(false)
-// with a fixed DR failing every single time with LBM's own
-// "ADR with a bad DataRate value" trace, confirmed by tracing the actual
-// failure into smtc_modem_custom_dr_distribution_to_tab() in the vendored
-// smtc_modem.c): dr_custom_distribution_data is NOT a one-hot table
-// indexed by DR (weight at index N meaning "use DR N") - it's a flat list
-// of SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH (16) literal DR *values*, one per
-// retry-attempt slot, and LBM validates/counts each slot's value directly
-// against the current channel mask (each entry must itself be a
-// currently-allowed DR, not an index into anything). The old
-// implementation here did exactly the one-hot thing the array's name
-// invites you to assume: out[dataRate] = 1, leaving the other 15 of 16
-// slots at value 0 - meaning "15 of 16 attempts should use DR0, 1 attempt
-// should use DR1" was being requested, regardless of what dataRate the
-// caller actually wanted. On any region where dwell time or the channel
-// mask excludes DR0/DR1 (AS923's dwell-time floor is DR2 - see
-// MIN_TX_DR_LIMIT_AS_923 in region_as_923_defs.h), *every* slot fails
-// LBM's validation and the call is rejected outright with
-// SMTC_MODEM_RC_INVALID - independent of the requested DR, independent of
-// the channel mask ever widening, which is why retrying after every
-// uplink (see applyAdrProfile()'s caller in handleEvents()) never helped:
-// there was nothing time-dependent to wait out.
-//
-// Fixed by filling every slot with the literal requested DR value, which
-// is what correctly expresses "always use this DR" to LBM's own
-// validation and runtime selection logic (smtc_real_get_next_tx_dr() in
-// smtc_real.c counts occurrences per DR value across surviving slots to
-// build its actual weighted-random selection table - see
-// Creation-Log-From-Claude-AI.md's note on this for the full trace).
+/**
+ * @brief Build an ADR distribution table that contains only one data rate
+ *
+ * FIX (root cause of a persistent, 100%-reproducible bug: setADR(false)
+ * with a fixed DR failing every single time with LBM's own
+ * "ADR with a bad DataRate value" trace, confirmed by tracing the actual
+ * failure into smtc_modem_custom_dr_distribution_to_tab() in the vendored
+ * smtc_modem.c): dr_custom_distribution_data is NOT a one-hot table
+ * indexed by DR (weight at index N meaning "use DR N") - it's a flat list
+ * of SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH (16) literal DR *values*, one per
+ * retry-attempt slot, and LBM validates/counts each slot's value directly
+ * against the current channel mask (each entry must itself be a
+ * currently-allowed DR, not an index into anything). The old
+ * implementation here did exactly the one-hot thing the array's name
+ * invites you to assume: out[dataRate] = 1, leaving the other 15 of 16
+ * slots at value 0 - meaning "15 of 16 attempts should use DR0, 1 attempt
+ * should use DR1" was being requested, regardless of what dataRate the
+ * caller actually wanted. On any region where dwell time or the channel
+ * mask excludes DR0/DR1 (AS923's dwell-time floor is DR2 - see
+ * MIN_TX_DR_LIMIT_AS_923 in region_as_923_defs.h), *every* slot fails
+ * LBM's validation and the call is rejected outright with
+ * SMTC_MODEM_RC_INVALID - independent of the requested DR, independent of
+ * the channel mask ever widening, which is why retrying after every
+ * uplink (see applyAdrProfile()'s caller in handleEvents()) never helped:
+ * there was nothing time-dependent to wait out.
+ *
+ * Fixed by filling every slot with the literal requested DR value, which
+ * is what correctly expresses "always use this DR" to LBM's own
+ * validation and runtime selection logic (smtc_real_get_next_tx_dr() in
+ * smtc_real.c counts occurrences per DR value across surviving slots to
+ * build its actual weighted-random selection table - see
+ * Creation-Log-From-Claude-AI.md's note on this for the full trace).
+ *
+ * @param dataRate The data rate
+ * @param out Receives the distribution table
+ */
 void buildSingleDrDistribution(uint8_t dataRate, uint8_t out[SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH])
 {
 	for (size_t i = 0; i < SMTC_MODEM_CUSTOM_ADR_DATA_LENGTH; i++)
@@ -68,13 +79,20 @@ void buildSingleDrDistribution(uint8_t dataRate, uint8_t out[SMTC_MODEM_CUSTOM_A
 		out[i] = dataRate;
 	}
 }
-// Explicit WisBlockRegion -> smtc_modem_region_t mapping. NOT a direct cast
-// - the two enums have completely different numeric values AND a
-// different ordering (LBM's real smtc_modem_region_t interleaves the
-// AS923 groups among other regions rather than grouping them together
-// the way WisBlockRegion does), so casting between them silently selects
-// the wrong region entirely. Verified against the real values in
-// src/lbm/smtc_modem_api/smtc_modem_api.h.
+/**
+ * @brief Convert a library region to the LoRa Basics Modem region
+ *
+ * Explicit WisBlockRegion -> smtc_modem_region_t mapping. NOT a direct cast
+ * - the two enums have completely different numeric values AND a
+ * different ordering (LBM's real smtc_modem_region_t interleaves the
+ * AS923 groups among other regions rather than grouping them together
+ * the way WisBlockRegion does), so casting between them silently selects
+ * the wrong region entirely. Verified against the real values in
+ * src/lbm/smtc_modem_api/smtc_modem_api.h.
+ *
+ * @param region Library region
+ * @return Modem region
+ */
 smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 {
 	switch (region)
@@ -118,25 +136,35 @@ smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 	}
 }
 
-// FIX: WisBlockTxResult::airtimeMs has been reporting a hardcoded 0 for
-// every LoRaWAN uplink since onLoRaWANTxFinished()'s TXDONE handler was
-// first written - SMTC_MODEM_EVENT_TXDONE's own event data carries only a
-// status enum (smtc_modem_api.h), no airtime figure, so nothing was ever
-// filling this field in. Computed here instead using the standard LoRa
-// airtime formula (Semtech AN1200.13 - the same one LoRaP2PEngine's
-// computeAirtimeMs() already uses and this project's own hardware traces
-// have confirmed accurate: predicted 102.9ms vs measured 103ms toa for a
-// real SF8/BW125/22-byte PHY frame from a device log captured earlier in
-// this project).
-//
-// Maps a LoRaWAN data rate index to SF/BW for regions with a verified,
-// stable Regional Parameters DR table. Returns false (no computation) for
-// FSK data rates (not a LoRa airtime formula at all) and for US915/AU915's
-// DR8-13 500kHz-channel range and DR5-7 RFU range - less commonly hit by
-// a device's own uplinks, and this project has no hardware trace to
-// verify those specific entries against the way the EU-like table above
-// was verified, so airtimeMs is left at 0 there rather than reporting an
-// unverified number as if it were confirmed.
+/**
+ * @brief Convert a data rate to spreading factor and bandwidth for a region
+ *
+ * FIX: WisBlockTxResult::airtimeMs has been reporting a hardcoded 0 for
+ * every LoRaWAN uplink since onLoRaWANTxFinished()'s TXDONE handler was
+ * first written - SMTC_MODEM_EVENT_TXDONE's own event data carries only a
+ * status enum (smtc_modem_api.h), no airtime figure, so nothing was ever
+ * filling this field in. Computed here instead using the standard LoRa
+ * airtime formula (Semtech AN1200.13 - the same one LoRaP2PEngine's
+ * computeAirtimeMs() already uses and this project's own hardware traces
+ * have confirmed accurate: predicted 102.9ms vs measured 103ms toa for a
+ * real SF8/BW125/22-byte PHY frame from a device log captured earlier in
+ * this project).
+ *
+ * Maps a LoRaWAN data rate index to SF/BW for regions with a verified,
+ * stable Regional Parameters DR table. Returns false (no computation) for
+ * FSK data rates (not a LoRa airtime formula at all) and for US915/AU915's
+ * DR8-13 500kHz-channel range and DR5-7 RFU range - less commonly hit by
+ * a device's own uplinks, and this project has no hardware trace to
+ * verify those specific entries against the way the EU-like table above
+ * was verified, so airtimeMs is left at 0 there rather than reporting an
+ * unverified number as if it were confirmed.
+ *
+ * @param region Region
+ * @param dr Data rate index
+ * @param sf Receives the spreading factor
+ * @param bwHz Receives the bandwidth in Hz
+ * @return true if the data rate is a LoRa data rate known for this region, false for FSK or unverified entries
+ */
 bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
 {
 	switch (region)
@@ -257,6 +285,14 @@ bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
 	}
 }
 
+/**
+ * @brief Calculate the time on air of a LoRaWAN frame
+ *
+ * @param region Region
+ * @param dr Data rate index
+ * @param phyPayloadLen Length of the PHY payload in bytes
+ * @return Airtime in ms, 0 if it cannot be calculated
+ */
 uint32_t computeLoRaWANAirtimeMs(WisBlockRegion region, uint8_t dr, uint8_t phyPayloadLen)
 {
 	uint8_t sf;

@@ -1,8 +1,25 @@
 /**
- * BasicLoRaWAN.ino
- * OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.
- * Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h
- * has the right pins for your revision and LBM is vendored in (see README).
+ * @file LowPowerLoRaWAN.ino
+ * @brief Low power LoRaWAN example: OTAA, periodic Cayenne LPP uplink, custom AT commands
+ *
+ * @details Full featured low power LoRaWAN application for RAK4631 (nRF52840), RAK3312 (ESP32-S3) and
+ * RAK3401. The LoRaWAN settings (region, keys) come from the saved configuration and are set with AT
+ * commands. The sketch enables auto join if it is not yet enabled (30 s retry interval, 3
+ * attempts). After the join ADR is switched off and DR3 is used.
+ *
+ *  - loop() sleeps on a FreeRTOS semaphore. Events (join finished, uplink timer, downlink, network
+ *    time, USB data) wake it up through the flags in g_task_event_type.
+ *  - The uplink interval is the custom setting ATC+SENDINT (seconds, stored in flash, 0 = no
+ *    automatic uplink, see custom_at.h). Every uplink is a Cayenne LPP packet (voltage and counter)
+ *    on port 1. Every 10th uplink also requests a link check and the network time.
+ *  - If a downlink has the "frame pending" flag, the remaining downlinks are fetched until the
+ *    network server has no more data: by the library (GET_PENDING_DLP 1) or by empty uplinks sent
+ *    from loop() (GET_PENDING_DLP 0).
+ *  - The network time is converted to local time and printed (UTC+8, change it for your location).
+ *  - Optional multicast group in Class C (ENA_MULTICAST).
+ *  - AT commands: USB receive only wakes up loop() through a wake callback (atRxWake()), the command is
+ *    processed in loop() by at_serial.handleSerial(). The custom AT commands ATC+SENDINT and
+ *    ATC+STATUS are registered in setup().
  */
 #include "main.h"
 
@@ -55,6 +72,15 @@ static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
 #define EVENT_UNLOCK()
 #endif
 
+/**
+ * @brief Set event flags
+ *
+ * The event flags are set from several tasks (LBM task, USB event task, timers) and cleared from
+ * loop(), possibly on different cores. A plain `flags |= x` is a read-modify-write that can lose an
+ * event when two of them overlap, so all updates run in a critical section.
+ *
+ * @param bits Event flag bits to set, e.g. STATUS
+ */
 static inline void taskEventSet(uint16_t bits)
 {
 	EVENT_LOCK();
@@ -62,7 +88,13 @@ static inline void taskEventSet(uint16_t bits)
 	EVENT_UNLOCK();
 }
 
-/** @param mask Inverted event mask, e.g. N_AT_CMD */
+/**
+ * @brief Clear event flags
+ *
+ * Counterpart of taskEventSet(), runs in a critical section as well.
+ *
+ * @param mask Inverted event mask, e.g. N_AT_CMD (all bits set except the one to clear)
+ */
 static inline void taskEventClear(uint16_t mask)
 {
 	EVENT_LOCK();
@@ -160,6 +192,12 @@ void atRxWake(void)
 }
 #endif
 
+/**
+ * @brief LoRaWAN join success callback
+ *
+ * Switches the blue LED off, sets the LORA_JOIN_FIN event and wakes up the loop() task, which then
+ * configures ADR, data rate and the uplink timer.
+ */
 void onJoined()
 {
 	Serial.println("[LoRaWAN] Join succeeded");
@@ -173,6 +211,12 @@ void onJoined()
 	Serial.flush();
 }
 
+/**
+ * @brief LoRaWAN join failed callback
+ *
+ * The library retries the join by itself, so no new join is started here. Only a final give-up
+ * (configured maximum number of attempts reached) is reported.
+ */
 void onJoinFailed()
 {
 	// FIX: this used to unconditionally call lora.join() again here on every
@@ -200,12 +244,27 @@ void onJoinFailed()
 	Serial.flush();
 }
 
+/**
+ * @brief LoRaWAN TX finished callback
+ *
+ * Prints the result and the airtime of the uplink.
+ *
+ * @param result TX result with success flag and airtime in ms
+ */
 void onTxDone(const WisBlockTxResult &result)
 {
 	Serial.printf("[LoRaWAN] TX %s, airtime %lu ms\n", result.success ? "OK" : "FAILED", result.airtimeMs);
 	Serial.flush();
 }
 
+/**
+ * @brief LoRaWAN downlink received callback
+ *
+ * Prints the downlink (unicast or multicast). A downlink with data is copied into rx_buffered, the
+ * LORA_DATA event is set and the loop() task is woken up to process it.
+ *
+ * @param result RX result with payload, length, port, RSSI, SNR, frame pending flag and multicast information
+ */
 void onRxDone(const WisBlockRxResult &result)
 {
 	if (result.isMulticast)
@@ -241,6 +300,15 @@ void onRxDone(const WisBlockRxResult &result)
 	Serial.flush();
 }
 
+/**
+ * @brief Network time answer callback
+ *
+ * Converts the network time (GPS epoch seconds) to a Unix time stamp, sets the LORA_TIME event and
+ * wakes up the loop() task.
+ *
+ * @param success true if the network answered the time request
+ * @param t Time answer, t.gpsEpochSeconds is the network time in GPS epoch seconds
+ */
 void onTimeAnswer(bool success, const WisBlockTimeAnswer &t)
 {
 	if (success)
@@ -259,6 +327,14 @@ void onTimeAnswer(bool success, const WisBlockTimeAnswer &t)
 	Serial.flush();
 }
 
+/**
+ * @brief Link check answer callback
+ *
+ * Prints the demodulation margin and the number of gateways if the request succeeded.
+ *
+ * @param success true if the network answered the link check request
+ * @param r Link check result with demodulation margin and gateway count
+ */
 void onLinkCheck(bool success, const WisBlockLinkCheckResult &r)
 {
 	if (success)
@@ -268,6 +344,13 @@ void onLinkCheck(bool success, const WisBlockLinkCheckResult &r)
 	Serial.flush();
 }
 
+/**
+ * @brief Configure and start a LoRaWAN multicast group
+ *
+ * Switches the device to Class C and sets up multicast group 0 with the given address, session keys,
+ * frequency and data rate. The values are provisioned by the network operator, replace them with
+ * your own. Only used if ENA_MULTICAST is 1.
+ */
 void setupMulticastGroup()
 {
 	// 1) Switch to Class C (or Class B) first - a multicast group has no
@@ -303,6 +386,14 @@ void setupMulticastGroup()
 	Serial.println("[Multicast] Group 0 active");
 }
 
+/**
+ * @brief Arduino setup function
+ *
+ * Starts the serial port and the library (RAK3401 hardware configuration if defined), registers
+ * the LoRaWAN callbacks, starts the background task and auto join, saves the configuration, starts
+ * the AT command interface with the custom AT commands, loads the uplink interval and creates the
+ * wake-up semaphore and timer.
+ */
 void setup()
 {
 	pinMode(LED_BLUE, OUTPUT);
@@ -457,6 +548,13 @@ void setup()
 #endif
 }
 
+/**
+ * @brief Arduino loop function
+ *
+ * Sleeps on the semaphore until an event wakes it up. Handles: join finished (ADR, data rate, start
+ * uplink timer, optional multicast), STATUS (send Cayenne LPP uplink), LORA_DATA (print received
+ * downlink, optionally pull pending downlinks), LORA_TIME (set and print local time), AT_CMD (process AT command).
+ */
 void loop()
 {
 	// Switch off green LED to show we go to sleep

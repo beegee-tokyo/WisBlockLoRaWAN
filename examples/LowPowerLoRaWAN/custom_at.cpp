@@ -1,13 +1,15 @@
 /**
  * @file custom_at.cpp
- * @brief Implementation of the ATC+SENDINT custom AT command example - see
- * custom_at.h for the struct/API this file implements.
+ * @brief Implementation of the custom AT commands ATC+SENDINT and ATC+STATUS
+ *
+ * @details Implements the API declared in custom_at.h: the settings struct persisted in flash,
+ * the ATC+SENDINT handler (also restarts the periodic wake-up timer of LowPowerLoRaWAN.ino) and the
+ * ATC+STATUS handler (prints all relevant device settings).
  *
  * @version 0.1
  * @date 2026-09-22
  *
  * @copyright Copyright (c) 2026
- *
  */
 #include <Arduino.h>
 #include "custom_at.h"
@@ -37,6 +39,13 @@ namespace
 
 	CustomAtSettings g_customSettings;
 
+	/**
+	 * @brief Save the custom settings to flash
+	 *
+	 * Writes g_customSettings to the flash key "wb_custom".
+	 *
+	 * @return true if the flash write succeeded
+	 */
 	bool saveCustomAtSettings()
 	{
 		g_customSettings.version = CUSTOM_AT_SETTINGS_VERSION; // keep in sync in case the two ever drift
@@ -45,6 +54,12 @@ namespace
 										sizeof(g_customSettings));
 	}
 
+	/**
+	 * @brief Load the custom settings from flash
+	 *
+	 * Reads the flash key "wb_custom". The data is only used if it has the size and the version of the
+	 * compiled-in struct, otherwise the defaults stay active.
+	 */
 	void loadCustomAtSettings()
 	{
 		CustomAtSettings loaded;
@@ -64,15 +79,17 @@ namespace
 		// custom_at.h's EXTENDING THIS STRUCT note.
 	}
 
-	// ATC+SENDINT=<seconds> / ATC+SENDINT=? / ATC+SENDINT
-	//
-	// Handler signature matches WisBlockLoRaAT::CustomAtHandler (see
-	// WisBlockLoRaAT.h's doc comment on addCustomATCommand()): `args` is
-	// nullptr for a bare command, the literal "?" for a query, or the raw
-	// text after '=' for a set. This command only ever takes a single
-	// plain decimal number, so unlike this library's own colon-separated
-	// custom commands (e.g. +JOIN=/+P2P=), there's nothing further to
-	// split here.
+	/**
+	 * @brief Handler for ATC+SENDINT
+	 *
+	 * ATC+SENDINT=? prints the send interval in seconds. ATC+SENDINT=`<seconds>` stores the new
+	 * interval in flash and restarts the periodic wake-up timer with it (0 stops the timer).
+	 *
+	 * @param port Stream the AT command was received on, used for the reply
+	 * @param cmd Command name (unused, only one name is registered for this handler)
+	 * @param args Text after the "=", or null / "?" for a query
+	 * @return WISBLOCK_AT_OK, WISBLOCK_AT_PARAM_ERROR for a bad value or WISBLOCK_AT_ERROR if the flash write failed
+	 */
 	WisBlockAtStatus handleSendInt(Stream &port, const char *cmd, char *args)
 	{
 		(void)cmd; // only one name is registered for this handler - see registerCustomATCommands() below
@@ -167,6 +184,18 @@ namespace
 	/** Network modes as text array*/
 	char *nwm_list[3] = {(char *)"P2P", (char *)"LoRaWAN", (char *)"FSK"};
 
+	/**
+	 * @brief Handler for ATC+STATUS
+	 *
+	 * ATC+STATUS=? prints the module, firmware version, send interval, network mode and the settings
+	 * of the active mode (region, join mode and keys for LoRaWAN, radio parameters for P2P). More
+	 * comprehensive than the built-in AT+STATUS.
+	 *
+	 * @param port Stream the AT command was received on
+	 * @param cmd Command name (unused)
+	 * @param args Text after the "=", must be null or "?"
+	 * @return WISBLOCK_AT_OK or WISBLOCK_AT_PARAM_ERROR for any other argument
+	 */
 	WisBlockAtStatus status_handler(Stream &port, const char *cmd, char *args)
 	{
 		String value_str = "";

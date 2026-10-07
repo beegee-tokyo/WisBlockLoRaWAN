@@ -108,9 +108,20 @@
 #define LPP_CHANNEL_WL_LOW 62		   // RAK12059
 #define LPP_CHANNEL_WL_HIGH 63		   // RAK12059
 
+/**
+ * @brief CayenneLPP with additional data types
+ *
+ * Adds GNSS formats (standard 4 byte, custom 6 byte, Helium Mapper, Field Tester), the VOC index,
+ * SensorHub values and the device ID to the CayenneLPP library.
+ */
 class WisCayenne : public CayenneLPP
 {
 public:
+	/**
+	 * @brief Create the payload buffer
+	 *
+	 * @param size Size of the payload buffer in bytes
+	 */
 	WisCayenne(uint8_t size) : CayenneLPP(size) {}
 
 	uint8_t addGNSS_4(uint8_t channel, int32_t latitude, int32_t longitude, int32_t altitude);

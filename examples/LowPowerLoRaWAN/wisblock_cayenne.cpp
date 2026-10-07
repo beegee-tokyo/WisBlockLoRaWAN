@@ -111,7 +111,6 @@ uint8_t WisCayenne::addGNSS_6(uint8_t channel, int32_t latitude, int32_t longitu
 /**
  * @brief Add GNSS data in Helium Mapper format
  *
- * @param channel LPP channel
  * @param latitude Latitude as read from the GNSS receiver
  * @param longitude Longitude as read from the GNSS receiver
  * @param altitude Altitude as read from the GNSS receiver

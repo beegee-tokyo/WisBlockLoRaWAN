@@ -8,9 +8,17 @@
 
 namespace
 {
-// Builds "/wb_<key>.bin" (nRF52/RP2040) - stays well under typical LittleFS
-// filename limits since keys here are short fixed strings ("wb_cfg",
-// "wb_lbm_0".."wb_lbm_5").
+/**
+ * @brief Build the file name of a data block from its key
+ *
+ * Builds "/wb_<key>.bin" (nRF52/RP2040) - stays well under typical LittleFS
+ * filename limits since keys here are short fixed strings ("wb_cfg",
+ * "wb_lbm_0".."wb_lbm_5").
+ *
+ * @param key Name of the block
+ * @param out Receives the file name
+ * @param outLen Size of the output buffer
+ */
 void buildFilename(const char *key, char *out, size_t outLen)
 {
 	snprintf(out, outLen, "%s%s%s", WISBLOCK_FLASH_FILE_PREFIX, key, WISBLOCK_FLASH_FILE_SUFFIX);

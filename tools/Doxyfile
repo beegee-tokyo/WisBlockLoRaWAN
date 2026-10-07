@@ -1,0 +1,30 @@
+# Doxygen configuration for the WisBlockLoRaWAN library.
+# Run from the library root:   doxygen tools/Doxyfile
+# Output: docs/html/index.html
+#
+# The vendored Semtech LoRa Basics Modem (src/lbm) is excluded, it has its own documentation.
+# ENABLE_PREPROCESSING is off on purpose: the sources contain several variants of the same function
+# for different MCUs inside #if blocks (nRF52 / ESP32 / RP2040) and all of them should show up.
+# The examples define functions with the same name and signature (setup(), loop(), onTxDone(), ...).
+# Doxygen merges those into one entry and may warn about "multiple @param documentation sections".
+# That is expected. To avoid it, generate the documentation of the library (INPUT = src) and of
+# each example folder separately.
+
+PROJECT_NAME           = "WisBlockLoRaWAN"
+OUTPUT_DIRECTORY       = docs
+INPUT                  = src examples
+EXCLUDE                = src/lbm
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.cpp *.c *.ino
+EXTENSION_MAPPING      = ino=C++
+ENABLE_PREPROCESSING   = NO
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_ALL            = NO
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+QUIET                  = YES

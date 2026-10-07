@@ -102,19 +102,39 @@ struct WisBlockLoRaHwConfig
 #endif
 };
 
-/** RAK4631: nRF52840 WisBlock Core module with an integrated SX1262. */
+/**
+ * @brief Radio wiring of the RAK4631 (nRF52840 WisBlock Core)
+ *
+ * RAK4631: nRF52840 WisBlock Core module with an integrated SX1262.
+ *
+ * @return Hardware configuration
+ */
 WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK4631();
-/** RAK3312: ESP32-S3 WisBlock Core module with an integrated SX1262. */
+/**
+ * @brief Radio wiring of the RAK3312 (ESP32-S3 WisBlock Core)
+ *
+ * RAK3312: ESP32-S3 WisBlock Core module with an integrated SX1262.
+ *
+ * @return Hardware configuration
+ */
 WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3312();
-/** RAK11310: RP2040 WisBlock Core module with an integrated SX1262. Only
+/**
+ * @brief Radio wiring of the RAK11310 (RP2040 WisBlock Core)
+ *
+ * RAK11310: RP2040 WisBlock Core module with an integrated SX1262. Only
  * usable with WisBlockLoRaWAN's default, compile-time-selected begin() -
  * RP2040/mbed has no full FreeRTOS support (see this file's doc comment),
  * so it isn't wired into the flexible begin(const WisBlockLoRaHwConfig&)
- * entry point and this preset exists only for symmetry/reference. */
+ * entry point and this preset exists only for symmetry/reference.
+ *
+ * @return Hardware configuration
+ */
 WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11310();
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
 /**
+ * @brief Radio wiring of the RAK3401 (RAK3400 module with a RAK13300 / RAK13302 SX1262 module)
+ *
  * RAK3401: a RAK3400 WisDuo nRF52840 module used as a WisBlock Core module,
  * combined with a RAK13300 or RAK13302 SX1262 LoRa transceiver module (both
  * share the same HW connection) - see the Creation Log entry "Flexible
@@ -126,6 +146,8 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11310();
  * SPI - the default SPI0 is already used elsewhere on this board. The
  * SPIClass instance itself is a static local inside this function's .cpp
  * file; every call returns a config pointing at the same one.
+ *
+ * @return Hardware configuration
  */
 WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401();
 #endif

@@ -19,6 +19,12 @@ namespace
 {
 constexpr void *kCtx = nullptr;
 
+/**
+ * @brief Convert a library bandwidth to the SX126x driver value
+ *
+ * @param bw Library bandwidth
+ * @return SX126x driver bandwidth
+ */
 sx126x_lora_bw_t toSx126xBandwidth(WisBlockP2PBandwidth bw)
 {
 	switch (bw)
@@ -47,6 +53,12 @@ sx126x_lora_bw_t toSx126xBandwidth(WisBlockP2PBandwidth bw)
 	}
 }
 
+/**
+ * @brief Convert a library bandwidth to Hz
+ *
+ * @param bw Library bandwidth
+ * @return Bandwidth in Hz
+ */
 uint32_t bandwidthToHz(WisBlockP2PBandwidth bw)
 {
 	switch (bw)
@@ -75,8 +87,16 @@ uint32_t bandwidthToHz(WisBlockP2PBandwidth bw)
 	}
 }
 
-// Semtech AN1200.13: enable Low Data Rate Optimization whenever the symbol
-// period exceeds 16.38ms - matters most at SF11/SF12 on narrow bandwidths.
+/**
+ * @brief Decide if the low data rate optimization is needed (symbol time above 16.38 ms)
+ *
+ * Semtech AN1200.13: enable Low Data Rate Optimization whenever the symbol
+ * period exceeds 16.38ms - matters most at SF11/SF12 on narrow bandwidths.
+ *
+ * @param sf Spreading factor
+ * @param bw Library bandwidth
+ * @return 1 if the optimization must be on, otherwise 0
+ */
 uint8_t computeLdro(uint8_t sf, WisBlockP2PBandwidth bw)
 {
 	double symbolPeriodMs = (1u << sf) * 1000.0 / (double)bandwidthToHz(bw);
@@ -86,21 +106,33 @@ uint8_t computeLdro(uint8_t sf, WisBlockP2PBandwidth bw)
 constexpr uint16_t kAllIrqsForTx = SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT;
 constexpr uint16_t kAllIrqsForRx = SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR;
 constexpr uint16_t kAllIrqsForCad = SX126X_IRQ_CAD_DONE | SX126X_IRQ_CAD_DETECTED;
-// Semtech AN1200.13 "LoRa Modem Designer's Guide", ยง4 Time on air:
-//
-//   Tsym = 2^SF / BW                                                  (seconds)
-//   Tpreamble = (preambleLen + 4.25) * Tsym
-//   payloadSymbNb = 8 + max(ceil((8*PL - 4*SF + 28 + 16*CRC - 20*H)
-//                                  / (4*(SF - 2*DE))) * (CR + 4), 0)
-//   Tpayload = payloadSymbNb * Tsym
-//   Ttotal = Tpreamble + Tpayload
-//
-// where PL = payload length in bytes, CRC = 1 if CRC enabled, H = 0 for
-// explicit header (1 for implicit), DE = 1 if LDRO is on, CR = coding rate
-// numerator offset (1..4, matching WisBlockP2PCodingRate / sx126x_lora_cr_t).
-// This library always uses explicit header + CRC on (see applyRadioParams()
-// and send()), so H=0 and CRC=1 are fixed below rather than threaded through
-// as parameters.
+/**
+ * @brief Calculate the time on air of a packet (Semtech AN1200.13), explicit header and CRC on
+ *
+ * Semtech AN1200.13 "LoRa Modem Designer's Guide", ยง4 Time on air:
+ *
+ *   Tsym = 2^SF / BW                                                  (seconds)
+ *   Tpreamble = (preambleLen + 4.25) * Tsym
+ *   payloadSymbNb = 8 + max(ceil((8*PL - 4*SF + 28 + 16*CRC - 20*H)
+ *                                  / (4*(SF - 2*DE))) * (CR + 4), 0)
+ *   Tpayload = payloadSymbNb * Tsym
+ *   Ttotal = Tpreamble + Tpayload
+ *
+ * where PL = payload length in bytes, CRC = 1 if CRC enabled, H = 0 for
+ * explicit header (1 for implicit), DE = 1 if LDRO is on, CR = coding rate
+ * numerator offset (1..4, matching WisBlockP2PCodingRate / sx126x_lora_cr_t).
+ * This library always uses explicit header + CRC on (see applyRadioParams()
+ * and send()), so H=0 and CRC=1 are fixed below rather than threaded through
+ * as parameters.
+ *
+ * @param sf Spreading factor
+ * @param bw Library bandwidth
+ * @param codingRate SX126x driver coding rate
+ * @param preambleLen Preamble length in symbols
+ * @param payloadLen Payload length in bytes
+ * @param ldro Low data rate optimization, 1 = on
+ * @return Airtime in ms
+ */
 uint32_t computeAirtimeMs(uint8_t sf, WisBlockP2PBandwidth bw, uint8_t codingRate, uint16_t preambleLen,
 						   uint8_t payloadLen, uint8_t ldro)
 {

@@ -1,12 +1,27 @@
 /**
- * @file plePingPong.cpp
+ * @file LoRaP2PPingPong.ino
  * @author Bernd Giesecke (bernd@giesecke.tk)
- * @brief PingPong example
+ * @brief LoRa P2P PingPong example (Master/Slave)
  * @version 0.1
  * @date 2026-10-04
  *
  * @copyright Copyright (c) 2026
  *
+ * @details Two or more identical nodes talk to each other with the 16 byte messages "PING" and "PONG"
+ * (followed by a counter pattern). Every node decides by itself if it is Master or Slave. The example
+ * is based on the PingPong example of the SX126x-Arduino library.
+ *
+ *  - After boot a node listens for RX_TIMEOUT_VALUE ms (state NO_STATE).
+ *  - RX timeout in NO_STATE: the node becomes MASTER and sends a PING.
+ *  - PING received in NO_STATE: the node becomes SLAVE and answers with a PONG.
+ *  - PONG or unknown data received in NO_STATE: the node becomes MASTER and sends a PING.
+ *  - MASTER: after a PONG it waits 15 seconds and sends the next PING. A PING from another Master
+ *    makes it a SLAVE. Unknown data is ignored.
+ *  - SLAVE: answers every PING with a PONG. A PONG makes it a MASTER. Unknown data is ignored.
+ *  - RX timeout in MASTER or SLAVE state: back to NO_STATE and listen again.
+ *
+ * The LoRa events wake the loop() task with a FreeRTOS semaphore. The AT command interface and the
+ * library background task are enabled, so the radio settings can be checked with AT commands.
  */
 #include <Arduino.h>
 
@@ -39,6 +54,15 @@ static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
 #define EVENT_LOCK() taskENTER_CRITICAL()
 #define EVENT_UNLOCK() taskEXIT_CRITICAL()
 #endif
+/**
+ * @brief Set event flags
+ *
+ * The event flags are set from several tasks (LBM task, USB event task, timers) and cleared from
+ * loop(), possibly on different cores. A plain `flags |= x` is a read-modify-write that can lose an
+ * event when two of them overlap, so all updates run in a critical section.
+ *
+ * @param bits Event flag bits to set, e.g. STATUS
+ */
 static inline void taskEventSet(uint16_t bits)
 {
 	EVENT_LOCK();
@@ -46,7 +70,13 @@ static inline void taskEventSet(uint16_t bits)
 	EVENT_UNLOCK();
 }
 
-/** @param mask Inverted event mask, e.g. N_AT_CMD */
+/**
+ * @brief Clear event flags
+ *
+ * Counterpart of taskEventSet(), runs in a critical section as well.
+ *
+ * @param mask Inverted event mask, e.g. N_AT_CMD (all bits set except the one to clear)
+ */
 static inline void taskEventClear(uint16_t mask)
 {
 	EVENT_LOCK();
@@ -94,6 +124,13 @@ int16_t rx_rssi;
 int8_t rx_snr;
 uint8_t rx_from;
 
+/**
+ * @brief Arduino setup function
+ *
+ * Starts the serial port, configures all LoRa P2P radio parameters (including IQ inversion and
+ * sync word), registers the callbacks, starts the library background task and the AT command
+ * interface, creates the wake-up semaphore and starts the first receive window.
+ */
 void setup()
 {
 	pinMode(LED_BUILTIN, OUTPUT);
@@ -165,6 +202,12 @@ void setup()
 	lora.startP2PReceive(RX_TIMEOUT_VALUE);
 }
 
+/**
+ * @brief Arduino loop function
+ *
+ * Sleeps on the semaphore until a LoRa event wakes it up. Handles the events TX finished (start
+ * receiving), RX timeout and RX done (Master/Slave state machine, see file description).
+ */
 void loop()
 {
 	// Wait until semaphore is released (FreeRTOS)
@@ -231,7 +274,7 @@ void loop()
 					delay(15000);
 					sendPingPong(true);
 				}
-				else if (rx_from = MASTER)
+				else if (rx_from == MASTER)
 				{
 					Serial.println("Switch MASTER ==> SLAVE");
 					current_state = SLAVE;
@@ -270,7 +313,9 @@ void loop()
 /**
  * @brief Send a PING or a PONG
  *
- * @param sendPing true ==> send a PING
+ * Fills the transmit buffer with "PING" or "PONG" followed by a counter pattern and sends it.
+ *
+ * @param sendPing true: send a PING, false: send a PONG
  */
 void sendPingPong(bool sendPing)
 {
@@ -308,7 +353,12 @@ void sendPingPong(bool sendPing)
 	lora.sendP2P((uint8_t *)TxdBuffer, (uint8_t)BufferSize);
 }
 
-/**@brief Function to be executed on Radio Tx Done event
+/**
+ * @brief LoRa P2P TX finished callback
+ *
+ * Sets the TX_FIN event and wakes up the loop() task.
+ *
+ * @param result TX result, result.success is true if the packet was sent
  */
 void onTxDone(const WisBlockTxResult &result)
 {
@@ -318,7 +368,13 @@ void onTxDone(const WisBlockTxResult &result)
 	xSemaphoreGive(g_task_sem);
 }
 
-/**@brief Function to be executed on Radio Rx Done event
+/**
+ * @brief LoRa P2P RX finished callback
+ *
+ * A packet with data: stores RSSI and SNR, checks if it is a PING or a PONG, sets the RX_FIN event
+ * and wakes up the loop() task. An empty result is an RX timeout: sets the RX_ERR event instead.
+ *
+ * @param result RX result with payload, length, RSSI and SNR (length 0 on RX timeout)
  */
 void onRxDone(const WisBlockRxResult &result)
 {

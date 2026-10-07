@@ -22,16 +22,47 @@
 
 namespace WisBlockLoRaFlash
 {
-/** Must be called once before read()/write(), e.g. from WisBlockLoRaWAN::begin(). */
+/**
+ * @brief Initialize the flash storage
+ *
+ * Must be called once before read()/write(), e.g. from WisBlockLoRaWAN::begin().
+ *
+ * @return true if the storage is ready
+ */
 bool init();
 
-/** Reads up to `len` bytes into `buf`. Returns false if nothing was ever stored under `key`. */
+/**
+ * @brief Read a stored data block
+ *
+ * Reads up to `len` bytes into `buf`. Returns false if nothing was ever stored under `key`.
+ *
+ * @param key Name of the block
+ * @param buf Receives the data
+ * @param len Number of bytes expected
+ * @return true if a block of exactly this size was read
+ */
 bool read(const char *key, uint8_t *buf, size_t len);
 
-/** Writes `len` bytes from `buf` under `key`, overwriting any previous contents. */
+/**
+ * @brief Write a data block, replacing any previous content
+ *
+ * Writes `len` bytes from `buf` under `key`, overwriting any previous contents.
+ *
+ * @param key Name of the block
+ * @param buf Data to store
+ * @param len Number of bytes
+ * @return true if the data was written
+ */
 bool write(const char *key, const uint8_t *buf, size_t len);
 
-/** Erases the blob stored under `key`. */
+/**
+ * @brief Delete a stored data block
+ *
+ * Erases the blob stored under `key`.
+ *
+ * @param key Name of the block
+ * @return true if the block was deleted
+ */
 bool erase(const char *key);
 } // namespace WisBlockLoRaFlash
 

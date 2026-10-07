@@ -53,6 +53,9 @@ WisBlockLoRaHwConfig wisblockRadioContext = {
 	.spiHz = 8000000UL, // SX1262 SPI max is 16 MHz; 8 MHz is a safe default over WisBlock header traces
 };
 
+/**
+ * @brief SPI settings of the radio: 8 MHz, MSB first, mode 0
+ */
 SPISettings spiSettings(8000000UL, MSBFIRST, SPI_MODE0);
 
 // --- Sleep-state tracking -------------------------------------------------
@@ -91,10 +94,14 @@ RadioMode radioMode = RadioMode::Awake;
 // needed anywhere else in the library.
 // ---------------------------------------------------------------------------
 
-// Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
-// for BUSY (assumed already low or clearing quickly); asleep case restores
-// antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
-// the special NSS-pulse wake sequence.
+/**
+ * @brief Wait until the radio can accept a command, and wake it up if it sleeps
+ *
+ * Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
+ * for BUSY (assumed already low or clearing quickly); asleep case restores
+ * antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
+ * the special NSS-pulse wake sequence.
+ */
 void checkDeviceReady()
 {
 	if (radioMode != RadioMode::Asleep)

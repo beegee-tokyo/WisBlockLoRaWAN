@@ -59,36 +59,66 @@ struct WisBlockPersistedConfig
 };
 
 /**
+ * @brief Load the saved configuration from flash
+ *
  * Loads config from flash into `out`. Returns false (and fills `out` with
  * factory defaults) if no valid config was found, e.g. first boot or CRC
  * mismatch.
+ *
+ * @param out Receives the configuration, the defaults if nothing valid was found
+ * @return true if a valid saved configuration was loaded
  */
 bool wisblockConfigLoad(WisBlockPersistedConfig &out);
 
-/** Persists `cfg` to flash. Returns false on write failure. */
+/**
+ * @brief Save the configuration to flash
+ *
+ * Persists `cfg` to flash. Returns false on write failure.
+ *
+ * @param cfg Configuration to save
+ * @return true if the data was written
+ */
 bool wisblockConfigSave(const WisBlockPersistedConfig &cfg);
 
 /**
+ * @brief Save the configuration as factory defaults
+ *
  * Persists `cfg` to a separate "factory" flash slot, distinct from the
  * regular wisblockConfigSave()/wisblockConfigLoad() "user" slot above - see
  * AT+FACTORY's doc comment in WisBlockLoRaAT.cpp for the intended
  * production flow this is part of (this deliberately does NOT touch the
  * user slot - only the caller decides when the two should be synced, via
  * wisblockConfigLoadFactory() below). Returns false on write failure.
+ *
+ * @param cfg Configuration to save
+ * @return true if the data was written
  */
 bool wisblockConfigSaveFactory(const WisBlockPersistedConfig &cfg);
 
 /**
+ * @brief Load the factory defaults from flash
+ *
  * Loads the factory-slot config saved by wisblockConfigSaveFactory() into
  * `out`. Returns false (and leaves `out` untouched) if nothing has ever
  * been saved there, or the saved blob fails its magic/version/CRC check -
  * unlike wisblockConfigLoad(), this deliberately does NOT fall back to
  * compiled-in defaults, since a caller asking for the factory backup needs
  * to know whether one actually exists (see ATR's doc comment).
+ *
+ * @param out Receives the configuration
+ * @return true if a valid factory configuration was loaded
  */
 bool wisblockConfigLoadFactory(WisBlockPersistedConfig &out);
 
-/** Computes the CRC16-CCITT used to validate the stored blob. */
+/**
+ * @brief Calculate the CRC16-CCITT of a data block
+ *
+ * Computes the CRC16-CCITT used to validate the stored blob.
+ *
+ * @param data Data
+ * @param len Number of bytes
+ * @return CRC16 value
+ */
 uint16_t wisblockConfigCrc16(const uint8_t *data, size_t len);
 
 #endif // WISBLOCK_LORAWAN_CONFIG_H

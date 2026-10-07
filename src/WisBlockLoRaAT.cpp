@@ -23,24 +23,46 @@
 
 namespace
 {
+	/**
+	 * @brief Check if a text starts with a prefix
+	 *
+	 * @param str Text to check
+	 * @param prefix Prefix
+	 * @return true if the text starts with the prefix
+	 */
 	bool startsWith(const char *str, const char *prefix)
 	{
 		return strncmp(str, prefix, strlen(prefix)) == 0;
 	}
 
-	// Case-insensitive "AT" prefix check only - used to decide whether a
-	// line should go through the (uppercasing) command parser at all,
-	// before that uppercasing happens. Lines that don't start with "AT" in
-	// any case are passed to unhandledDataCb() completely untouched - see
-	// processLine()'s doc comment for why that path must not be uppercased.
+	/**
+	 * @brief Check if a text starts with "AT" in any letter case
+	 *
+	 * Case-insensitive "AT" prefix check only - used to decide whether a
+	 * line should go through the (uppercasing) command parser at all,
+	 * before that uppercasing happens. Lines that don't start with "AT" in
+	 * any case are passed to unhandledDataCb() completely untouched - see
+	 * processLine()'s doc comment for why that path must not be uppercased.
+	 *
+	 * @param str Text to check
+	 * @return true if it starts with AT
+	 */
 	bool startsWithAtCaseInsensitive(const char *str)
 	{
 		return (str[0] == 'A' || str[0] == 'a') && (str[1] == 'T' || str[1] == 't');
 	}
 
-	// Shared by every query handler below that reads back a byte array
-	// (DevEUI, JoinEUI, DevAddr, SN) as upper-case hex, matching the format
-	// their corresponding setters accept.
+	/**
+	 * @brief Print bytes as hex text followed by a line end
+	 *
+	 * Shared by every query handler below that reads back a byte array
+	 * (DevEUI, JoinEUI, DevAddr, SN) as upper-case hex, matching the format
+	 * their corresponding setters accept.
+	 *
+	 * @param port Stream to print on
+	 * @param data Bytes to print
+	 * @param len Number of bytes
+	 */
 	void printHex(Stream *port, const uint8_t *data, size_t len)
 	{
 		char buf[3];
@@ -55,22 +77,39 @@ namespace
 	}
 
 	// --- P2P parameter helpers (RUI3 numbering) ---------------------------
-	//
-	// The AT interface uses RUI3's index values, which are NOT the same
-	// numbers as this library's enums:
-	//   AT+PBW:  0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83,
-	//            7=31.25, 8=41.67, 9=62.5 kHz   (WisBlockP2PBandwidth lists
-	//            the narrow bands in the opposite order: 3=62.5 ... 9=7.81)
-	//   AT+PCR:  0=4/5, 1=4/6, 2=4/7, 3=4/8     (WisBlockP2PCodingRate is 1..4)
-	// For the bandwidth the mapping is its own inverse: 0..2 stay, 3..9 -> 12-x.
+	/**
+	 * @brief Convert a P2P bandwidth between the AT numbering (RUI3) and the library numbering, the conversion works in both directions
+	 *
+	 *
+	 * The AT interface uses RUI3's index values, which are NOT the same
+	 * numbers as this library's enums:
+	 *   AT+PBW:  0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83,
+	 *            7=31.25, 8=41.67, 9=62.5 kHz   (WisBlockP2PBandwidth lists
+	 *            the narrow bands in the opposite order: 3=62.5 ... 9=7.81)
+	 *   AT+PCR:  0=4/5, 1=4/6, 2=4/7, 3=4/8     (WisBlockP2PCodingRate is 1..4)
+	 * For the bandwidth the mapping is its own inverse: 0..2 stay, 3..9 -> 12-x.
+	 *
+	 * @param v Bandwidth index
+	 * @return Bandwidth index in the other numbering
+	 */
 	inline uint8_t p2pBwToggle(uint8_t v)
 	{
 		return v >= 3 ? (uint8_t)(12 - v) : v;
 	}
 
-	// Strict unsigned decimal parse: digits only, no sign/space/trailing text,
-	// result within [minV, maxV]. Used by all the AT+P* setters below so that
-	// a damaged or empty value is rejected instead of silently becoming 0.
+	/**
+	 * @brief Convert a text to a number, only digits and a value inside the limits are accepted
+	 *
+	 * Strict unsigned decimal parse: digits only, no sign/space/trailing text,
+	 * result within [minV, maxV]. Used by all the AT+P* setters below so that
+	 * a damaged or empty value is rejected instead of silently becoming 0.
+	 *
+	 * @param s Text
+	 * @param minV Lowest accepted value
+	 * @param maxV Highest accepted value
+	 * @param out Receives the number
+	 * @return true if the text is a valid number inside the limits
+	 */
 	bool parseUintStrict(const char *s, uint32_t minV, uint32_t maxV, uint32_t &out)
 	{
 		if (s == nullptr || s[0] == '\0' || strlen(s) > 10)
@@ -2193,9 +2232,15 @@ bool WisBlockLoRaAT::enableBackgroundRx()
 	return true;
 }
 
-// TinyUSB weak-symbol hook - fires whenever USB CDC RX data arrives. Only
-// one definition of this can exist in the whole linked program; see the
-// class doc comment on enableBackgroundRx().
+/**
+ * @brief TinyUSB callback for received USB CDC data (nRF52)
+ *
+ * TinyUSB weak-symbol hook - fires whenever USB CDC RX data arrives. Only
+ * one definition of this can exist in the whole linked program; see the
+ * class doc comment on enableBackgroundRx().
+ *
+ * @param itf CDC interface number, only interface 0 is used
+ */
 extern "C" void tud_cdc_rx_cb(uint8_t itf)
 {
 	if (itf != 0)
@@ -2222,8 +2267,17 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 
 namespace
 {
-// Signature required by esp_event_handler_t. Runs in the Arduino core's USB
-// event task: do nothing here except forward to the wake callback.
+/**
+ * @brief USB event handler (ESP32), forwards the receive event
+ *
+ * Signature required by esp_event_handler_t. Runs in the Arduino core's USB
+ * event task: do nothing here except forward to the wake callback.
+ *
+ * @param arg Not used
+ * @param event_base Event base
+ * @param event_id Event ID
+ * @param event_data Not used
+ */
 void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
 	(void)arg;

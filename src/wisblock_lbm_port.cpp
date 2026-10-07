@@ -46,6 +46,9 @@ void *radioIrqContext = nullptr;
 volatile bool radioIrqEnabled = true;
 volatile bool radioIrqFlag = false;
 
+/**
+ * @brief Interrupt handler of the radio DIO1 line
+ */
 void onDio1Rising()
 {
 	radioIrqFlag = true;
@@ -79,6 +82,12 @@ constexpr int kContextTypeCount = 6;	  // matches modem_context_type_t in smtc_m
 uint8_t contextShadow[kContextTypeCount][kContextBlobSize];
 bool contextLoaded[kContextTypeCount] = {false, false, false, false, false, false};
 
+/**
+ * @brief Get the flash key under which a modem context is stored
+ *
+ * @param type Modem context type
+ * @return Flash key
+ */
 const char *contextKey(modem_context_type_t type)
 {
 	static const char *keys[kContextTypeCount] = {"wb_lbm_0", "wb_lbm_1", "wb_lbm_2",
@@ -86,6 +95,11 @@ const char *contextKey(modem_context_type_t type)
 	return keys[(int)type];
 }
 
+/**
+ * @brief Load a modem context from flash into its RAM copy if that did not happen yet
+ *
+ * @param type Modem context type
+ */
 void ensureContextLoaded(modem_context_type_t type)
 {
 	int idx = (int)type;
@@ -165,6 +179,9 @@ bool consumeRadioIrqFlag()
 extern "C"
 {
 	// --- Reset management ---------------------------------------------
+	/**
+	 * @brief Reset the MCU (modem HAL, see smtc_modem_hal.h)
+	 */
 	void smtc_modem_hal_reset_mcu(void)
 	{
 #if defined(ARDUINO_ARCH_NRF52)
@@ -177,6 +194,9 @@ extern "C"
 	}
 
 	// --- Watchdog management ---------------------------------------------
+	/**
+	 * @brief Reload the watchdog, not used in this port
+	 */
 	void smtc_modem_hal_reload_wdog(void)
 	{
 		// TODO: hook up each platform's watchdog if you enable one:
@@ -186,16 +206,29 @@ extern "C"
 	}
 
 	// --- Time management ---------------------------------------------
+	/**
+	 * @brief Get the time since boot
+	 * @return Time in seconds
+	 */
 	uint32_t smtc_modem_hal_get_time_in_s(void)
 	{
 		return millis() / 1000;
 	}
 
+	/**
+	 * @brief Get the time since boot
+	 * @return Time in milliseconds
+	 */
 	uint32_t smtc_modem_hal_get_time_in_ms(void)
 	{
 		return millis();
 	}
 
+	/**
+	 * @brief Set an offset for the time functions to test the counter wrapping
+	 *
+	 * @param offset_to_test_wrapping Offset in seconds
+	 */
 	void smtc_modem_hal_set_offset_to_test_wrapping(const uint32_t offset_to_test_wrapping)
 	{
 		// Debug-only hook LBM uses to test millis() wraparound handling.
@@ -205,11 +238,19 @@ extern "C"
 	}
 
 	// --- Timer management ---------------------------------------------
-	// When WisBlockLbmTask is active (background task mode - see
-	// WisBlockLoRaWAN::enableBackgroundTask()), timers are scheduled via a
-	// real FreeRTOS software timer instead of the millis()-polled fallback
-	// below, so LBM's own retransmission/join-backoff scheduling keeps
-	// working with zero loop() polling required.
+	/**
+	 * @brief Start the modem software timer
+	 *
+	 * When WisBlockLbmTask is active (background task mode - see
+	 * WisBlockLoRaWAN::enableBackgroundTask()), timers are scheduled via a
+	 * real FreeRTOS software timer instead of the millis()-polled fallback
+	 * below, so LBM's own retransmission/join-backoff scheduling keeps
+	 * working with zero loop() polling required.
+	 *
+	 * @param milliseconds Time until the callback is called
+	 * @param callback Function called when the timer expires
+	 * @param context Context passed to the callback
+	 */
 	void smtc_modem_hal_start_timer(const uint32_t milliseconds, void (*callback)(void *context), void *context)
 	{
 		if (WisBlockLbmTask::isActive())
@@ -223,6 +264,9 @@ extern "C"
 		timerActive = true;
 	}
 
+	/**
+	 * @brief Stop the modem software timer
+	 */
 	void smtc_modem_hal_stop_timer(void)
 	{
 		if (WisBlockLbmTask::isActive())
@@ -234,12 +278,18 @@ extern "C"
 	}
 
 	// --- IRQ management ---------------------------------------------
+	/**
+	 * @brief Disable the interrupts that call into the modem
+	 */
 	void smtc_modem_hal_disable_modem_irq(void)
 	{
 		radioIrqEnabled = false;
 		noInterrupts();
 	}
 
+	/**
+	 * @brief Enable the interrupts that call into the modem
+	 */
 	void smtc_modem_hal_enable_modem_irq(void)
 	{
 		interrupts();
@@ -247,6 +297,14 @@ extern "C"
 	}
 
 	// --- Context saving management ---------------------------------------------
+	/**
+	 * @brief Read a modem context from flash
+	 *
+	 * @param ctx_type Modem context type
+	 * @param offset Offset in the context
+	 * @param buffer Receives the data
+	 * @param size Number of bytes
+	 */
 	void smtc_modem_hal_context_restore(const modem_context_type_t ctx_type, uint32_t offset, uint8_t *buffer,
 										 const uint32_t size)
 	{
@@ -261,6 +319,14 @@ extern "C"
 		memcpy(buffer, contextShadow[(int)ctx_type] + offset, size);
 	}
 
+	/**
+	 * @brief Write a modem context to flash
+	 *
+	 * @param ctx_type Modem context type
+	 * @param offset Offset in the context
+	 * @param buffer Data to store
+	 * @param size Number of bytes
+	 */
 	void smtc_modem_hal_context_store(const modem_context_type_t ctx_type, uint32_t offset, const uint8_t *buffer,
 									   const uint32_t size)
 	{
@@ -273,6 +339,13 @@ extern "C"
 		WisBlockLoRaFlash::write(contextKey(ctx_type), contextShadow[(int)ctx_type], kContextBlobSize);
 	}
 
+	/**
+	 * @brief Erase flash pages of a modem context
+	 *
+	 * @param ctx_type Modem context type
+	 * @param offset Offset in the context
+	 * @param nb_page Number of pages
+	 */
 	void smtc_modem_hal_context_flash_pages_erase(const modem_context_type_t ctx_type, uint32_t offset,
 												   uint8_t nb_page)
 	{
@@ -289,6 +362,13 @@ extern "C"
 	}
 
 	// --- Panic management ---------------------------------------------
+	/**
+	 * @brief Handle a fatal error of the modem: print it and reset the MCU
+	 *
+	 * @param func Name of the function that reported the error
+	 * @param line Line number
+	 * @param fmt Printf style format of the message
+	 */
 	void smtc_modem_hal_on_panic(uint8_t *func, uint32_t line, const char *fmt, ...)
 	{
 		Serial.print("[LBM PANIC] ");
@@ -314,6 +394,13 @@ extern "C"
 	}
 
 	// --- Random management ---------------------------------------------
+	/**
+	 * @brief Get a random number
+	 *
+	 * @param val_1 Lower limit
+	 * @param val_2 Upper limit
+	 * @return Random number between the limits
+	 */
 	uint32_t smtc_modem_hal_get_random_nb_in_range(const uint32_t val_1, const uint32_t val_2)
 	{
 		uint32_t lo = val_1 < val_2 ? val_1 : val_2;
@@ -322,12 +409,22 @@ extern "C"
 	}
 
 	// --- Radio env management ---------------------------------------------
+	/**
+	 * @brief Register the callback for the radio interrupt
+	 *
+	 * @param callback Function called when the radio interrupt fires
+	 * @param context Context passed to the callback
+	 */
 	void smtc_modem_hal_irq_config_radio_irq(void (*callback)(void *context), void *context)
 	{
 		radioIrqCallback = callback;
 		radioIrqContext = context;
 	}
 
+	/**
+	 * @brief Tell if another stack uses the radio
+	 * @return Always false, the radio is only used by the modem
+	 */
 	bool smtc_modem_external_stack_currently_use_radio(void)
 	{
 		// No other stack (e.g. a separate BLE/802.15.4 radio driver) shares
@@ -335,6 +432,9 @@ extern "C"
 		return false;
 	}
 
+	/**
+	 * @brief Start the radio TCXO
+	 */
 	void smtc_modem_hal_start_radio_tcxo(void)
 	{
 		// The RAK4631/RAK3312/RAK11310 SX1262 modules use a TCXO fed
@@ -345,11 +445,18 @@ extern "C"
 		// drive it high here.
 	}
 
+	/**
+	 * @brief Stop the radio TCXO
+	 */
 	void smtc_modem_hal_stop_radio_tcxo(void)
 	{
 		// See smtc_modem_hal_start_radio_tcxo() above.
 	}
 
+	/**
+	 * @brief Get the start-up time of the radio TCXO and antenna switch power
+	 * @return Delay in ms
+	 */
 	uint32_t smtc_modem_hal_get_radio_tcxo_startup_delay_ms(void)
 	{
 		// FIX (root cause of every LoRaWAN join that sent a real Join
@@ -387,6 +494,11 @@ extern "C"
 		return kBaseTcxoStartupMs + WisBlockRadioHal::antennaPowerSettleMs();
 	}
 
+	/**
+	 * @brief Switch the antenna switch between TX and RX, not used because the radio drives the switch
+	 *
+	 * @param is_tx_on true when transmitting
+	 */
 	void smtc_modem_hal_set_ant_switch(bool is_tx_on)
 	{
 		// SX1262 drives its own RF switch via DIO2 (useDio2AntSwitch in the
@@ -398,6 +510,10 @@ extern "C"
 	}
 
 	// --- Environment management ---------------------------------------------
+	/**
+	 * @brief Get the battery level
+	 * @return 255 (unknown), not measured in this port
+	 */
 	uint8_t smtc_modem_hal_get_battery_level(void)
 	{
 		// 0 = mains-powered, 1..254 = battery level, 255 = unknown.
@@ -408,6 +524,10 @@ extern "C"
 		return 255;
 	}
 
+	/**
+	 * @brief Get the board specific delay that is added to the RX window timing
+	 * @return Delay in ms
+	 */
 	int8_t smtc_modem_hal_get_board_delay_ms(void)
 	{
 		// Extra fixed delay LBM adds to its RX window timing to compensate
@@ -418,6 +538,11 @@ extern "C"
 	}
 
 	// --- Trace management ---------------------------------------------
+	/**
+	 * @brief Print a trace message of the modem to the serial port
+	 *
+	 * @param fmt Printf style format of the message
+	 */
 	void smtc_modem_hal_print_trace(const char *fmt, ...)
 	{
 		char msg[192];
@@ -429,17 +554,43 @@ extern "C"
 	}
 
 	// --- Fuota management (only exercised if FMP package is enabled) ---------------------------------------------
+	/**
+	 * @brief FUOTA hardware version, not used
+	 * @return 0
+	 */
 	uint32_t smtc_modem_hal_get_hw_version_for_fuota(void) { return 0; }
+	/**
+	 * @brief FUOTA firmware version, not used
+	 * @return 0
+	 */
 	uint32_t smtc_modem_hal_get_fw_version_for_fuota(void) { return 0; }
+	/**
+	 * @brief FUOTA firmware status, not used
+	 * @return 0
+	 */
 	uint8_t smtc_modem_hal_get_fw_status_available_for_fuota(void) { return 0; }
+	/**
+	 * @brief FUOTA firmware delete status, not used
+	 *
+	 * @param fw_to_delete_version Firmware version to delete
+	 * @return 0
+	 */
 	uint8_t smtc_modem_hal_get_fw_delete_status_for_fuota(uint32_t fw_to_delete_version)
 	{
 		(void)fw_to_delete_version;
 		return 0;
 	}
+	/**
+	 * @brief FUOTA next firmware version, not used
+	 * @return 0
+	 */
 	uint32_t smtc_modem_hal_get_next_fw_version_for_fuota(void) { return 0; }
 
 	// --- Needed for Device Management ---------------------------------------------
+	/**
+	 * @brief Get the temperature for the device management
+	 * @return Temperature in degree Celsius, fixed at 25
+	 */
 	int8_t smtc_modem_hal_get_temperature(void)
 	{
 		// TODO: wire to the SX1262's internal temperature sensor
@@ -448,6 +599,10 @@ extern "C"
 		return 25;
 	}
 
+	/**
+	 * @brief Get the supply voltage for the device management
+	 * @return Voltage in mV, fixed at 3300
+	 */
 	uint16_t smtc_modem_hal_get_voltage_mv(void)
 	{
 		// TODO: wire to an actual VBAT ADC read; RAK4631/3312/11310 all
@@ -458,11 +613,23 @@ extern "C"
 		return 3300;
 	}
 
+	/**
+	 * @brief Store a crash log, not used
+	 *
+	 * @param crash_string Crash text
+	 * @param crash_string_length Length of the text
+	 */
 	void smtc_modem_hal_crashlog_store(const uint8_t *crash_string, uint8_t crash_string_length)
 	{
 		// WisBlockLoRaFlash::write("wb_lbm_crash", crash_string, crash_string_length);
 	}
 
+	/**
+	 * @brief Restore a crash log, not used
+	 *
+	 * @param crash_string Receives the crash text
+	 * @param crash_string_length Receives the length of the text
+	 */
 	void smtc_modem_hal_crashlog_restore(uint8_t *crash_string, uint8_t *crash_string_length)
 	{
 		// CRASH_LOG_SIZE is defined in smtc_modem_hal.h (242 bytes).
@@ -470,12 +637,21 @@ extern "C"
 		// *crash_string_length = ok ? CRASH_LOG_SIZE : 0;
 	}
 
+	/**
+	 * @brief Set the crash log status
+	 *
+	 * @param available true if a crash log is available
+	 */
 	void smtc_modem_hal_crashlog_set_status(bool available)
 	{
 		// uint8_t flag = available ? 1 : 0;
 		// WisBlockLoRaFlash::write("wb_lbm_crash_flag", &flag, 1);
 	}
 
+	/**
+	 * @brief Get the crash log status
+	 * @return true if a crash log is available
+	 */
 	bool smtc_modem_hal_crashlog_get_status(void)
 	{
 		uint8_t flag = 0;
@@ -484,6 +660,10 @@ extern "C"
 	}
 
 	// --- Needed for Store and Forward service ---------------------------------------------
+	/**
+	 * @brief Number of flash pages for the store and forward service, not used
+	 * @return 3
+	 */
 	uint16_t smtc_modem_hal_store_and_forward_get_number_of_pages(void)
 	{
 		// Only consulted if the Store-and-Forward service is compiled in
@@ -492,6 +672,10 @@ extern "C"
 		return 3;
 	}
 
+	/**
+	 * @brief Flash page size for the store and forward service, not used
+	 * @return Page size in bytes
+	 */
 	uint16_t smtc_modem_hal_flash_get_page_size(void)
 	{
 		// Nominal flash page size; only meaningful alongside real
@@ -501,6 +685,9 @@ extern "C"
 	}
 
 	// --- For Real Time OS compatibility ---------------------------------------------
+	/**
+	 * @brief Called by the modem when it needs the application to run it, not used
+	 */
 	void smtc_modem_hal_user_lbm_irq(void)
 	{
 		// LBM calls this whenever it wants to notify an RTOS-based port

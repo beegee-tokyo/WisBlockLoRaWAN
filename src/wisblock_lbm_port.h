@@ -17,6 +17,8 @@
 namespace WisBlockLbmPort
 {
 /**
+ * @brief Attach the radio interrupt (DIO1) and reset the port state
+ *
  * Attaches the DIO1 interrupt (feeding smtc_modem_hal_irq_config_radio_irq's
  * registered callback) and initializes the software timer used by
  * smtc_modem_hal_start_timer/stop_timer. Call once from
@@ -25,6 +27,8 @@ namespace WisBlockLbmPort
 void init();
 
 /**
+ * @brief Service the software timer of the LoRa Basics Modem
+ *
  * Services the software timer (fires the callback smtc_modem_hal_start_timer
  * registered, once its deadline passes). Call every loop(); this is what
  * lets smtc_modem_run_engine()'s requested sleep_time_ms actually elapse on
@@ -33,12 +37,16 @@ void init();
 void tick();
 
 /**
+ * @brief Check and clear the radio interrupt flag
+ *
  * True if DIO1 has risen since the last call (consumes/clears the flag).
  * LoRaWAN mode doesn't need this - LBM's own radio IRQ callback (registered
  * via smtc_modem_hal_irq_config_radio_irq once smtc_modem_init() runs)
  * already gets invoked straight from the same ISR. LoRaP2PEngine uses this
  * instead, since it drives the radio directly and never triggers that
  * registration.
+ *
+ * @return true if the radio interrupt fired since the last call
  */
 bool consumeRadioIrqFlag();
 } // namespace WisBlockLbmPort

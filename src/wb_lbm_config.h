@@ -7,7 +7,7 @@
  * this library's `src/` folder on the include path and have no per-library
  * compiler flags. So that the same sources build in both:
  *
- *  - every #include of an LBM header inside this library is a path relative
+ *  - every include of an LBM header inside this library is a path relative
  *    to the including file (rewritten by tools/make_lbm_includes_relative.py),
  *    so nothing depends on the include path or on other installed libraries,
  *  - every translation unit that uses LBM starts with this header, which
