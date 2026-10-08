@@ -17,7 +17,7 @@ _**Not supported**_
 
 # IMPORTANT
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
-- This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on eal devices is done by the author of this repository.    
+- This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
 - _**RAK11300 and RAK11310 support is not yet fully implemented. The original Arduino and PlatformIO BSP's for the RP2040 MCU are based on MBED, which is no longer officially maintained and supported, a different approach will be required for these modules.**_     
 
 ## Supported hardware

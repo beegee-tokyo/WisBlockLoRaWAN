@@ -18,6 +18,14 @@
 #include <stddef.h> // size_t
 #include <stdint.h>
 
+/**
+ * Number of lines that WisBlockLoRaAT::onUnhandledDataInLoop() can hold until loop() fetches them.
+ * Each line needs 256 bytes of RAM. Define a different value before including the library.
+ */
+#ifndef WB_AT_UNHANDLED_QUEUE_LINES
+#define WB_AT_UNHANDLED_QUEUE_LINES 4
+#endif
+
 /** Status a custom AT command handler returns - see WisBlockLoRaAT::addCustomATCommand(). */
 enum WisBlockAtStatus
 {
@@ -77,7 +85,10 @@ public:
 	/**
 	 * @brief Read the serial port and execute the received AT commands
 	 *
-	 * Call every loop(); reads available bytes, parses complete lines terminated by CR or LF.
+	 * Call it in every loop(), or after the wake callback of setRxWakeCallback() was called.
+	 * It reads the available bytes, parses the complete lines (terminated by CR or LF) and runs
+	 * the AT commands. It does nothing while enableBackgroundRx() runs the commands in its own
+	 * task, except delivering the lines for onUnhandledDataInLoop().
 	 */
 	void handleSerial();
 
@@ -104,6 +115,24 @@ public:
 	 * @param cb Function called with every line that does not start with AT
 	 */
 	void onUnhandledData(UnhandledDataCb cb) { unhandledDataCb = cb; }
+
+	/**
+	 * @brief Register a handler for lines that are not AT commands, called from loop()
+	 *
+	 * Same lines as onUnhandledData(), but they are not handled where they are read. With
+	 * enableBackgroundRx() that is the task of the library, in a sketch with
+	 * setRxWakeCallback() it is whatever context the wake callback runs in. This handler is
+	 * called from handleSerial(), that means from loop(), so it can do what loop() can do. The
+	 * lines wait in a queue (WB_AT_UNHANDLED_QUEUE_LINES lines of up to 255 characters). If the
+	 * queue is full, new lines are dropped.
+	 *
+	 * Both handlers can be registered at the same time. If loop() sleeps, use the handler of
+	 * onUnhandledData() to wake it up (set a flag or give a semaphore) and let loop() call
+	 * handleSerial().
+	 *
+	 * @param cb Function called from handleSerial() for every line that does not start with AT, the text is only valid during the call
+	 */
+	void onUnhandledDataInLoop(UnhandledDataCb cb) { unhandledLoopCb = cb; }
 
 	/** Up to this many custom commands can be registered - see addCustomATCommand(). */
 	static const uint8_t MAX_CUSTOM_AT_COMMANDS = 16;
@@ -153,46 +182,55 @@ public:
 	 * up and calls handleSerial(). The AT commands themselves then run on
 	 * the application's task, not inside the USB driver.
 	 *
-	 * Required on ESP32 (RAK3312/RAK3112); optional on nRF52 (without it,
-	 * commands are processed directly in the TinyUSB callback).
+	 * Optional. Without a wake callback enableBackgroundRx() starts a task of the library that
+	 * runs the commands, then there is nothing to do for the sketch. Use the wake callback if
+	 * the commands have to run in loop(), for example because loop() sleeps on a semaphore and
+	 * handles all events in one place.
 	 *
 	 * @param cb Function called in the USB driver context, it must only set a flag or wake up a task
 	 */
 	void setRxWakeCallback(RxWakeCallback cb);
 
 	/**
-	 * @brief Hook the USB receive notification of the serial port
+	 * @brief Run the AT commands in the background, without handleSerial() in loop()
 	 *
-	 * Hooks the USB CDC RX notification of the physical USB CDC Serial
-	 * (TinyUSB's tud_cdc_rx_cb on RAK4631, the native USB CDC RX event on
-	 * RAK3312). `port` (passed to begin()) must be that Serial.
+	 * Hooks the receive notification of the USB serial port (`Serial`): tud_cdc_rx_cb() of
+	 * TinyUSB on RAK4631 (nRF52840), on RAK3312 / RAK3112 (ESP32-S3) the receive handler of
+	 * Serial (Serial.onReceive() for a UART, the USB CDC RX event for the native USB). Both
+	 * platforms work the same way, in one of two modes:
 	 *
-	 * With a wake callback registered (setRxWakeCallback()), the hook only
-	 * calls that callback and YOU must call handleSerial() from your task
-	 * after being woken. Without a callback (nRF52 only) the data is
-	 * processed directly inside the USB callback and handleSerial()
-	 * becomes a no-op.
+	 *  - Task mode (no wake callback registered): the library starts a task of its own, called
+	 *    "WB_AT". The receive callback only gives a semaphore, the task wakes up and calls
+	 *    processIncomingBytes(). The commands run in that task, with its own stack (8 KB, change it
+	 *    with `-DWB_AT_TASK_STACK_BYTES=...`), not in the USB driver, not in loop(). The task
+	 *    priority is 1 (`WB_AT_TASK_PRIORITY`), on ESP32 it runs on the core of loop()
+	 *    (`WB_AT_TASK_CORE`). Needs lora.enableBackgroundTask() to be running, because the commands
+	 *    then call into the LoRa Basics Modem from a second task, and lockLbm() / unlockLbm() only
+	 *    protect it if the background task is running. handleSerial() does nothing in this mode.
+	 *  - Loop mode (wake callback registered with setRxWakeCallback()): the receive callback only
+	 *    calls your wake callback. You call handleSerial() from loop(), the commands run there.
 	 *
-	 * IMPORTANT: this can only be enabled for ONE WisBlockLoRaAT instance,
-	 * and it installs a weak-symbol/global event hook that cannot coexist
-	 * with your own sketch defining tud_cdc_rx_cb()/a USB CDC RX event
-	 * handler - pick one or the other.
+	 * Lines that are not AT commands go to onUnhandledData() (in the task or in the wake context)
+	 * and to onUnhandledDataInLoop() (in loop()).
 	 *
-	 * Not available on RAK11310 (RP2040) - handleSerial() polling remains
-	 * the only option there. Returns false if unsupported on this
-	 * platform/build, or on ESP32 if no wake callback was registered.
+	 * IMPORTANT: only one WisBlockLoRaAT object can use it, `port` of begin() must be `Serial`,
+	 * and the sketch must not define tud_cdc_rx_cb() or hook the receive event of Serial itself.
+	 * Not available on RAK11310 (RP2040): there handleSerial() in loop() is the only way.
 	 *
-	 * @return true if the hook is installed
+	 * @return true if the background processing is active, false if the platform has no receive
+	 * hook, `port` is not `Serial`, another object already uses it, in task mode the background
+	 * task of the library is not running or the task could not be created
 	 */
 	bool enableBackgroundRx();
 
 	/**
 	 * @brief Called from the USB receive callback when data arrives
 	 *
-	 * Called by the platform-specific USB CDC RX callback (tud_cdc_rx_cb on
-	 * RAK4631, the ARDUINO_HW_CDC_EVENTS handler on RAK3312) - public
-	 * because those are free functions outside this class, not because
-	 * application code should call this directly.
+	 * Called by the platform-specific receive callback (tud_cdc_rx_cb on RAK4631, the receive
+	 * handler of Serial on RAK3312). In task mode it wakes up the task of the library, in loop
+	 * mode it calls the wake callback, before enableBackgroundRx() it does nothing. Public because
+	 * those callbacks are free functions outside this class, not because application code should
+	 * call this directly.
 	 */
 	static void onBackgroundRxData();
 
@@ -243,10 +281,53 @@ private:
 
 	WisBlockLoRaWAN *lora = nullptr;
 	Stream *port = nullptr;
-	char lineBuffer[256];
+	/** Longest line (with the terminating zero) that is collected before it is run */
+	static const size_t LINE_BUFFER_SIZE = 256;
+	char lineBuffer[LINE_BUFFER_SIZE];
 	uint16_t lineLength = 0;
 	UnhandledDataCb unhandledDataCb = nullptr;
-	bool backgroundRxActive = false;
+	UnhandledDataCb unhandledLoopCb = nullptr;
+	bool backgroundRxActive = false; // task mode is running, handleSerial() must not read the port
+	void *rxSemaphore = nullptr;     // task mode: given by the receive callback (SemaphoreHandle_t)
+	void *rxTask = nullptr;          // task mode: the task of the library (TaskHandle_t)
+
+	// Queue for onUnhandledDataInLoop(): one writer (the context that reads the port) and one
+	// reader (handleSerial()), so the two indexes are enough, no lock is needed.
+	char unhandledQueue[WB_AT_UNHANDLED_QUEUE_LINES][LINE_BUFFER_SIZE];
+	uint8_t unhandledHead = 0; // next slot to write, only changed by the writer
+	uint8_t unhandledTail = 0; // next slot to read, only changed by the reader
+
+	/**
+	 * @brief Put a line that is not an AT command into the queue for onUnhandledDataInLoop()
+	 *
+	 * Called in the context that reads the port. A full queue drops the line.
+	 *
+	 * @param line Zero terminated text, longer text is cut
+	 */
+	void queueUnhandledLine(const char *line);
+
+	/**
+	 * @brief Call the handler of onUnhandledDataInLoop() for every queued line
+	 *
+	 * Called by handleSerial(), so in the context of loop().
+	 */
+	void dispatchUnhandledLines();
+
+	/**
+	 * @brief Body of the task of the library in task mode (see enableBackgroundRx())
+	 *
+	 * Waits for the semaphore that the receive callback gives, then runs processIncomingBytes().
+	 *
+	 * @param param The WisBlockLoRaAT object
+	 */
+	static void rxTaskEntry(void *param);
+
+	/**
+	 * @brief Create the semaphore and the task for task mode
+	 *
+	 * @return true if the task is running
+	 */
+	bool startRxTask();
 
 	/**
 	 * @brief Send a text line followed by OK

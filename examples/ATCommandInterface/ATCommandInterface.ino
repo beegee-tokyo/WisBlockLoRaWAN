@@ -11,13 +11,13 @@
  * LoRaWAN and P2P events are handled by the library's background task
  * (lora.enableBackgroundTask()). Without FreeRTOS, loop() polls lora.handleEvents().
  *
- * AT commands: atCommands.enableBackgroundRx() is called without a wake callback.
- *  - RAK4631: the commands are processed directly in the TinyUSB receive callback
- *    (inline mode, handleSerial() is a no-op).
- *  - RAK3312 and RAK11310: enableBackgroundRx() returns false and the commands are
- *    processed by atCommands.handleSerial() in loop().
+ * AT commands: atCommands.enableBackgroundRx() is called without a wake callback, so the library
+ * runs the commands in a task of its own (task mode, needs the background task above).
+ *  - RAK4631 and RAK3312: the receive callback of the USB serial port wakes up that task.
+ *  - RAK11310: enableBackgroundRx() returns false, the commands are processed by
+ *    atCommands.handleSerial() in loop().
  *
- * See LowPowerLoRaWAN.ino for the recommended way (wake callback, commands processed in loop()).
+ * See LowPowerLoRaWAN.ino for the loop mode (wake callback, commands processed in loop()).
  */
 #include <WisBlockLoRaAT.h>
 #include <WisBlockLoRaWAN.h>

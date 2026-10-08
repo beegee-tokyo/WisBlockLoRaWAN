@@ -801,6 +801,17 @@ public:
 	 */
 	void unlockLbm();
 
+	/**
+	 * @brief Check if the background task of enableBackgroundTask() is running
+	 *
+	 * WisBlockLoRaAT::enableBackgroundRx() needs it, because the AT commands then run in a task of
+	 * their own and lockLbm() / unlockLbm() only protect the LoRa Basics Modem if the background
+	 * task is running.
+	 *
+	 * @return true if enableBackgroundTask() was called successfully
+	 */
+	bool isBackgroundTaskActive() const { return backgroundTaskActive; }
+
 	// --- Callback registration (LoRaWAN) ------------------------------
 	/**
 	 * @brief Register the join success callback

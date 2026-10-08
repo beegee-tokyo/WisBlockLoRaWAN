@@ -3669,3 +3669,97 @@ Short entries, in the order they happened. The details of the first three items 
    the receive is restarted (the engine writes the settings without leaving receive mode, and the
    SX126x datasheet allows some of those commands only in standby); `AT+PTP` accepts 5 - 22 dBm as
    in RUI3 while the engine itself allows -9 - 22 dBm.
+
+
+## 2026-10-08 - AT commands in a task of the library (task mode) for RAK4631 and RAK3312
+
+### Scope
+
+The user read `WisBlockLoRaAT.cpp` and found `enableBackgroundRx()` inconsistent between the two
+platforms: nRF52 accepted it with or without a wake callback and processed the data inside
+`tud_cdc_rx_cb()` without any check; ESP32 refused it without a wake callback, always set
+`backgroundRxActive` to false and registered `Serial.onReceive()` in every unknown configuration.
+A first cleanup (no wake callback at all, commands run in the receive callback of both platforms)
+was started and stopped by the user, because the ESP32 needs `loop()` and `atRxWake()` at the moment.
+Nothing of that attempt is in the library. The design the user asked for instead is implemented
+here: `enableBackgroundRx()` starts a task of the library, the receive callbacks only give a
+semaphore, the task runs `processIncomingBytes()`.
+
+### Behavior now (same on both platforms)
+
+- **Task mode** (no wake callback registered): `enableBackgroundRx()` creates a binary semaphore and
+  the task "WB_AT" (8 KB stack, `WB_AT_TASK_STACK_BYTES`, priority 1, `WB_AT_TASK_PRIORITY`, on the
+  ESP32 pinned to the core of `loop()`, `WB_AT_TASK_CORE`). `tud_cdc_rx_cb()` (nRF52) and the receive
+  handler of `Serial` (ESP32) give the semaphore, from a task or from an interrupt. The task takes
+  it and calls `processIncomingBytes()`, which reads until nothing is left. `handleSerial()` does not
+  read the port in this mode. The stack depth is converted for both ports: bytes on the ESP32,
+  32 bit words on the nRF52.
+- **Loop mode** (wake callback registered with `setRxWakeCallback()`): unchanged, the receive
+  callback calls the wake callback and the sketch calls `handleSerial()`. The three low power
+  examples use it and were not touched.
+- The receive hook does nothing before `enableBackgroundRx()` succeeded (the nRF52 callback used to
+  run on every USB data, whether anybody asked for it or not).
+- `enableBackgroundRx()` returns false if: the platform has no hook (RAK11310), `port` of `begin()`
+  is not `Serial`, another object already uses the hook, in task mode the LoRa background task
+  (`lora.enableBackgroundTask()`) is not running, or the task cannot be created. The background
+  task is required because the commands now call into the LoRa Basics Modem from a second task and
+  `lockLbm()` / `unlockLbm()` do nothing without it. New: `WisBlockLoRaWAN::isBackgroundTaskActive()`.
+- After a successful enable in task mode the task is kicked once, so data that arrived earlier is
+  handled (a receive event only comes with new data).
+- Which ESP32 hook is used follows from what `Serial` really is: `Serial.onEvent()` with the HWCDC
+  or the USBCDC event for the native USB, `Serial.onReceive()` for a UART. Checked in the
+  Arduino-ESP32 3.3.7 sources: only `HardwareSerial` has `onReceive()`, HWCDC and USBCDC only have
+  `onEvent()`. So "Serial.onReceive works on ESP32" means the build had a UART `Serial`
+  (`ARDUINO_USB_CDC_ON_BOOT` not set), which is the branch the Arduino IDE build took.
+- New optional callback for lines that are not AT commands: `onUnhandledDataInLoop(cb)`. The lines
+  are queued (`WB_AT_UNHANDLED_QUEUE_LINES`, 4 lines of 255 characters, one writer and one reader,
+  no lock) and `handleSerial()` calls the callback from `loop()`. `onUnhandledData()` still exists
+  and is called where the line is read, so it can wake `loop()`. Both can be registered together.
+  A full queue drops the new line.
+
+### Behavior changes to be aware of
+
+- nRF52: the inline mode (commands inside the TinyUSB callback) is gone. `enableBackgroundRx()`
+  without a wake callback used to return true on any sketch, now it needs the LoRa background task.
+  The examples that call it without a wake callback already enable the background task first
+  (`ATCommandInterface`, `LoRaP2PPingPong`).
+- ESP32: `enableBackgroundRx()` without a wake callback used to return false. In
+  `LoRaP2PPingPong` and `ATCommandInterface` it now starts the task.
+
+### Files changed
+
+`src/WisBlockLoRaAT.h`, `src/WisBlockLoRaAT.cpp`, `src/WisBlockLoRaWAN.h`,
+`examples/ATCommandInterface/ATCommandInterface.ino` (header text only), `WisBlockLoRaWAN-API.md`
+(handleSerial, onUnhandledData, new onUnhandledDataInLoop and setRxWakeCallback sections, rewritten
+enableBackgroundRx with the defines), `CHANGELOG.md`, this log.
+
+### Verification
+
+The real `WisBlockLoRaAT.cpp` was compiled for five variants (nRF52, ESP32 with a UART `Serial`,
+with HWCDC, with USBCDC, RP2040) against host stand-ins for Arduino and for FreeRTOS (pthreads and
+semaphores, so the AT task really runs in a second thread), and run:
+
+- nothing is processed before `enableBackgroundRx()`; task mode is refused without the LoRa
+  background task and for another port than `Serial`; one task only, also after a second call; a
+  second object is refused;
+- an `AT` sent through the platform receive callback is answered by the task, not by the caller;
+  `handleSerial()` leaves the port alone in task mode; data that waits is handled when the task is
+  woken; the stack depth is 8192 on the ESP32 variants and 2048 words on the nRF52 variant;
+- a line that is not an AT command reaches `onUnhandledData()` in the task and
+  `onUnhandledDataInLoop()` only from `handleSerial()`; with more lines than the queue holds (6
+  against 4 slots) the first 3 arrive, none crashes; a 600 character line is cut at 255;
+- a wake from interrupt context works; loop mode creates no task, calls the wake callback once per
+  receive event, and `handleSerial()` runs the command; RP2040 returns false in both modes.
+
+All of this passes. The Doxygen completeness check (see the entry of 2026-10-06) still shows only
+the 3 variable definitions that Doxygen reads as functions.
+
+**Not verified**: nothing of this ran on a RAK4631 or RAK3312. The stand-ins say nothing about stack
+usage, about the TX behavior of the HWCDC under load, or about the USB event task. Task mode on the
+ESP32 is a repeat of an earlier attempt (a library task "wb_at_rx" in the entry above) that showed
+lost and garbled replies and random hangs. The cause was never found; what is different now: the
+sketch cannot call `processIncomingBytes()` at the same time (`handleSerial()` is a no-op in this
+mode), the LoRa background task and its lock are required, the task is pinned to the core of
+`loop()`, and the pending data is handled when the task starts. If the problem comes back, the
+loop mode is the fallback. The parser still waits 5 ms after every received byte, which limits a
+command to about 200 characters per second, in the task this blocks nothing else.

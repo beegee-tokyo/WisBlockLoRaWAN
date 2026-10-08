@@ -2917,7 +2917,7 @@ void loop()
 
 ### handleSerial()
 
-Reads the port, collects lines ended by CR or LF and executes them. Call it in every `loop()`, unless [enableBackgroundRx()](#enablebackgroundrx) is active (then it is a harmless no-op).
+Reads the port, collects lines ended by CR or LF and executes them. Call it in every `loop()`, or after the wake callback of [setRxWakeCallback()](#setrxwakecallback) was called. It does nothing while [enableBackgroundRx()](#enablebackgroundrx) runs the commands in its own task, except delivering the lines for [onUnhandledDataInLoop()](#onunhandleddatainloop).
 
 ```cpp
 at.handleSerial();
@@ -2970,6 +2970,26 @@ at.onUnhandledData(callback);
 | --- | --- |
 | **Function** | `void onUnhandledData(UnhandledDataCb cb)` |
 | **Parameters** | **cb** - `void (*)(const char *line)` |
+
+The callback runs in the context that reads the port: the task of [enableBackgroundRx()](#enablebackgroundrx), or `loop()` if you call `handleSerial()`. Use [onUnhandledDataInLoop()](#onunhandleddatainloop) if the lines must be handled in `loop()`.
+
+### onUnhandledDataInLoop()
+
+Same lines as [onUnhandledData()](#onunhandleddata), but the callback is called from `handleSerial()`, that means from `loop()`. The lines wait in a queue of `WB_AT_UNHANDLED_QUEUE_LINES` (4) lines of up to 255 characters, 256 bytes of RAM each (define another value before including the library). If the queue is full, new lines are dropped. The text is only valid during the call.
+
+```cpp
+void onLine(const char *line) { Serial.printf("Got: %s\n", line); }
+
+at.onUnhandledDataInLoop(onLine);   // setup()
+at.handleSerial();                  // loop(), also in task mode
+```
+
+| | |
+| --- | --- |
+| **Function** | `void onUnhandledDataInLoop(UnhandledDataCb cb)` |
+| **Parameters** | **cb** - `void (*)(const char *line)` |
+
+Both callbacks can be registered at the same time. If `loop()` sleeps, use the `onUnhandledData()` callback to wake it up (set a flag or give a semaphore) and let `loop()` call `handleSerial()`.
 
 ### addCustomATCommand()
 
@@ -3024,25 +3044,54 @@ void setup()
 
 </details>
 
-### enableBackgroundRx()
+### setRxWakeCallback()
 
-Processes incoming AT data directly from the USB CDC receive callback, so `loop()` does not have to call `handleSerial()`. Commands are protected by `lockLbm()` / `unlockLbm()` automatically.
+Optional. Registers a function that is called whenever USB data arrives, for the **loop mode** of [enableBackgroundRx()](#enablebackgroundrx). Call it before `enableBackgroundRx()`. The function runs in the context of the USB driver, so it must be short: set a flag or give a semaphore and let your own task call `handleSerial()`. Typical for a `loop()` that sleeps on a semaphore, as in the `LowPower*` examples.
 
 ```cpp
-bool ok = at.enableBackgroundRx();
+void atRxWake(void) { /* set a flag, give the semaphore that wakes loop() */ }
+
+at.setRxWakeCallback(atRxWake);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setRxWakeCallback(RxWakeCallback cb)` |
+| **Parameters** | **cb** - `void (*)(void)` |
+
+### enableBackgroundRx()
+
+Runs the AT commands in the background, so `loop()` does not have to call `handleSerial()`. It hooks the USB receive notification of `Serial` (`tud_cdc_rx_cb()` of TinyUSB on RAK4631, the receive handler of `Serial` on RAK3312: `Serial.onReceive()` for a UART, the USB CDC RX event for the native USB). RAK4631 and RAK3312 work the same way, in one of two modes:
+
+- **Task mode** (no wake callback registered): the library starts a task `WB_AT`. The receive callback only gives a semaphore, the task wakes up and handles the incoming data like `handleSerial()` does. The commands run in that task, with its own stack, not in the USB driver and not in `loop()`. `lora.enableBackgroundTask()` must be running, because the commands call into the LoRa Basics Modem from a second task, and `lockLbm()` / `unlockLbm()` (used around every command) only protect it if the background task is running.
+- **Loop mode** (wake callback registered with [setRxWakeCallback()](#setrxwakecallback)): the receive callback only calls your wake callback, and you call `handleSerial()` from your own task.
+
+```cpp
+lora.enableBackgroundTask();           // needed for task mode
+bool ok = at.enableBackgroundRx();     // task mode
 ```
 
 | | |
 | --- | --- |
 | **Function** | `bool enableBackgroundRx()` |
 | **Returns** | bool |
-| **Return Values** | **TRUE** active<br/>**FALSE** not supported on this platform (RAK11310) or build |
+| **Return Values** | **TRUE** active<br/>**FALSE** not supported (RAK11310), `port` is not `Serial`, another object already uses it, or in task mode the LoRa background task is not running or the task could not be created |
+
+The task can be tuned with defines before the library is built (for example in `platformio.ini`):
+
+| Define | Default | Meaning |
+| --- | --- | --- |
+| `WB_AT_TASK_STACK_BYTES` | 8192 | Stack of the task in bytes. Commands like `AT+STATUS` print a lot. |
+| `WB_AT_TASK_PRIORITY` | 1 | Priority, the same as `loop()` and the LoRa Basics Modem task. |
+| `WB_AT_TASK_CORE` | core of `loop()` | ESP32 only. `tskNO_AFFINITY` lets FreeRTOS pick the core. |
 
 ## _⚠️ WARNING_
 ----
-- _The `port` given to `begin()` must be the physical USB CDC `Serial`._
+- _The `port` given to `begin()` must be the `Serial` that receives the AT commands._
 - _Only **one** `WisBlockLoRaAT` instance can use it._
-- _It installs `tud_cdc_rx_cb()` (RAK4631) or a USB CDC event handler (RAK3312). Your sketch **must not define these itself**._
+- _It uses `tud_cdc_rx_cb()` (RAK4631) or the receive handler of `Serial` (RAK3312). Your sketch **must not define or set these itself**._
+- _The task mode on the ESP32 is new and so far only tested with a simulation on a PC. A task of the library read the port in an earlier version and replies were lost and devices hung under load, the cause was never found. If you see this, use the loop mode and tell us._
+- _The task answers the commands while `loop()` and the LoRa task print their own messages. The messages can be mixed on the serial port._
 
 ----
 
@@ -3103,6 +3152,6 @@ Collected from the library's Creation Log (`Creation-Log-From-Claude-AI.md`) for
 - **OTAA/ABP keys** (`appKey`, session keys) cannot be read back from the stack. Multicast keys can.
 - **Multicast groups** live in RAM only and are lost at reboot. Remote Multicast Setup (over-the-air provisioning) and FUOTA are not enabled.
 - **Not vendored:** FUOTA, clock sync, cloud services, store-and-forward, geolocation, relay (removed on 2026-09-14) and the 2.4 GHz region.
-- **Background task** (`enableBackgroundTask()`) and **background AT RX** (`enableBackgroundRx()`) are the recommended low power setup on RAK4631 and RAK3312. RAK11310 needs a FreeRTOS port and has no background AT RX.
+- **Background task** (`enableBackgroundTask()`) and **background AT RX** (`enableBackgroundRx()`, task mode or loop mode with a wake callback) are the recommended low power setup on RAK4631 and RAK3312. RAK11310 needs a FreeRTOS port and has no background AT RX, `handleSerial()` in `loop()` is the only option there.
 - **P2P sleep** uses cold-start sleep. The idle current improvement is reasoned, not yet measured on hardware.
 - **P2P RX duty cycle** timing usually needs more margin than the datasheet formula, verify on your own link.

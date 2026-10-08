@@ -239,16 +239,44 @@ void WisBlockLoRaAT::setRxWakeCallback(RxWakeCallback cb)
 
 void WisBlockLoRaAT::handleSerial()
 {
-	// Once background RX mode (see enableBackgroundRx()) owns serial
-	// processing, calling this from loop() too would let two different
-	// contexts read from the same Stream concurrently. Harmless no-op
-	// instead of removing it outright, same reasoning as
-	// WisBlockLoRaWAN::handleEvents()'s equivalent guard.
-	if (backgroundRxActive)
+	// In task mode (see enableBackgroundRx()) the task of the library reads the port. Reading it
+	// from loop() as well would let two contexts read the same Stream and split the lines between
+	// them. Then this function only delivers what was queued for onUnhandledDataInLoop().
+	if (!backgroundRxActive)
 	{
-		return; // inline background mode owns the stream, see enableBackgroundRx()
+		processIncomingBytes();
 	}
-	processIncomingBytes();
+	dispatchUnhandledLines();
+}
+
+void WisBlockLoRaAT::queueUnhandledLine(const char *line)
+{
+	// One writer (the context that reads the port) and one reader (dispatchUnhandledLines()):
+	// the writer only changes unhandledHead, the reader only unhandledTail. The release/acquire
+	// pairs make sure the text is complete before the other side sees the new index.
+	uint8_t head = __atomic_load_n(&unhandledHead, __ATOMIC_RELAXED);
+	uint8_t next = (uint8_t)((head + 1) % WB_AT_UNHANDLED_QUEUE_LINES);
+	if (next == __atomic_load_n(&unhandledTail, __ATOMIC_ACQUIRE))
+	{
+		return; // queue full, the new line is dropped
+	}
+	strncpy(unhandledQueue[head], line, LINE_BUFFER_SIZE - 1);
+	unhandledQueue[head][LINE_BUFFER_SIZE - 1] = '\0';
+	__atomic_store_n(&unhandledHead, next, __ATOMIC_RELEASE);
+}
+
+void WisBlockLoRaAT::dispatchUnhandledLines()
+{
+	while (unhandledLoopCb)
+	{
+		uint8_t tail = __atomic_load_n(&unhandledTail, __ATOMIC_RELAXED);
+		if (tail == __atomic_load_n(&unhandledHead, __ATOMIC_ACQUIRE))
+		{
+			return; // nothing queued
+		}
+		unhandledLoopCb(unhandledQueue[tail]);
+		__atomic_store_n(&unhandledTail, (uint8_t)((tail + 1) % WB_AT_UNHANDLED_QUEUE_LINES), __ATOMIC_RELEASE);
+	}
 }
 
 void WisBlockLoRaAT::processIncomingBytes()
@@ -273,7 +301,7 @@ void WisBlockLoRaAT::processIncomingBytes()
 				lineLength = 0;
 			}
 		}
-		else if (lineLength < sizeof(lineBuffer) - 1)
+		else if (lineLength < LINE_BUFFER_SIZE - 1)
 		{
 			lineBuffer[lineLength++] = c;
 		}
@@ -405,18 +433,25 @@ void WisBlockLoRaAT::processLine(const char *line)
 	// lowercase hex digits parse identically via parseHex()/strtol()).
 	if (!startsWithAtCaseInsensitive(line))
 	{
+		bool taken = false;
 		if (unhandledDataCb)
 		{
-			unhandledDataCb(line);
+			unhandledDataCb(line); // right here, in the context that reads the port
+			taken = true;
 		}
-		else
+		if (unhandledLoopCb)
+		{
+			queueUnhandledLine(line); // delivered later by handleSerial(), in loop()
+			taken = true;
+		}
+		if (!taken)
 		{
 			replyError("AT_ERROR"); // expected AT prefix
 		}
 		return;
 	}
 
-	char upperLine[sizeof(lineBuffer)];
+	char upperLine[LINE_BUFFER_SIZE];
 	size_t len = strlen(line);
 	if (len >= sizeof(upperLine))
 	{
@@ -2186,60 +2221,160 @@ void WisBlockLoRaAT::atBoot(AtOp op, const char *value)
 }
 
 // ---------------------------------------------------------------------------
-// Background RX: USB CDC RX notification per platform.
+// Background RX: the receive notification of the USB serial port, per platform.
 //
-// Two modes (see WisBlockLoRaAT.h, setRxWakeCallback()/enableBackgroundRx()):
-//
-//  - WAKE mode (a wake callback is registered): the USB hook only calls that
-//    callback. It must be short and non-blocking - set a flag / give a
-//    semaphore / notify a task. The application then calls handleSerial()
-//    from its own task (typically loop()), so AT commands run on the same
-//    task as the rest of the application and are not executed inside the
-//    USB driver's own task. This is the mode to use on ESP32.
-//
-//  - INLINE mode (no callback): the USB hook calls processIncomingBytes()
-//    directly in the USB driver's task context. Only supported on nRF52
-//    (TinyUSB). On ESP32 the CDC event task has a small stack and also
-//    delivers the driver's own RX/TX events, so enableBackgroundRx() returns
-//    false there instead of silently doing this.
+// The platform callbacks (tud_cdc_rx_cb() on nRF52, the receive handler of Serial on ESP32) only
+// forward to onBackgroundRxData(). That function does nothing before enableBackgroundRx(), calls
+// the wake callback in loop mode, and in task mode gives the semaphore the task of the library
+// waits for. The task then runs processIncomingBytes(). See enableBackgroundRx() in the header.
 // ---------------------------------------------------------------------------
 
 #include <Arduino.h>
 
-void WisBlockLoRaAT::onBackgroundRxData()
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <task.h>
+#define WB_AT_HAS_RTOS 1
+#elif defined(ARDUINO_ARCH_ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+#define WB_AT_HAS_RTOS 1
+#endif
+
+#ifndef WB_AT_TASK_STACK_BYTES
+#define WB_AT_TASK_STACK_BYTES 8192 // ESP32: stack of the AT task; commands like AT+STATUS print a lot
+#endif
+#ifndef WB_AT_TASK_PRIORITY
+#define WB_AT_TASK_PRIORITY 1 // same as loop() and the LoRa Basics Modem task
+#endif
+#ifndef WB_AT_TASK_CORE
+#if defined(ARDUINO_RUNNING_CORE)
+#define WB_AT_TASK_CORE ARDUINO_RUNNING_CORE // the core of loop()
+#else
+#define WB_AT_TASK_CORE tskNO_AFFINITY
+#endif
+#endif
+
+#if defined(WB_AT_HAS_RTOS)
+
+/**
+ * @brief Give a semaphore from a task or from an interrupt
+ *
+ * @param semaphore The semaphore to give
+ */
+static void giveFromAnyContext(SemaphoreHandle_t semaphore)
 {
-	if (rxWakeCb)
+#if defined(ARDUINO_ARCH_ESP32)
+	bool inIsr = xPortInIsrContext();
+#else
+	bool inIsr = (__get_IPSR() != 0);
+#endif
+	if (inIsr)
 	{
-		rxWakeCb();
-		return;
+		BaseType_t woken = pdFALSE;
+		xSemaphoreGiveFromISR(semaphore, &woken);
+		portYIELD_FROM_ISR(woken);
 	}
-	if (activeInstanceForRx)
+	else
 	{
-		activeInstanceForRx->processIncomingBytes();
+		xSemaphoreGive(semaphore);
 	}
 }
+
+void WisBlockLoRaAT::rxTaskEntry(void *param)
+{
+	WisBlockLoRaAT *at = static_cast<WisBlockLoRaAT *>(param);
+	while (true)
+	{
+		xSemaphoreTake(static_cast<SemaphoreHandle_t>(at->rxSemaphore), portMAX_DELAY);
+		at->processIncomingBytes(); // reads until nothing is left, the semaphore may be given again meanwhile
+	}
+}
+
+bool WisBlockLoRaAT::startRxTask()
+{
+	if (rxTask != nullptr)
+	{
+		return true; // already running
+	}
+	SemaphoreHandle_t semaphore = xSemaphoreCreateBinary();
+	if (semaphore == NULL)
+	{
+		return false;
+	}
+	rxSemaphore = semaphore;
+	TaskHandle_t handle = NULL;
+	// The stack depth counts bytes on ESP32 and 32 bit words on nRF52, sizeof(StackType_t) is 1 or 4
+	const uint32_t stackDepth = WB_AT_TASK_STACK_BYTES / sizeof(StackType_t);
+#if defined(ARDUINO_ARCH_ESP32)
+	BaseType_t result = xTaskCreatePinnedToCore(rxTaskEntry, "WB_AT", stackDepth, this, WB_AT_TASK_PRIORITY, &handle, WB_AT_TASK_CORE);
+#else
+	BaseType_t result = xTaskCreate(rxTaskEntry, "WB_AT", stackDepth, this, WB_AT_TASK_PRIORITY, &handle);
+#endif
+	if (result != pdPASS)
+	{
+		vSemaphoreDelete(semaphore);
+		rxSemaphore = nullptr;
+		return false;
+	}
+	rxTask = handle;
+	return true;
+}
+
+void WisBlockLoRaAT::onBackgroundRxData()
+{
+	WisBlockLoRaAT *at = activeInstanceForRx;
+	if (at == nullptr)
+	{
+		return; // enableBackgroundRx() was not called (or failed)
+	}
+	if (rxWakeCb)
+	{
+		rxWakeCb(); // loop mode
+	}
+	else if (at->rxSemaphore != nullptr)
+	{
+		giveFromAnyContext(static_cast<SemaphoreHandle_t>(at->rxSemaphore)); // task mode
+	}
+}
+
+#else
+
+void WisBlockLoRaAT::rxTaskEntry(void *param)
+{
+	(void)param;
+}
+
+bool WisBlockLoRaAT::startRxTask()
+{
+	return false; // no RTOS
+}
+
+void WisBlockLoRaAT::onBackgroundRxData()
+{
+	WisBlockLoRaAT *at = activeInstanceForRx;
+	if (at != nullptr && rxWakeCb)
+	{
+		rxWakeCb();
+	}
+}
+
+#endif
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
 
 #include <Adafruit_TinyUSB.h>
 
-bool WisBlockLoRaAT::enableBackgroundRx()
-{
-	activeInstanceForRx = this;
-	// Wake mode: loop() keeps calling handleSerial(). Inline mode: the
-	// callback processes the data itself, handleSerial() becomes a no-op.
-	backgroundRxActive = (rxWakeCb == nullptr);
-	return true;
-}
-
 /**
- * @brief TinyUSB callback for received USB CDC data (nRF52)
+ * @brief TinyUSB receive callback (RAK4631)
  *
- * TinyUSB weak-symbol hook - fires whenever USB CDC RX data arrives. Only
- * one definition of this can exist in the whole linked program; see the
- * class doc comment on enableBackgroundRx().
+ * TinyUSB calls this weak symbol whenever USB CDC data arrives, in the task of the USB stack. It
+ * exists from link time on, so there is nothing to install. It does nothing before
+ * enableBackgroundRx().
  *
- * @param itf CDC interface number, only interface 0 is used
+ * @param itf CDC interface number, only interface 0 (Serial) is used
  */
 extern "C" void tud_cdc_rx_cb(uint8_t itf)
 {
@@ -2250,12 +2385,21 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 	WisBlockLoRaAT::onBackgroundRxData();
 }
 
+/**
+ * @brief Install the receive hook of the platform
+ *
+ * @return true if the hook is in place (always, tud_cdc_rx_cb() is linked in)
+ */
+static bool installRxHook()
+{
+	return true;
+}
+
 #elif defined(ARDUINO_ARCH_ESP32)
 
-// Which Serial is it? RAK3312/RAK3112 build with ARDUINO_USB_CDC_ON_BOOT=1 and
-// ARDUINO_USB_MODE=1, i.e. Serial is the USB-Serial/JTAG peripheral (HWCDC).
-// The USBCDC (TinyUSB) and UART branches below follow the same pattern but
-// have not been compiled/tested by the author.
+// What Serial is depends on the board settings: the native USB (HWCDC with ARDUINO_USB_MODE 1,
+// or USBCDC with TinyUSB) when ARDUINO_USB_CDC_ON_BOOT is set, otherwise a UART (HardwareSerial).
+// Only the UART has onReceive(), the two USB classes have onEvent().
 #if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE == 1
 #define WB_AT_USE_HWCDC 1
 #include <HWCDC.h>
@@ -2265,17 +2409,17 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 #include <USBCDC.h>
 #endif
 
+#if defined(WB_AT_USE_HWCDC) || defined(WB_AT_USE_USBCDC)
 namespace
 {
 /**
- * @brief USB event handler (ESP32), forwards the receive event
+ * @brief Receive event handler of the native USB serial port (ESP32)
  *
- * Signature required by esp_event_handler_t. Runs in the Arduino core's USB
- * event task: do nothing here except forward to the wake callback.
+ * Forwards the RX event to WisBlockLoRaAT::onBackgroundRxData().
  *
  * @param arg Not used
- * @param event_base Event base
- * @param event_id Event ID
+ * @param event_base Event base, ARDUINO_HW_CDC_EVENTS or ARDUINO_USB_CDC_EVENTS
+ * @param event_id Event ID, only the RX event is handled
  * @param event_data Not used
  */
 void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -2284,52 +2428,83 @@ void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, 
 	(void)event_data;
 #if defined(WB_AT_USE_HWCDC)
 	if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT)
-#elif defined(WB_AT_USE_USBCDC)
-	if (event_base == ARDUINO_USB_CDC_EVENTS && event_id == ARDUINO_USB_CDC_RX_EVENT)
 #else
-	(void)event_base;
-	(void)event_id;
-	if (false)
+	if (event_base == ARDUINO_USB_CDC_EVENTS && event_id == ARDUINO_USB_CDC_RX_EVENT)
 #endif
 	{
 		WisBlockLoRaAT::onBackgroundRxData();
 	}
 }
 } // namespace
+#endif
 
-bool WisBlockLoRaAT::enableBackgroundRx()
+/**
+ * @brief Install the receive hook of the platform
+ *
+ * @return true if the hook is in place
+ */
+static bool installRxHook()
 {
-	if (rxWakeCb == nullptr)
-	{
-		// Inline processing inside the ESP32 USB event task is not supported,
-		// register a wake callback with setRxWakeCallback() first.
-		return false;
-	}
-	activeInstanceForRx = this;
-	backgroundRxActive = false; // wake mode: the application calls handleSerial()
-
-	static bool registered = false; // never register the event handler twice
-	if (!registered)
+	static bool installed = false; // the handler must only be registered once
+	if (!installed)
 	{
 #if defined(WB_AT_USE_HWCDC)
 		Serial.onEvent(ARDUINO_HW_CDC_RX_EVENT, usbEventCallback);
 #elif defined(WB_AT_USE_USBCDC)
 		Serial.onEvent(ARDUINO_USB_CDC_RX_EVENT, usbEventCallback);
 #else
-		// UART-backed Serial: no event API, use the HardwareSerial RX callback
 		Serial.onReceive([]() { WisBlockLoRaAT::onBackgroundRxData(); });
 #endif
-		registered = true;
+		installed = true;
 	}
 	return true;
 }
 
 #else
 
-bool WisBlockLoRaAT::enableBackgroundRx()
+/**
+ * @brief Install the receive hook of the platform
+ *
+ * @return false, RAK11310 (RP2040) and other platforms have no receive notification
+ */
+static bool installRxHook()
 {
-	// Not available on RAK11310 (RP2040) - see the class doc comment.
 	return false;
 }
 
 #endif
+
+bool WisBlockLoRaAT::enableBackgroundRx()
+{
+	if (port != static_cast<Stream *>(&Serial))
+	{
+		return false; // the hook is on Serial, this object reads another port
+	}
+	if (activeInstanceForRx != nullptr && activeInstanceForRx != this)
+	{
+		return false; // only one object can use the hook
+	}
+	if (rxWakeCb == nullptr)
+	{
+		// Task mode. The commands run in a second task and call into the LoRa Basics Modem, that
+		// is only protected if its own background task is running (lockLbm()).
+		if (lora == nullptr || !lora->isBackgroundTaskActive() || !startRxTask())
+		{
+			return false;
+		}
+	}
+	// Set before the hook is installed, so that a receive event that comes right away is not lost
+	activeInstanceForRx = this;
+	backgroundRxActive = (rxWakeCb == nullptr); // task mode: the task reads the port, not handleSerial()
+	if (!installRxHook())
+	{
+		activeInstanceForRx = nullptr;
+		backgroundRxActive = false;
+		return false;
+	}
+	if (backgroundRxActive)
+	{
+		onBackgroundRxData(); // task mode: handle what arrived before, a receive event only comes with new data
+	}
+	return true;
+}
