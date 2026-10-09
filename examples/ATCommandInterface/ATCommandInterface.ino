@@ -14,8 +14,9 @@
  * AT commands: atCommands.enableBackgroundRx() is called without a wake callback, so the library
  * runs the commands in a task of its own (task mode, needs the background task above).
  *  - RAK4631 and RAK3312: the receive callback of the USB serial port wakes up that task.
- *  - RAK11310: enableBackgroundRx() returns false, the commands are processed by
- *    atCommands.handleSerial() in loop().
+ *  - RAK11310 (Arduino-Pico): Serial has no receive callback, so the task polls the port every 10 ms.
+ *    Needs FreeRTOS SMP (Tools -> Operating System). Without FreeRTOS enableBackgroundRx() returns
+ *    false and the commands are processed by atCommands.handleSerial() in loop().
  *
  * See LowPowerLoRaWAN.ino for the loop mode (wake callback, commands processed in loop()).
  */

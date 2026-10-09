@@ -19,6 +19,12 @@
 #ifndef WB_LBM_CONFIG_H
 #define WB_LBM_CONFIG_H
 
+// RP2040 (RAK11300 / RAK11310): only Earle Philhower's Arduino-Pico core is supported. The
+// original Arduino mbed core has no FreeRTOS and a different SPI/GPIO API.
+#if defined(ARDUINO_ARCH_MBED) || defined(ARDUINO_ARCH_MBED_RP2040)
+#error "WisBlockLoRaWAN: the Arduino mbed core is not supported for RP2040. Use arduino-pico (https://github.com/earlephilhower/arduino-pico, PlatformIO: https://github.com/maxgerhardt/platform-raspberrypi)."
+#endif
+
 #ifndef NUMBER_OF_STACKS
 #define NUMBER_OF_STACKS 1
 #endif

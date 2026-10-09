@@ -27,10 +27,9 @@
  * - see WisBlockLoRaHwConfig.h's doc comment for the field-combinations
  * this supports and wisblock_radio_hal.cpp (the merged nRF52/ESP32
  * implementation) for how they're realized in GPIO/SPI terms.
- * wisblock_radio_hal_rak11310.cpp (RP2040) is untouched and still owns its
- * own fixed pin set - RP2040/mbed has no full FreeRTOS support, so it isn't
- * part of this flexible path (WisBlockLoRaWAN::begin() still auto-selects
- * it at compile time for RP2040 builds).
+ * RP2040 (RAK11300/RAK11310, Arduino-Pico core) uses the same path: its
+ * former separate wisblock_radio_hal_rak11310.cpp was merged into
+ * wisblock_radio_hal.cpp.
  *
  * Reference (function contract only, not copied verbatim):
  * https://github.com/Lora-net/sx126x_driver — sx126x_hal.h
@@ -54,7 +53,7 @@ typedef enum sx126x_hal_status_e sx126x_hal_status_t;
 
 namespace WisBlockRadioHal
 {
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 /**
  * @brief Configure SPI and all radio pins from an explicit board description
  *
@@ -63,8 +62,7 @@ namespace WisBlockRadioHal
  * WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&). Call once, before
  * anything else in this namespace or the LBM/P2P engines.
  *
- * Only compiled for nRF52840/ESP32-S3 - see this file's doc comment for why
- * RP2040 (RAK11310) doesn't take this path.
+ * Compiled for nRF52840, ESP32-S3 and RP2040 (WISBLOCK_HAS_HW_CONFIG_INIT).
  *
  * @param hwConfig Radio wiring (pins, SPI, TCXO) of the board
  */

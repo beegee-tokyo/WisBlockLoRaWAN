@@ -30,7 +30,7 @@ void WisBlockLoRaWAN::begin()
 	// Sets up SPI + NSS/RESET/BUSY/DIO1 GPIOs and performs the initial
 	// hardware reset, using the compile-time-selected RAKwireless board
 	// preset - see wisblock_radio_hal.cpp (RAK4631/RAK3312) and
-	// wisblock_radio_hal_rak11310.cpp (RAK11310). Use
+	// (RAK4631/RAK3312/RAK11310, all in wisblock_radio_hal.cpp). Use
 	// begin(const WisBlockLoRaHwConfig&) instead for any other board.
 	//
 	// FIX: must run BEFORE WisBlockLbmPort::init() below, not after -
@@ -59,7 +59,7 @@ void WisBlockLoRaWAN::begin()
 	began = true;
 }
 
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 void WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig &hwConfig)
 {
 	// Identical to plain begin() (see its comments above), except the radio
@@ -518,7 +518,7 @@ void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)
 	gpio_wakeup_disable((gpio_num_t)LORA_DIO1);
 
 #elif defined(ARDUINO_ARCH_RP2040)
-	// RP2040 (RAK11310, plain arduino-pico core): true dormant-mode sleep
+	// RP2040 (RAK11310, Arduino-Pico core): true dormant-mode sleep
 	// needs pico-extras' pico_sleep component, which arduino-pico doesn't
 	// ship or expose without rebuilding the core's libpico.a and extending
 	// its include path (see the arduino-pico project's own "Looking for
@@ -560,8 +560,8 @@ bool WisBlockLoRaWAN::enableBackgroundTask()
 
 	if (!backgroundTaskActive)
 	{
-		// FreeRTOS unavailable on this platform/build (e.g. plain RP2040
-		// without a FreeRTOS-Kernel port added) - fall back to requiring
+		// FreeRTOS unavailable on this platform/build (e.g. Arduino-Pico
+		// without FreeRTOS SMP enabled, i.e. no __FREERTOS) - fall back to requiring
 		// loop()-level handleEvents() polling exactly as before.
 		activeInstanceForTask = nullptr;
 	}

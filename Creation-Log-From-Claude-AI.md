@@ -3763,3 +3763,45 @@ mode), the LoRa background task and its lock are required, the task is pinned to
 `loop()`, and the pending data is handled when the task starts. If the problem comes back, the
 loop mode is the fallback. The parser still waits 5 ms after every received byte, which limits a
 command to about 200 characters per second, in the task this blocks nothing else.
+
+## RP2040 / RAK11300 / RAK11310: Arduino-Pico instead of the mbed core
+
+The RP2040 support now targets Earle Philhower's Arduino-Pico core (Arduino IDE) and the
+`maxgerhardt/platform-raspberrypi` platform (PlatformIO). The Arduino mbed core is rejected with an `#error`.
+
+- Radio HAL: `wisblock_radio_hal_rak11310.cpp` is gone, RP2040 is part of the common `wisblock_radio_hal.cpp`, so
+  `begin(const WisBlockLoRaHwConfig&)` works there too (`WISBLOCK_HAS_HW_CONFIG_INIT`). The radio is wired to SPI1
+  (GPIO10/11/12); the old code configured SPI0, where Arduino-Pico panics on those pins. Without `spiInstance` the SPI
+  object is chosen from the SCK pin. The new `wisblockLoRaHwConfigRAK11300()` is the same as the RAK11310 preset.
+- FreeRTOS: `wisblock_lbm_task.cpp` tests `__FREERTOS` (`__has_include(<FreeRTOS.h>)` is always true there and the header
+  stops the build when FreeRTOS is off). The LBM task runs at `WB_LBM_TASK_PRIORITY` (default 17 on RP2040, loop() runs
+  at 16) and is pinned to core 0.
+- AT interface: `ATZ`, `AT+BOOT` (BOOTSEL/UF2) and `AT+FACTORY` work on RP2040. `enableBackgroundRx()` runs a task that polls
+  `Serial` every `WB_AT_POLL_MS` (10 ms), task mode only (no wake callback), same priority as loop(), core 0.
+- Flash: LittleFS access is serialized with a recursive mutex (the core says LittleFS must not be used from several tasks).
+  `init()` prints a message when the mount fails.
+- `wisblock_lbm_port.cpp`: `rp2040.reboot()`, and `randomSeed(rp2040.hwrand32())` because `random()` is never seeded there.
+- Examples: LowPowerLoRaP2P, LowPowerLoRaWAN, RX-Duty-LoRaP2P and LoRaP2PPingPong run on RP2040 with FreeRTOS SMP. Their `main.h` fills
+  in `LED_GREEN`/`LED_BLUE`/`LED_BUILTIN` (GPIO23/24, unverified, the variant has none); RX-Duty skips `WB_IO2` if undefined.
+
+Setup:
+- Arduino IDE: board "RAKwireless RAK11300", Tools -> Operating System -> FreeRTOS SMP, Tools -> Flash Size with a file system (e.g. 2MB Sketch 1MB / FS 1MB).
+- PlatformIO:
+```
+[env:rak11300]
+platform = https://github.com/maxgerhardt/platform-raspberrypi.git
+board = rakwireless_rak11300
+framework = arduino
+board_build.filesystem = littlefs
+board_build.filesystem_size = 0.5m
+build_flags = -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS
+lib_deps = https://github.com/beegee-tokyo/WisBlockLoRaWAN
+```
+
+Limits: Arduino-Pico has no tickless idle (1 kHz tick, idle task only `__wfe()`), so the nRF52 idle current does not carry over.
+The FreeRTOS timer task (priority 2) cannot be pinned. Call the library from core 0 (setup()/loop()), not from loop1().
+
+**Verified**: all sources and examples compile against Arduino-Pico (commit e4cdfdd, 2026-10-08) with `arm-none-eabi-gcc` 13.2, with and
+without `__FREERTOS`; the vendored LBM C files compile for the Cortex-M0+; the library symbols resolve (`wisblock_radio_hal_get_bsp_config`
+was undefined on RP2040 before). **Not verified**: no link, no PlatformIO build, nothing ran on a RAK11300/RAK11310. The LED pins,
+the 10 ms AT poll and the priorities need a test on hardware.

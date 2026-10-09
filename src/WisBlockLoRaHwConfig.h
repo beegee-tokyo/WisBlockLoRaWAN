@@ -3,10 +3,8 @@
  * @brief Describes the wiring between the MCU and the SX1261/SX1262 radio,
  * so this library isn't limited to the exact RAKwireless WisBlock modules
  * it started with (RAK4631, RAK3312, RAK11310) - any board with a supported
- * MCU (nRF52840 or ESP32-S3, with full FreeRTOS support - see the Creation
- * Log entry "Flexible hw_config-based radio init (RAK3401 / non-WisBlock
- * boards)" for why RP2040/RAK11310 is out of scope here) and an SX1262
- * wired up in one of the common ways can be described with this struct and
+ * MCU (nRF52840, ESP32-S3 or RP2040 with the Arduino-Pico core and FreeRTOS SMP)
+ * and an SX1262 wired up in one of the common ways can be described with this struct and
  * passed to WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&).
  *
  * Modeled on beegee-tokyo/SX126x-Arduino's `hw_config` struct
@@ -40,9 +38,17 @@
 
 #include "lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src/sx126x.h
 
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32) || defined(ARDUINO_ARCH_RP2040)
 #include <SPI.h>
 #define WISBLOCK_LORA_HW_CONFIG_HAS_SPI_INSTANCE 1
+/** Defined on every MCU that supports WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&) */
+#define WISBLOCK_HAS_HW_CONFIG_INIT 1
+#if defined(ARDUINO_ARCH_RP2040)
+// Arduino-Pico: SPIClass is only the abstract HardwareSPI base class, without setRX()/setTX()/setSCK()
+typedef SPIClassRP2040 WisBlockLoRaSpiClass;
+#else
+typedef SPIClass WisBlockLoRaSpiClass;
+#endif
 #endif
 
 /** Which SX126x variant the board carries. Only SX1262 (the HP PA variant)
@@ -94,11 +100,12 @@ struct WisBlockLoRaHwConfig
 
 #if WISBLOCK_LORA_HW_CONFIG_HAS_SPI_INSTANCE
 	/** Custom SPI peripheral instance. nullptr (default) = remap and use the
-	 * Arduino core's global `SPI` object with the pins above. Set this if
+	 * Arduino core's global `SPI` object with the pins above (RP2040: `SPI` or `SPI1`,
+	 * whichever one the SCK pin belongs to). Set this if
 	 * your board wires the radio to a second SPI peripheral instead - see
 	 * wisblockLoRaHwConfigRAK3401() below for a real example (RAK3400's
 	 * default SPI is already committed to onboard flash). */
-	SPIClass *spiInstance = nullptr;
+	WisBlockLoRaSpiClass *spiInstance = nullptr;
 #endif
 };
 
@@ -121,15 +128,18 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3312();
 /**
  * @brief Radio wiring of the RAK11310 (RP2040 WisBlock Core)
  *
- * RAK11310: RP2040 WisBlock Core module with an integrated SX1262. Only
- * usable with WisBlockLoRaWAN's default, compile-time-selected begin() -
- * RP2040/mbed has no full FreeRTOS support (see this file's doc comment),
- * so it isn't wired into the flexible begin(const WisBlockLoRaHwConfig&)
- * entry point and this preset exists only for symmetry/reference.
+ * RAK11310: RP2040 WisBlock Core module with an integrated SX1262 (RAK11300 module).
+ * Needs the Arduino-Pico core. The radio is hardwired to the SPI1 peripheral.
  *
  * @return Hardware configuration
  */
 WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11310();
+/**
+ * @brief Radio wiring of the RAK11300 (RP2040 WisDuo module), same as wisblockLoRaHwConfigRAK11310()
+ *
+ * @return Hardware configuration
+ */
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11300();
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
 /**

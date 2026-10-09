@@ -87,8 +87,14 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11310()
 	cfg.pinMosi = LORA_SPI_MOSI;
 	cfg.pinMiso = LORA_SPI_MISO;
 	cfg.radioRxEn = LORA_ANT_PWR;
+	cfg.spiInstance = &SPI1; // the SX1262 is wired to SPI1 (GPIO10/11/12) on the RAK11300/RAK11310
 #endif
 	return cfg;
+}
+
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11300()
+{
+	return wisblockLoRaHwConfigRAK11310();
 }
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)

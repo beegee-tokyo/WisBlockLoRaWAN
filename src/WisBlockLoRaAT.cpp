@@ -1815,6 +1815,9 @@ void WisBlockLoRaAT::atFactory(AtOp op, const char *value)
 #ifdef ESP32
 	esp_restart();
 #endif
+#if defined(ARDUINO_ARCH_RP2040)
+	rp2040.reboot();
+#endif
 }
 
 void WisBlockLoRaAT::atR(AtOp op, const char *value)
@@ -2198,6 +2201,9 @@ void WisBlockLoRaAT::atZ(AtOp op, const char *value)
 #ifdef ESP32
 	esp_restart();
 #endif
+#if defined(ARDUINO_ARCH_RP2040)
+	rp2040.reboot();
+#endif
 	replyOk();
 }
 
@@ -2216,6 +2222,9 @@ void WisBlockLoRaAT::atBoot(AtOp op, const char *value)
 #if defined ESP32
 	// No way to go into bootloader programmatically, just restart
 	ESP.restart();
+#endif
+#if defined(ARDUINO_ARCH_RP2040)
+	rp2040.rebootToBootloader(); // BOOTSEL mode, the board shows up as a UF2 drive
 #endif
 	replyOk();
 }
@@ -2241,16 +2250,34 @@ void WisBlockLoRaAT::atBoot(AtOp op, const char *value)
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #define WB_AT_HAS_RTOS 1
+#elif defined(ARDUINO_ARCH_RP2040) && defined(__FREERTOS)
+// Arduino-Pico with FreeRTOS SMP enabled. Serial (USB CDC or UART) has no receive notification
+// there, so the task polls the port, see rxTaskEntry().
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <task.h>
+#define WB_AT_HAS_RTOS 1
+#define WB_AT_POLLS_SERIAL 1
+#endif
+
+#ifndef WB_AT_POLL_MS
+#define WB_AT_POLL_MS 10 // RP2040: how often the AT task looks for received characters
 #endif
 
 #ifndef WB_AT_TASK_STACK_BYTES
 #define WB_AT_TASK_STACK_BYTES 8192 // ESP32: stack of the AT task; commands like AT+STATUS print a lot
 #endif
 #ifndef WB_AT_TASK_PRIORITY
+#if defined(ARDUINO_ARCH_RP2040)
+#define WB_AT_TASK_PRIORITY (configMAX_PRIORITIES / 2) // same as loop() (Arduino-Pico), below the LoRa Basics Modem task
+#else
 #define WB_AT_TASK_PRIORITY 1 // same as loop() and the LoRa Basics Modem task
 #endif
+#endif
 #ifndef WB_AT_TASK_CORE
-#if defined(ARDUINO_RUNNING_CORE)
+#if defined(ARDUINO_ARCH_RP2040)
+#define WB_AT_TASK_CORE 0 // the core of loop(), like the LoRa Basics Modem task
+#elif defined(ARDUINO_RUNNING_CORE)
 #define WB_AT_TASK_CORE ARDUINO_RUNNING_CORE // the core of loop()
 #else
 #define WB_AT_TASK_CORE tskNO_AFFINITY
@@ -2268,6 +2295,8 @@ static void giveFromAnyContext(SemaphoreHandle_t semaphore)
 {
 #if defined(ARDUINO_ARCH_ESP32)
 	bool inIsr = xPortInIsrContext();
+#elif defined(ARDUINO_ARCH_RP2040)
+	bool inIsr = portCHECK_IF_IN_ISR();
 #else
 	bool inIsr = (__get_IPSR() != 0);
 #endif
@@ -2288,7 +2317,12 @@ void WisBlockLoRaAT::rxTaskEntry(void *param)
 	WisBlockLoRaAT *at = static_cast<WisBlockLoRaAT *>(param);
 	while (true)
 	{
+#if defined(WB_AT_POLLS_SERIAL)
+		// No receive notification on this platform: the timeout of the wait is the poll interval
+		xSemaphoreTake(static_cast<SemaphoreHandle_t>(at->rxSemaphore), pdMS_TO_TICKS(WB_AT_POLL_MS));
+#else
 		xSemaphoreTake(static_cast<SemaphoreHandle_t>(at->rxSemaphore), portMAX_DELAY);
+#endif
 		at->processIncomingBytes(); // reads until nothing is left, the semaphore may be given again meanwhile
 	}
 }
@@ -2312,6 +2346,12 @@ bool WisBlockLoRaAT::startRxTask()
 	BaseType_t result = xTaskCreatePinnedToCore(rxTaskEntry, "WB_AT", stackDepth, this, WB_AT_TASK_PRIORITY, &handle, WB_AT_TASK_CORE);
 #else
 	BaseType_t result = xTaskCreate(rxTaskEntry, "WB_AT", stackDepth, this, WB_AT_TASK_PRIORITY, &handle);
+#if defined(ARDUINO_ARCH_RP2040) && (configUSE_CORE_AFFINITY == 1)
+	if (result == pdPASS)
+	{
+		vTaskCoreAffinitySet(handle, 1u << WB_AT_TASK_CORE);
+	}
+#endif
 #endif
 	if (result != pdPASS)
 	{
@@ -2465,11 +2505,16 @@ static bool installRxHook()
 /**
  * @brief Install the receive hook of the platform
  *
- * @return false, RAK11310 (RP2040) and other platforms have no receive notification
+ * @return true on RP2040 with FreeRTOS (the AT task polls the port, nothing to install),
+ * false on other platforms: they have no receive notification
  */
 static bool installRxHook()
 {
+#if defined(WB_AT_POLLS_SERIAL)
+	return true;
+#else
 	return false;
+#endif
 }
 
 #endif
@@ -2484,6 +2529,12 @@ bool WisBlockLoRaAT::enableBackgroundRx()
 	{
 		return false; // only one object can use the hook
 	}
+#if defined(ARDUINO_ARCH_RP2040)
+	if (rxWakeCb != nullptr)
+	{
+		return false; // loop mode needs a receive notification to call the wake callback, there is none
+	}
+#endif
 	if (rxWakeCb == nullptr)
 	{
 		// Task mode. The commands run in a second task and call into the LoRa Basics Modem, that

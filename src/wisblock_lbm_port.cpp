@@ -148,6 +148,11 @@ void init()
 	// the wrong pin for custom hw_config boards" for the full story. This
 	// requires WisBlockRadioHal::init() to have already run - see the
 	// ordering note on WisBlockLoRaWAN::begin()'s call sequence.
+#if defined(ARDUINO_ARCH_RP2040)
+	// Arduino-Pico's random() is rand() % n and is never seeded by the core: every device would
+	// get the same sequence after every reset (LBM draws channels, back-offs and jitter from it).
+	randomSeed(rp2040.hwrand32());
+#endif
 	int8_t dio1Pin = WisBlockRadioHal::dio1Pin();
 	pinMode(dio1Pin, INPUT_PULLDOWN);
 	attachInterrupt(digitalPinToInterrupt(dio1Pin), onDio1Rising, RISING);
@@ -189,7 +194,7 @@ extern "C"
 #elif defined(ARDUINO_ARCH_ESP32)
 		ESP.restart();
 #elif defined(ARDUINO_ARCH_RP2040)
-		watchdog_reboot(0, 0, 0);
+		rp2040.reboot();
 #endif
 	}
 
@@ -202,7 +207,7 @@ extern "C"
 		// TODO: hook up each platform's watchdog if you enable one:
 		// nRF52: NRF_WDT->RR[0] = WDT_RR_RR_Reload;
 		// ESP32: esp_task_wdt_reset();
-		// RP2040: watchdog_update();
+		// RP2040: rp2040.wdt_begin(ms) once, then rp2040.wdt_reset();
 	}
 
 	// --- Time management ---------------------------------------------

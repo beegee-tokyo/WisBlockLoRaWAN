@@ -181,16 +181,71 @@ bool erase(const char *key)
 #elif defined(ARDUINO_ARCH_RP2040)
 
 #include <LittleFS.h>
+#include <Arduino.h>
+
+// Arduino-Pico: LittleFS must not be used from several tasks at once (see the FreeRTOS chapter of
+// the core documentation). Flash access happens from the LBM task, the FreeRTOS timer task, the AT
+// task and loop(), so every call is serialized with a mutex when FreeRTOS SMP is enabled.
+// The file system needs flash space: select a flash size with a file system (Arduino IDE: Tools ->
+// Flash Size, e.g. "2MB (Sketch: 1MB, FS: 1MB)"; PlatformIO: board_build.filesystem_size = 0.5m).
+#if defined(__FREERTOS)
+#include <FreeRTOS.h>
+#include <semphr.h>
+namespace
+{
+SemaphoreHandle_t fsMutex = NULL;
+struct FsLock
+{
+	FsLock()
+	{
+		if (fsMutex)
+		{
+			xSemaphoreTakeRecursive(fsMutex, portMAX_DELAY);
+		}
+	}
+	~FsLock()
+	{
+		if (fsMutex)
+		{
+			xSemaphoreGiveRecursive(fsMutex);
+		}
+	}
+};
+} // namespace
+#else
+namespace
+{
+struct FsLock
+{
+	FsLock() {}
+};
+} // namespace
+#endif
 
 namespace WisBlockLoRaFlash
 {
 bool init()
 {
-	return LittleFS.begin();
+#if defined(__FREERTOS)
+	if (fsMutex == NULL && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+	{
+		fsMutex = xSemaphoreCreateRecursiveMutex(); // first call is from setup(), before other tasks use flash
+	}
+#endif
+	FsLock lock;
+	static bool warned = false;
+	bool ok = LittleFS.begin();
+	if (!ok && !warned)
+	{
+		warned = true;
+		Serial.println("[WisBlockLoRaWAN] LittleFS mount failed - settings and LoRaWAN session are NOT saved. Select a flash size with a file system.");
+	}
+	return ok;
 }
 
 bool read(const char *key, uint8_t *buf, size_t len)
 {
+	FsLock lock;
 	char filename[32];
 	buildFilename(key, filename, sizeof(filename));
 
@@ -206,6 +261,7 @@ bool read(const char *key, uint8_t *buf, size_t len)
 
 bool write(const char *key, const uint8_t *buf, size_t len)
 {
+	FsLock lock;
 	char filename[32];
 	buildFilename(key, filename, sizeof(filename));
 
@@ -221,6 +277,7 @@ bool write(const char *key, const uint8_t *buf, size_t len)
 
 bool erase(const char *key)
 {
+	FsLock lock;
 	char filename[32];
 	buildFilename(key, filename, sizeof(filename));
 	return LittleFS.remove(filename);

@@ -3,18 +3,19 @@
 #include "wisblock_radio_hal.h"
 
 /*
- * Merged nRF52840/ESP32-S3 implementation - see this file's own doc comment
+ * Merged nRF52840/ESP32-S3/RP2040 implementation - see this file's own doc comment
  * in wisblock_radio_hal.h ("Board flexibility") for why this replaces the
- * former wisblock_radio_hal_rak4631.cpp/_rak3312.cpp pair. Both boards'
+ * former wisblock_radio_hal_rak4631.cpp/_rak3312.cpp/_rak11310.cpp files. The boards'
  * logic was identical except for the SPI peripheral init call and a
  * yield()-in-the-busy-wait-loop for ESP32's watchdog - both are isolated to
  * small #if blocks below, everything else is driven by the WisBlockLoRaHwConfig
  * passed to init() instead of compile-time board macros.
  *
- * wisblock_radio_hal_rak11310.cpp (RP2040) is a separate file, unaffected by
- * this merge - see its own doc comment for why.
+ * RP2040 (Arduino-Pico core): the SPI pins are assigned with setRX()/setTX()/setSCK()
+ * before begin() (begin() takes no pin arguments), and the pins must belong to the SPI
+ * instance (SPI = SPI0, SPI1) or the core panics. The RAK11300/RAK11310 radio is on SPI1.
  */
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -42,7 +43,7 @@ constexpr uint32_t kAntPwrSettleUs = 1000;
 
 WisBlockLoRaHwConfig activeConfig;
 WisBlockLoRaRadioBspConfig activeBspConfig;
-SPIClass *activeSpi = nullptr;
+WisBlockLoRaSpiClass *activeSpi = nullptr;
 /**
  * @brief SPI settings of the radio: 8 MHz, MSB first, mode 0
  */
@@ -200,6 +201,10 @@ void checkDeviceReady()
 	activeSpi->begin();
 #elif defined(ARDUINO_ARCH_ESP32)
 	activeSpi->begin(activeConfig.pinSck, activeConfig.pinMiso, activeConfig.pinMosi, activeConfig.pinNss);
+#elif defined(ARDUINO_ARCH_RP2040)
+	// end() leaves the pin assignment of the SPI object untouched, begin() re-enables it.
+	// NSS is driven manually (hwCS = false).
+	activeSpi->begin();
 #endif
 #endif
 
@@ -269,7 +274,18 @@ void setActiveConfig(const WisBlockLoRaHwConfig &hwConfig)
 	// ral_sx126x_bsp_get_xosc_cfg()'s doc comment in wisblock_ral_sx126x_bsp.c.
 	activeBspConfig.tcxoStartupTimeInTick = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 64ULL / 1000ULL);
 
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_RP2040)
+	if (hwConfig.spiInstance != nullptr)
+	{
+		activeSpi = hwConfig.spiInstance;
+	}
+	else
+	{
+		// Pick the SPI peripheral the SCK pin belongs to: SPI0 = 2/6/18/22, SPI1 = 10/14/26
+		int sck = hwConfig.pinSck;
+		activeSpi = (sck == 10 || sck == 14 || sck == 26) ? &SPI1 : &SPI;
+	}
+#elif defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 	activeSpi = hwConfig.spiInstance != nullptr ? hwConfig.spiInstance : &SPI;
 #endif
 	spiSettings = SPISettings(hwConfig.spiHz, MSBFIRST, SPI_MODE0);
@@ -303,6 +319,11 @@ void init(const WisBlockLoRaHwConfig &hwConfig)
 	// doesn't span.
 	pinMode(activeConfig.pinNss, OUTPUT);
 	digitalWrite(activeConfig.pinNss, HIGH);
+#elif defined(ARDUINO_ARCH_RP2040)
+	activeSpi->setRX(activeConfig.pinMiso);
+	activeSpi->setTX(activeConfig.pinMosi);
+	activeSpi->setSCK(activeConfig.pinSck);
+	activeSpi->begin(); // NSS is driven manually, see the ESP32 branch above
 #endif
 
 	sx126x_hal_reset(nullptr); // see NOTE below: this port ignores the context arg entirely
@@ -314,11 +335,9 @@ void init()
 	init(wisblockLoRaHwConfigRAK4631());
 #elif defined(ARDUINO_ARCH_ESP32)
 	init(wisblockLoRaHwConfigRAK3312());
+#elif defined(ARDUINO_ARCH_RP2040)
+	init(wisblockLoRaHwConfigRAK11310());
 #endif
-	// ARDUINO_ARCH_RP2040 (RAK11310) is handled entirely by
-	// wisblock_radio_hal_rak11310.cpp's own WisBlockRadioHal::init() - this
-	// whole file is not compiled for that target (see the #if guard at the
-	// top), so there's no conflicting definition here.
 }
 
 const void *context()
@@ -568,4 +587,4 @@ extern "C"
 	}
 }
 
-#endif // ARDUINO_ARCH_NRF52 || NRF52840_XXAA || ARDUINO_ARCH_ESP32
+#endif // WISBLOCK_HAS_HW_CONFIG_INIT

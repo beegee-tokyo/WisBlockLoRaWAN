@@ -4,7 +4,7 @@
  * in WisBlockLoRaFlash.cpp:
  *   - nRF52840 (RAK4631): internal flash page via Adafruit's InternalFileSystem / LittleFS,
  *   - ESP32-S3 (RAK3312): Preferences (NVS),
- *   - RP2040   (RAK11310): LittleFS on the RP2040 flash filesystem.
+ *   - RP2040   (RAK11310): LittleFS of the Arduino-Pico core (needs a flash size with a file system).
  *
  * Named blobs, not a general filesystem: "give me back the last thing I
  * saved under this key". Used both for our own WisBlockPersistedConfig

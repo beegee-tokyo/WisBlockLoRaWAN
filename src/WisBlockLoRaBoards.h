@@ -40,7 +40,9 @@
 	#define LORA_ANT_PWR          4
 	/* NOTE: Verified and correct */
 
-#elif defined(ARDUINO_ARCH_RP2040) // ---- RAK11310 (RP2040) ----
+#elif defined(ARDUINO_ARCH_RP2040) // ---- RAK11310 (RP2040, RAK11300 module), Arduino-Pico core ----
+	// The SX1262 is hardwired to the RP2040's SPI1 peripheral (GPIO10/11/12), not to the default
+	// SPI (SPI0). The same values are in the Arduino-Pico variant rakwireless_rak11300.
 	#define WISBLOCK_BOARD_NAME   "RAK11310 (RP2040)"
 	#define LORA_SPI_NSS          13
 	#define LORA_RESET            14

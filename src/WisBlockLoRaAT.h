@@ -203,7 +203,7 @@ public:
 	 *    "WB_AT". The receive callback only gives a semaphore, the task wakes up and calls
 	 *    processIncomingBytes(). The commands run in that task, with its own stack (8 KB, change it
 	 *    with `-DWB_AT_TASK_STACK_BYTES=...`), not in the USB driver, not in loop(). The task
-	 *    priority is 1 (`WB_AT_TASK_PRIORITY`), on ESP32 it runs on the core of loop()
+	 *    priority is 1 (`WB_AT_TASK_PRIORITY`, configMAX_PRIORITIES/2 on RP2040), on ESP32 and RP2040 it runs on the core of loop()
 	 *    (`WB_AT_TASK_CORE`). Needs lora.enableBackgroundTask() to be running, because the commands
 	 *    then call into the LoRa Basics Modem from a second task, and lockLbm() / unlockLbm() only
 	 *    protect it if the background task is running. handleSerial() does nothing in this mode.
@@ -215,7 +215,9 @@ public:
 	 *
 	 * IMPORTANT: only one WisBlockLoRaAT object can use it, `port` of begin() must be `Serial`,
 	 * and the sketch must not define tud_cdc_rx_cb() or hook the receive event of Serial itself.
-	 * Not available on RAK11310 (RP2040): there handleSerial() in loop() is the only way.
+	 * RAK11310 (RP2040, Arduino-Pico): task mode only, and only with FreeRTOS SMP enabled. Serial has
+	 * no receive notification there, so the task polls the port every WB_AT_POLL_MS (10 ms) and a
+	 * wake callback (loop mode) is not possible. Without FreeRTOS handleSerial() in loop() is the only way.
 	 *
 	 * @return true if the background processing is active, false if the platform has no receive
 	 * hook, `port` is not `Serial`, another object already uses it, in task mode the background

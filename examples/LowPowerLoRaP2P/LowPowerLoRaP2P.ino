@@ -33,7 +33,7 @@ volatile uint16_t g_task_event_type = 0;
 static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
 #define EVENT_LOCK() portENTER_CRITICAL(&g_event_mux)
 #define EVENT_UNLOCK() portEXIT_CRITICAL(&g_event_mux)
-#elif defined ARDUINO_ARCH_NRF52
+#elif defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
 #define EVENT_LOCK() taskENTER_CRITICAL()
 #define EVENT_UNLOCK() taskEXIT_CRITICAL()
 #else
@@ -71,7 +71,7 @@ static inline void taskEventClear(uint16_t mask)
 	EVENT_UNLOCK();
 }
 
-#if defined ARDUINO_ARCH_NRF52
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
 #define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
 
@@ -301,10 +301,17 @@ void setup()
 	{
 		Serial.println("[Setup] AT command USB RX hook failed");
 	}
+#elif defined ARDUINO_ARCH_RP2040
+	// Arduino-Pico: Serial has no receive notification, so there is no wake callback. The AT task of
+	// the library (needs lora.enableBackgroundTask(), FreeRTOS SMP) polls Serial and runs the commands.
+	if (!at_serial.enableBackgroundRx())
+	{
+		Serial.println("[Setup] AT command background task failed");
+	}
 #endif
 
 	// Prepare timer and seamphore to wake up loop for frequent sending
-#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+#if defined ARDUINO_ARCH_NRF52 || defined ESP32 || defined ARDUINO_ARCH_RP2040
 	// Create the task event semaphore
 	g_task_sem = xSemaphoreCreateBinary();
 	// Initialize semaphore
@@ -315,7 +322,7 @@ void setup()
 #warning MCU not supported
 #endif
 // Initialize the timer for frequent sending
-#if defined ARDUINO_ARCH_NRF52
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
 	g_task_wakeup_timer = xTimerCreate(NULL, mypdMS_TO_TICKS(UPLINK_INTERVAL_MS), true, NULL, periodic_wakeup);
 	// FIX: xTimerCreate() above already creates this timer with the correct
 	// period - the xTimerChangePeriod() call that used to be here was

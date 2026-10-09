@@ -16,7 +16,9 @@
  * idle behavior (built into both the Adafruit nRF52 core and the ESP32
  * Arduino core) automatically drops the MCU into a low-power idle state
  * whenever no task is ready to run - genuine current savings, not just
- * fewer CPU cycles spent polling.
+ * fewer CPU cycles spent polling. (Arduino-Pico's FreeRTOS SMP has NO
+ * tickless idle: the 1 kHz tick keeps running and the idle task only does
+ * __wfe(). The RP2040 saves CPU time, but not as much current.)
  *
  * Three things determine how soon the background task wakes:
  *   - DIO1 radio IRQ (via notifyFromISR(), called from the DIO1 ISR in
@@ -38,12 +40,15 @@
  *     no extra dependency.
  *   - ESP32 (RAK3312): the ESP32 Arduino core itself runs on FreeRTOS -
  *     no extra dependency.
- *   - RP2040 (RAK11310): NOT available by default on the plain
- *     arduino-pico core. Requires a FreeRTOS-Kernel port to be added to
- *     your project first (e.g. via the arduino-pico core's "FreeRTOS"
- *     option, where available, or the standalone FreeRTOS-Kernel library).
- *     start() returns false if FreeRTOS isn't available, and the caller
- *     should fall back to manual handleEvents() polling in that case.
+ *   - RP2040 (RAK11300/RAK11310, Arduino-Pico core): FreeRTOS SMP is part of
+ *     the core but has to be enabled: Arduino IDE Tools -> Operating System
+ *     -> FreeRTOS SMP, PlatformIO build_flags = -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS
+ *     (both define __FREERTOS). The task runs at priority configMAX_PRIORITIES/2+1
+ *     (loop() runs at configMAX_PRIORITIES/2) pinned to core 0. Call the library
+ *     from setup()/loop() (core 0), not from setup1()/loop1(). The FreeRTOS timer
+ *     task cannot be pinned and runs at priority 2. start() returns false if
+ *     FreeRTOS isn't enabled, and the caller should fall back to manual
+ *     handleEvents() polling in that case.
  */
 #ifndef WISBLOCK_LBM_TASK_H
 #define WISBLOCK_LBM_TASK_H

@@ -28,6 +28,22 @@
 #include <WisBlockLoRaWAN.h>
 #include <WisBlockLoRaAT.h>
 
+#ifdef ARDUINO_ARCH_RP2040
+// Arduino-Pico (RAK11300 / RAK11310): needs FreeRTOS SMP (Arduino IDE: Tools -> Operating System -> FreeRTOS SMP,
+// PlatformIO: build_flags = -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS) and a flash size with a file system.
+#ifndef __FREERTOS
+#error "Enable FreeRTOS SMP (Tools -> Operating System, or -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS)"
+#endif
+#include <FreeRTOS.h>
+#include <semphr.h>
+#ifndef LED_GREEN
+#define LED_GREEN 23 // WisBlock LED1 of the RAK11310, check the pins of your base board
+#endif
+#ifndef LED_BUILTIN
+#define LED_BUILTIN LED_GREEN
+#endif
+#endif
+
 /**
  * The event flags are set from several tasks (LBM task, USB event task,
  * timers) and cleared from loop(), possibly on different cores. A plain
@@ -50,7 +66,7 @@ volatile uint16_t g_task_event_type = NO_EVENT;
 static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
 #define EVENT_LOCK() portENTER_CRITICAL(&g_event_mux)
 #define EVENT_UNLOCK() portEXIT_CRITICAL(&g_event_mux)
-#elif defined ARDUINO_ARCH_NRF52
+#elif defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
 #define EVENT_LOCK() taskENTER_CRITICAL()
 #define EVENT_UNLOCK() taskEXIT_CRITICAL()
 #endif
@@ -183,7 +199,7 @@ void setup()
 
 	// Start AT command handling
 	at_serial.begin(lora, Serial);
-#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+#if defined ARDUINO_ARCH_NRF52 || defined ESP32 || defined ARDUINO_ARCH_RP2040
 	if (!at_serial.enableBackgroundRx())
 	{
 		Serial.println("[Setup] AT command USB RX hook failed");

@@ -39,7 +39,7 @@ public:
 	 */
 	void begin();
 
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA) || defined(ARDUINO_ARCH_ESP32)
+#if defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 	/**
 	 * @brief Start the library with an explicit board description
 	 *
@@ -50,8 +50,7 @@ public:
 	 * is supported: fill in a WisBlockLoRaHwConfig for its wiring (or copy a preset and override
 	 * the fields that differ) and pass it here instead of calling plain begin().
 	 *
-	 * Only available on nRF52840/ESP32-S3 builds - RP2040 (RAK11310) doesn't have the full
-	 * FreeRTOS support this flexible path assumes, see wisblock_radio_hal.h's doc comment.
+	 * Available on nRF52840, ESP32-S3 and RP2040 (Arduino-Pico) builds.
 	 *
 	 * @param hwConfig Radio wiring (pins, SPI, TCXO) of the board
 	 */
@@ -752,7 +751,7 @@ public:
 	 * Parks the MCU in a low-power wait, per-platform (see WisBlockLoRaWAN.cpp
 	 * for exactly what each target does): waits on the Adafruit nRF52 core's
 	 * waitForEvent() on RAK4631, esp_light_sleep_start() on RAK3312, and a
-	 * __wfi() loop on RAK11310 (true dormant sleep there needs a
+	 * __wfi() loop on RAK11310 (Arduino-Pico; true dormant sleep there needs a
 	 * pico-extras-enabled core build - see the comment at the call site).
 	 * Wakes on the SX1262 DIO1 IRQ or `maxDurationMs` elapsing (0 = wait
 	 * indefinitely for DIO1), whichever comes first. Doesn't touch the radio
@@ -774,7 +773,7 @@ public:
 	 * anyway, so existing sketches don't break if adapted incrementally).
 	 * See wisblock_lbm_task.h for the full explanation and platform
 	 * availability notes (works out of the box on RAK4631/RAK3312; RAK11310
-	 * needs a FreeRTOS-Kernel port added to the project first).
+	 * needs Arduino-Pico's FreeRTOS SMP enabled, see there).
 	 *
 	 * Must be called after begin(). Returns false if FreeRTOS isn't
 	 * available on this platform/build - keep calling handleEvents() from

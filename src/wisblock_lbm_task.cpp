@@ -16,11 +16,11 @@
 #include <freertos/task.h>
 #define WISBLOCK_LBM_TASK_HAS_FREERTOS 1
 #elif defined(ARDUINO_ARCH_RP2040)
-// Not available on the plain arduino-pico core out of the box - only
-// compiles in if a FreeRTOS-Kernel port has been added to the project
-// (e.g. arduino-pico's "FreeRTOS" core option, where available). See the
-// header comment for details.
-#if __has_include(<FreeRTOS.h>)
+// Arduino-Pico: FreeRTOS SMP is part of the core but only built in when __FREERTOS is defined
+// (Arduino IDE: Tools -> Operating System -> FreeRTOS SMP, PlatformIO: build_flag
+// -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS). Do NOT test with __has_include(<FreeRTOS.h>): the
+// header is always on the include path and #errors out when FreeRTOS is not enabled.
+#if defined(__FREERTOS)
 #include <FreeRTOS.h>
 #include <semphr.h>
 #include <timers.h>
@@ -34,7 +34,17 @@
 namespace
 {
 constexpr uint32_t kStackSize = 4096; // matches SX126x-Arduino's own start_lora_task() default
-constexpr UBaseType_t kTaskPriority = 1; // matches SX126x-Arduino's TASK_PRIO_NORMAL
+// Priority of the task. nRF52/ESP32: 1, the same as loop(). Arduino-Pico runs setup()/loop() at
+// configMAX_PRIORITIES / 2, so the task is one above it, otherwise a loop() that does not block
+// would starve it (the task is pinned to core 0 below). Override with -DWB_LBM_TASK_PRIORITY=n
+#ifndef WB_LBM_TASK_PRIORITY
+#if defined(ARDUINO_ARCH_RP2040)
+#define WB_LBM_TASK_PRIORITY ((configMAX_PRIORITIES / 2) + 1)
+#else
+#define WB_LBM_TASK_PRIORITY 1 // matches SX126x-Arduino's TASK_PRIO_NORMAL
+#endif
+#endif
+constexpr UBaseType_t kTaskPriority = WB_LBM_TASK_PRIORITY;
 
 // First wait after the task starts, before eventHandler has ever run once -
 // bounded (not portMAX_DELAY) specifically so a join()/send()/etc. call
@@ -154,6 +164,12 @@ bool start(uint32_t (*eventHandler)())
 	{
 		return false;
 	}
+#if defined(ARDUINO_ARCH_RP2040) && (configUSE_CORE_AFFINITY == 1)
+	// FreeRTOS SMP: tasks may run on either core. Keep the engine on core 0, where setup()/loop()
+	// and (normally) the DIO1 interrupt run, so noInterrupts() in the modem HAL really blocks the
+	// radio interrupt for it, as on the single core nRF52.
+	vTaskCoreAffinitySet(eventTaskHandle, 1u << 0);
+#endif
 
 	active = true;
 	return true;

@@ -18,6 +18,31 @@
 #include <Ticker.h>
 #endif
 
+#ifdef ARDUINO_ARCH_RP2040
+// Arduino-Pico (RAK11300 / RAK11310): this example needs FreeRTOS SMP.
+// Arduino IDE: Tools -> Operating System -> FreeRTOS SMP. PlatformIO: build_flags = -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS
+// The file system is needed to save the settings: Tools -> Flash Size -> e.g. "2MB (Sketch: 1MB, FS: 1MB)".
+#ifndef __FREERTOS
+#error "Enable FreeRTOS SMP (Tools -> Operating System, or -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS)"
+#endif
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <timers.h>
+#include <task.h>
+#define isInISR() portCHECK_IF_IN_ISR()
+// The Arduino-Pico variant of the RAK11300 does not define the LEDs. WisBlock LED1/LED2 are GPIO23/GPIO24
+// on the RAK11310, check the pins of your base board.
+#ifndef LED_GREEN
+#define LED_GREEN 23
+#endif
+#ifndef LED_BLUE
+#define LED_BLUE 24
+#endif
+#ifndef LED_BUILTIN
+#define LED_BUILTIN LED_GREEN
+#endif
+#endif
+
 /** Wake up events, more events can be defined in app.h */
 #define NO_EVENT 0
 #define STATUS 0b0000000000000001
