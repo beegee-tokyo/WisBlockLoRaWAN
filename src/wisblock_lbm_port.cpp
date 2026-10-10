@@ -170,6 +170,11 @@ void tick()
 	}
 }
 
+bool radioIrqPending()
+{
+	return radioIrqFlag;
+}
+
 bool consumeRadioIrqFlag()
 {
 	if (radioIrqFlag)

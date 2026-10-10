@@ -3805,3 +3805,12 @@ The FreeRTOS timer task (priority 2) cannot be pinned. Call the library from cor
 without `__FREERTOS`; the vendored LBM C files compile for the Cortex-M0+; the library symbols resolve (`wisblock_radio_hal_get_bsp_config`
 was undefined on RP2040 before). **Not verified**: no link, no PlatformIO build, nothing ran on a RAK11300/RAK11310. The LED pins,
 the 10 ms AT poll and the priorities need a test on hardware.
+
+### RP2040: sleep() did not honour its timeout (join stalls of ~120 s)
+
+`WisBlockLoRaWAN::sleep()` waited with `__wfi()`, which only returns on an interrupt. Without FreeRTOS the RP2040 has no periodic
+tick, so `sleep(1000)` (called in loop() of BasicLoRaWAN, low power is on by default) could sleep far beyond 1 s: DIO1 (TX done) woke
+the CPU, but the LBM timers (join start, RX1/RX2 windows) are polled after the wake up, so they ran late and the join failed
+("lr1mac task aborted by the radioplanner"). Now a one-shot alarm (`add_alarm_in_ms`) guarantees the wake up, and the check before
+WFI runs with interrupts masked so a pending interrupt is not lost. New `WisBlockLbmPort::radioIrqPending()`.
+Not yet confirmed on hardware.

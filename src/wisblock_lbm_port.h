@@ -49,6 +49,13 @@ void tick();
  * @return true if the radio interrupt fired since the last call
  */
 bool consumeRadioIrqFlag();
+
+/**
+ * @brief Check without clearing it if the radio interrupt fired since the last consumeRadioIrqFlag()
+ *
+ * @return true if the radio interrupt flag is set
+ */
+bool radioIrqPending();
 } // namespace WisBlockLbmPort
 
 #endif // WISBLOCK_LBM_PORT_H

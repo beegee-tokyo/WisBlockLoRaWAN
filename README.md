@@ -22,17 +22,26 @@ _**Not supported**_
 # WARNING
 _**RAK11300 and RAK11310 support is not yet fully implemented. The original Arduino and PlatformIO BSP's for the RP2040 MCU are based on MBED, which is no longer officially maintained and supported, a different approach will be required for these modules.**_     
 Current workaround for RAK11300/RAk11310
-With Arduino IDE use Earle F. Philhower BSP for RP2040 ==> [arduino-pico](https://github.com/earlephilhower/arduino-pico)
-With PlatformIO use [platform-raspberrypi](https://github.com/maxgerhardt/platform-raspberrypi)
-Status: LoRa P2P is working, LoRaWAN is not yet working, can't join network.
+- With Arduino IDE use Earle F. Philhower BSP for RP2040 ==> [arduino-pico](https://github.com/earlephilhower/arduino-pico)
+- With PlatformIO use [platform-raspberrypi](https://github.com/maxgerhardt/platform-raspberrypi)
+
+If firmware upload does not work with RAK11300/RAK11310 on Windows, change driver with ZADIG:    
+**Install the driver**
+   - Put the board in BOOTSEL mode.
+   - Start Zadig and enable Options → List All Devices.
+   - Select "RP2 Boot (Interface 1)". _**Do not pick the mass-storage interface.**_
+   - Install the WinUSB driver.
+
+After that, picotool uploads and the automatic reset into BOOTSEL both work.
 
 ## Supported hardware
 
-Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, reduced support - see above). `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
+Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (_**only with Earle F. Philhower BSP, MBED is BSP is not supported**_).       
+`WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
 
-On nRF52840 and ESP32-S3, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
+On nRF52840, ESP32-S3 and RP2040, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
 `WisBlockLoRaHwConfig` (`src/WisBlockLoRaHwConfig.h`) and pass it to `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` instead of plain `begin()`. A RAK3401 (RAK3400 WisDuo module + RAK13300/RAK13302 transceiver) preset is included as a worked example - `wisblockLoRaHwConfigRAK3401()` - see `examples/RAK3401_RAK13300/`. This flexible path is
-nRF52840/ESP32-S3 only, for the same FreeRTOS-support reason RAK11310 has reduced support above.
+nRF52840/ESP32-S3/RP2040 only. Other MCU types are not supported.
 
 ## API documentation
 

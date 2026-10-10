@@ -8,6 +8,10 @@
 #include "wisblock_radio_hal.h"
 #include <Arduino.h>
 #include <string.h>
+#if defined(ARDUINO_ARCH_RP2040)
+#include <hardware/sync.h>
+#include <pico/time.h>
+#endif
 
 #if defined(ARDUINO_ARCH_ESP32)
 // esp_light_sleep_start()/gpio_wakeup_enable() - see sleep() below.
@@ -530,6 +534,20 @@ void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)
 	// peripherals) stays powered. If you rebuild libpico.a with pico-extras
 	// per that project's instructions, swap this loop for
 	// sleep_goto_dormant_until_edge_high(LORA_DIO1) for a deeper sleep.
+	//
+	// __wfi() only returns when an interrupt arrives, and without FreeRTOS the RP2040 has no
+	// periodic tick (millis() is a free running timer without an interrupt). Checking millis()
+	// in the loop is therefore not enough: the CPU would sleep far beyond maxDurationMs (the
+	// LoRa Basics Modem timers, e.g. the RX1/RX2 windows, are polled after the wake up), so a
+	// one-shot alarm is armed that guarantees a wake up at the timeout.
+	alarm_id_t wakeAlarm = 0;
+	if (maxDurationMs != 0)
+	{
+		wakeAlarm = add_alarm_in_ms(
+			maxDurationMs, [](alarm_id_t, void *) -> int64_t
+			{ return 0; }, // only needed for the interrupt, do not repeat
+			nullptr, true);
+	}
 	uint32_t start = millis();
 	while (true)
 	{
@@ -541,7 +559,18 @@ void WisBlockLoRaWAN::sleep(uint32_t maxDurationMs)
 		{
 			break;
 		}
-		__wfi();
+		// Mask interrupts for the check, WFI still wakes on a pending interrupt, so an interrupt
+		// that arrives between the checks above and the WFI is not lost.
+		uint32_t irqState = save_and_disable_interrupts();
+		if (!WisBlockLbmPort::radioIrqPending() && (maxDurationMs == 0 || (millis() - start) < maxDurationMs))
+		{
+			__wfi();
+		}
+		restore_interrupts(irqState);
+	}
+	if (wakeAlarm > 0)
+	{
+		cancel_alarm(wakeAlarm);
 	}
 #else
 	(void)maxDurationMs;
