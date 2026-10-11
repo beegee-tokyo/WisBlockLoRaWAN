@@ -36,11 +36,29 @@
 #endif
 #include <FreeRTOS.h>
 #include <semphr.h>
-#ifndef LED_GREEN
-#define LED_GREEN 23 // WisBlock LED1 of the RAK11310, check the pins of your base board
+// Add missing WisBlock definitions
+
+#ifndef _VARIANT_RAK11300_
+#define WB_IO1 6
+#define WB_IO2 22
+#define WB_IO3 7
+#define WB_IO4 28
+#define WB_IO5 9
+#define WB_IO6 8
+#define WB_A0 26
+#define WB_A1 27
 #endif
-#ifndef LED_BUILTIN
-#define LED_BUILTIN LED_GREEN
+
+// LEDs
+#define PIN_LED1 (23)
+#define PIN_LED2 (24)
+
+#define LED_BUILTIN PIN_LED1
+#define LED_CONN PIN_LED2
+
+#ifndef _VARIANT_RAK11300_
+#define LED_GREEN PIN_LED1
+#define LED_BLUE PIN_LED2
 #endif
 #endif
 
