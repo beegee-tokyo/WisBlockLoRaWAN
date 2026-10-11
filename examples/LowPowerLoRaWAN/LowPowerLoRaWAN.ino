@@ -44,7 +44,7 @@ uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x06, 0x79, 0xdb}; // ac1f09f
 #elif defined(RAK3400)
 uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x00, 0x00, 0x02}; // ac1f09fffe000002
 #elif defined(ARDUINO_ARCH_RP2040)
-uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x06, 0x40, 0x80}; // ac1f09fffe000002
+uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x06, 0x40, 0x80}; // ac1f09fffe064080
 #else
 uint8_t devEui[8] = {0xac, 0x1f, 0x09, 0xff, 0xfe, 0x18, 0xF0, 0xC4}; // ac1f09fffe18f0c4
 #endif
@@ -439,11 +439,16 @@ void setup()
 	Serial.println("[Setup] lora.begin");
 	lora.begin();
 #endif
-	Serial.println("[LoRaWAN] setup");
-	lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
-	lora.setOTAAKeys(devEui, joinEui, appKey);
-	lora.setRegion(WISBLOCK_RUI3_BAND_AS923_3);
-	const WisBlockPersistedConfig &cfg = lora.getConfig();
+	if (lora.getWorkMode() != WISBLOCK_MODE_LORAWAN)
+	{
+		Serial.println("[LoRaWAN] Switch to LoRaWAN mode");
+		lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
+	}
+	// Serial.println("[LoRaWAN] setup");
+	// lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
+	// lora.setOTAAKeys(devEui, joinEui, appKey);
+	// lora.setRegion(WISBLOCK_RUI3_BAND_AS923_3);
+	// const WisBlockPersistedConfig &cfg = lora.getConfig();
 	int idx = lora.getRegion();
 	Serial.printf("[Setup] Current band selection %d\n", idx);
 
@@ -475,19 +480,19 @@ void setup()
 	// #else
 	// 	lora.setFetchPendingDownlinks(false);
 	// #endif
-	lora.setTxPower(0);
-	if (!lora.setADR(false))
-	{
-		Serial.println("[Setup] Failed to disable ADR");
-	}
-	if (!lora.setDataRate(3))
-	{
-		Serial.println("[Setup] Failed to set DR3");
-	}
+	// lora.setTxPower(0);
+	// if (!lora.setADR(false))
+	// {
+	// 	Serial.println("[Setup] Failed to disable ADR");
+	// }
+	// if (!lora.setDataRate(3))
+	// {
+	// 	Serial.println("[Setup] Failed to set DR3");
+	// }
 
-	lora.setConfirmedUplinks(false);
+	// lora.setConfirmedUplinks(false);
 
-	// Serial.println("[LoRaWAN] setup from saved config");
+	Serial.println("[LoRaWAN] setup from saved config");
 
 	Serial.println("[Setup] set callbacks");
 	lora.onJoinSuccess(onJoined);
@@ -529,9 +534,7 @@ void setup()
 	// Start AT command interface. USB RX only wakes loop() (atRxWake), the
 	// AT commands are processed in loop() via at_serial.handleSerial()
 	at_serial.begin(lora, Serial);
-#if !defined ARDUINO_ARCH_RP2040
-	at_serial.setRxWakeCallback(atRxWake);
-#endif
+	// at_serial.setRxWakeCallback(atRxWake);	// Arduino-Pico (RP2040): Serial has no receive notification, so there is no wake callback. The AT
 	// Arduino-Pico (RP2040): Serial has no receive notification, so there is no wake callback. The AT
 	// task of the library (needs lora.enableBackgroundTask(), FreeRTOS SMP) polls Serial and runs the commands.
 	if (!at_serial.enableBackgroundRx())
@@ -544,10 +547,14 @@ void setup()
 	registerCustomATCommands(at_serial);
 
 	// Get saved settings
-	// Serial.println("[Setup] Get saved custom settings");
-	// custom_settings = getCustomAtSettings();
-	// UPLINK_INTERVAL_MS = custom_settings.sendIntervalS * 1000; // seconds to milli seconds
-	UPLINK_INTERVAL_MS = 0;
+	Serial.println("[Setup] Get saved custom settings");
+	custom_settings = getCustomAtSettings();
+	UPLINK_INTERVAL_MS = custom_settings.sendIntervalS * 1000; // seconds to milli seconds
+	Serial.printf("[Setup] Send interval is %ds\n", custom_settings.sendIntervalS);
+	if (custom_settings.sendIntervalS == 0)
+	{
+		UPLINK_INTERVAL_MS = 300000;
+	}
 
 // Initialize the timer for frequent sending
 #if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
@@ -614,7 +621,8 @@ void loop()
 			}
 #endif
 			if (custom_settings.sendIntervalS != 0)
-			{ // Request to send first packet
+			{ 
+				// Request to send first packet
 				taskEventSet(STATUS);
 			}
 

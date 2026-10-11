@@ -4,7 +4,7 @@
 
 This library is created to replace the [SX126x-Arduino](https://github.com/beegee-tokyo/SX126x-Arduino) in the future.     
 It includes     
-- an API for LoRa P2P communication, including P2P CAD and RX-Duty-Cycle implementation.
+- an API for LoRa P2P and FSK P2P communication, including P2P CAD and RX-Duty-Cycle implementation.
 - an API to use a LoRaWAN modem stack based on Semtechs [SWL2001 Basic Modem](https://github.com/Lora-net/SWL2001/tree/master) implementation.     
 It supports Class A, Class C and Class B (not yet tested), LinkCheck, ServerTime and a full implementation of the [TS001-LoRaWAN L2 1.0.4](https://resources.lora-alliance.org/technical-specifications/ts001-1-0-4-lorawan-l2-1-0-4-specification) and [Regional Parameters RP2-1.0.3](https://resources.lora-alliance.org/technical-specifications/rp2-1-0-3-lorawan-regional-parameters) specifications.     
 - an AT command interface and a local storage for device setup, e.g. LoRa P2P settings, LoRaWAN credentials, DevNonces, ...     
@@ -18,11 +18,11 @@ _**Not supported**_
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
 - This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
 
-# WARNING
-_**RAK11300 and RAK11310 support is not yet fully implemented. The original Arduino and PlatformIO BSP's for the RP2040 MCU are based on MBED, which is no longer officially maintained and supported, a different approach will be required for these modules.**_     
-Current workaround for RAK11300/RAk11310
+_**RAK11300 and RAK11310 is only supported using the BSP from Earle F. Philhower, which supports FreeRTOS. The original Arduino and PlatformIO BSP's for the RP2040 MCU are based on MBED, which is no longer officially maintained and supported, therefor it is not supported by this library.**_     
+Current workaround for RAK11300/RAK11310
 - With Arduino IDE use Earle F. Philhower BSP for RP2040 ==> [arduino-pico](https://github.com/earlephilhower/arduino-pico)
 - With PlatformIO use [platform-raspberrypi](https://github.com/maxgerhardt/platform-raspberrypi)
+- Enable FreeRTOS support in Arduino BSP tools or for PIO in platformio.ini with _**`build_flags = -D PIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS`**_
 
 If firmware upload does not work with RAK11300/RAK11310 on Windows, change driver with ZADIG:    
 **Install the driver**
