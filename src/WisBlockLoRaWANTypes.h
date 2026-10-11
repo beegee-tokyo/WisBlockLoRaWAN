@@ -17,7 +17,24 @@ enum WisBlockWorkMode : uint8_t
 {
 	WISBLOCK_MODE_LORAWAN = 0,
 	WISBLOCK_MODE_LORA_P2P = 1,
+	WISBLOCK_MODE_FSK_P2P = 2, // GFSK point to point, RUI3 AT+NWM=2
 };
+
+/** Modulation used by the P2P engine, follows the work mode (see WisBlockLoRaWAN::setWorkMode()). */
+enum WisBlockP2PModulation : uint8_t
+{
+	WISBLOCK_P2P_MOD_LORA = 0,
+	WISBLOCK_P2P_MOD_FSK = 1,
+};
+
+/** Limits of the SX126x GFSK modem. */
+#define WISBLOCK_FSK_BITRATE_MIN 600UL
+#define WISBLOCK_FSK_BITRATE_MAX 300000UL
+#define WISBLOCK_FSK_FDEV_MIN 600UL
+#define WISBLOCK_FSK_FDEV_MAX 200000UL
+#define WISBLOCK_FSK_BW_MIN 4800UL // RX bandwidth (double side band), RUI3 AT+PBW in FSK mode
+#define WISBLOCK_FSK_BW_MAX 467000UL
+#define WISBLOCK_FSK_SYNCWORD_MAX_LEN 8
 
 /** LoRaWAN regional parameters. Mirrors smtc_modem_region_t from LBM. */
 enum WisBlockRegion : uint8_t
@@ -234,6 +251,23 @@ struct WisBlockP2PSettings
 	 * link must match.
 	 */
 	uint16_t syncWord = 0x1424;
+
+	// ---- FSK (GFSK) P2P, used when modulation == WISBLOCK_P2P_MOD_FSK. Appended after the LoRa
+	// fields (persisted config version 5). preambleLength, txPowerDbm, frequencyHz and
+	// rxBoostedGainEnabled are shared with LoRa; preambleLength counts BYTES in FSK mode.
+	// cadEnabled, spreadingFactor, bandwidth, codingRate, iqInversion and syncWord are LoRa only.
+	WisBlockP2PModulation modulation = WISBLOCK_P2P_MOD_LORA;
+	/** FSK bit rate in bit/s (RUI3 AT+PBR), 600..300000 */
+	uint32_t fskBitrate = 50000;
+	/** FSK frequency deviation in Hz (RUI3 AT+PFDEV), 600..200000 */
+	uint32_t fskFreqDevHz = 25000;
+	/** FSK RX bandwidth in Hz (RUI3 AT+PBW in FSK mode), 4800..467000. The next larger step of the
+	 * radio is used. It should be at least bit rate + 2 * deviation. */
+	uint32_t fskBandwidthHz = 117300;
+	/** Number of valid bytes in fskSyncWord, 1..8 */
+	uint8_t fskSyncWordLen = 3;
+	/** FSK sync word, both ends must match. Default 0xC1 0x94 0xC1 (Semtech reference). */
+	uint8_t fskSyncWord[WISBLOCK_FSK_SYNCWORD_MAX_LEN] = {0xC1, 0x94, 0xC1, 0, 0, 0, 0, 0};
 };
 
 /** Result of a CAD (Channel Activity Detection) operation. */

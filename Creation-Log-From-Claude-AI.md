@@ -3814,3 +3814,39 @@ the CPU, but the LBM timers (join start, RX1/RX2 windows) are polled after the w
 ("lr1mac task aborted by the radioplanner"). Now a one-shot alarm (`add_alarm_in_ms`) guarantees the wake up, and the check before
 WFI runs with interrupts masked so a pending interrupt is not lost. New `WisBlockLbmPort::radioIrqPending()`.
 Not yet confirmed on hardware.
+
+## FSK (GFSK) P2P mode
+
+Why it was missing: nothing in the radio stack prevents it. The vendored SX126x driver and the RAL layer implement GFSK completely
+(modulation/packet parameters, sync word, CRC, whitening, packet status, time on air, the 0.6/1.2 kbps workarounds). The limit was in
+this library: `LoRaP2PEngine` only called the `sx126x_*_lora_*` functions, `WisBlockP2PSettings` had only LoRa fields and
+`AT+NWM=2` was answered with `AT_PARAM_ERROR` on purpose.
+
+What was added:
+- `WISBLOCK_MODE_FSK_P2P` (RUI3 `AT+NWM=2`); `setWorkMode()` switches the P2P engine between LoRa and GFSK.
+- `WisBlockP2PSettings`: `modulation`, `fskBitrate` (600..300000, default 50000), `fskFreqDevHz` (600..200000, default 25000),
+  `fskBandwidthHz` (4800..467000, default 117300, next larger radio step), `fskSyncWord`/`fskSyncWordLen` (default C1 94 C1).
+  API: `setP2PFskBitrate()`, `setP2PFskFrequencyDeviation()`, `setP2PFskBandwidth()`, `setP2PFskSyncWord()`.
+- Fixed GFSK packet format: variable length, 2 byte inverted CCITT CRC (seed 0x1D0F, polynomial 0x1021), whitening seed 0x01FF, no address
+  filter, Gaussian filter BT 1.0, preamble detector 16 bit (8 bit below 2 preamble bytes). The preamble length (`AT+PPL`) counts BYTES in FSK.
+- AT: `AT+NWM=2`, `AT+PBR`, `AT+PFDEV`, `AT+PBW` (Hz in FSK mode), `AT+PPL` (bytes in FSK mode); `AT+P2P` in FSK mode uses
+  `<freq>:<bitrate>:<fdev>:<bw>:<preamble>:<power>` (this library's own layout, not verified against RUI3); `AT+STATUS` shows the FSK values.
+- Persisted config version 5: version 3 and 4 blobs (settings and factory backup) are converted, the FSK fields get their defaults.
+  Checked with a host test that writes a real version 4 blob and reloads it.
+- FSK RX reports RSSI (`rssi_avg`), no SNR (0). A packet with a wrong CRC is reported like an RX timeout (length 0) so the application can restart RX.
+- Not available in FSK mode: CAD (the callback gets `WISBLOCK_CAD_ERROR`), `computeRxDutyCycleTiming()` (returns false, the formula is LoRa
+  specific; `startReceiveDutyCycle()` itself works with your own times), IQ inversion and the LoRa sync word.
+- Example `BasicFskP2P`.
+
+Not verified: compiled against Arduino-Pico only (the engine code is MCU independent); nothing was transmitted. Interoperability with RUI3
+FSK is unknown (packet format defaults, preamble unit). Note: the LoRa RX path delivers a packet even if the radio flags a CRC error
+(`SX126X_IRQ_CRC_ERROR` arrives together with RX_DONE), the FSK path drops it. The LoRa behaviour was left unchanged.
+- Example `FskP2PTest`: two-device FSK bench test with API calls only (sender/receiver selected with `ROLE_SENDER`, counts missed packets). Compiled for both roles; not run on hardware.
+- Diagnostics for FSK bring-up: `getP2PInstantRssi()` and `getP2PFskStats()` (radio packet counters: received / CRC error / length error). `FskP2PTest` prints them once per second on the receiver (`FSK_DEBUG`).
+- `getP2PRadioStatus()` (chip mode, last command status, device errors) and the `FSK_TEST_AS_LORA` switch in `FskP2PTest`: first FSK receiver test showed RSSI max -128 dBm (raw 0xFF, saturated) all the time, i.e. the radio did not measure a signal; open question whether the radio was in RX / front end.
+
+### Bug: continuous P2P receive never started (LoRa and FSK)
+
+`LoRaP2PEngine::startReceive(0)` passed `SX126X_RX_CONTINUOUS` (0x00FFFFFF, RTC steps) to `sx126x_set_rx()`, which takes milliseconds and returns `UNKNOWN_VALUE` without sending the command for anything above 262143 ms. The radio stayed in standby (chip mode 2, RSSI raw 0xFF = -128 dBm), so `startP2PReceive(0)` never received anything. Found with the FSK receiver diagnostics. Fixed with `sx126x_set_rx_with_timeout_in_rtc_step(SX126X_RX_CONTINUOUS)`; finite timeouts above the radio maximum are now limited instead of dropped. Finite timeouts (PingPong, the 5 s window after a TX) were never affected. The device error 0x0020 (XOSC start) seen in the same output is probably the flag the SX126x raises after SetDIO3AsTCXOCtrl, it does not clear itself.
+- Example `FSKP2PPingPong`: the LoRaP2PPingPong Master/Slave example in FSK mode (916.4 MHz, 100 kbit/s, 50 kHz deviation, 225 kHz bandwidth), with the library background task, the AT interface in the background and the FreeRTOS semaphore wake-up. FSK and PingPong tested separately on RAK4631 <-> RAK3112 (FskP2PTest, both directions); this example itself was only compiled.
+- `AT+STATUS` in FSK mode now also prints PPL (bytes), TXP and SYNC (hex). `ATC+STATUS` in `examples/LowPowerLoRaWAN/custom_at.cpp` handled every non-LoRaWAN mode as LoRa P2P; it now follows the `AT+NWM` numbering (0 P2P, 1 LoRaWAN, 2 FSK) and prints bit rate, deviation, RX bandwidth, preamble (bytes), TX power and sync word in FSK mode.

@@ -58,6 +58,15 @@ void WisBlockLoRaWAN::begin()
 	// why starting the LoRaWAN engine unconditionally for every application,
 	// P2P-only ones included, was actively fighting the P2P engine for
 	// control of the radio.
+	// The modulation follows the (possibly restored) work mode
+	if (config.workMode == WISBLOCK_MODE_FSK_P2P)
+	{
+		config.p2p.modulation = WISBLOCK_P2P_MOD_FSK;
+	}
+	else if (config.workMode == WISBLOCK_MODE_LORA_P2P)
+	{
+		config.p2p.modulation = WISBLOCK_P2P_MOD_LORA;
+	}
 	p2p.begin(config.p2p);
 
 	began = true;
@@ -78,6 +87,15 @@ void WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig &hwConfig)
 	WisBlockLbmPort::init();
 
 	// See the matching comment in plain begin() above.
+	// The modulation follows the (possibly restored) work mode
+	if (config.workMode == WISBLOCK_MODE_FSK_P2P)
+	{
+		config.p2p.modulation = WISBLOCK_P2P_MOD_FSK;
+	}
+	else if (config.workMode == WISBLOCK_MODE_LORA_P2P)
+	{
+		config.p2p.modulation = WISBLOCK_P2P_MOD_LORA;
+	}
 	p2p.begin(config.p2p);
 
 	began = true;
@@ -167,6 +185,16 @@ void WisBlockLoRaWAN::setWorkMode(WisBlockWorkMode mode)
 	if (mode == WISBLOCK_MODE_LORAWAN)
 	{
 		ensureLoRaWANEngineStarted();
+	}
+	else
+	{
+		// The two P2P modes differ in the modulation of the P2P engine
+		WisBlockP2PModulation mod = (mode == WISBLOCK_MODE_FSK_P2P) ? WISBLOCK_P2P_MOD_FSK : WISBLOCK_P2P_MOD_LORA;
+		if (config.p2p.modulation != mod)
+		{
+			config.p2p.modulation = mod;
+			applyP2PSettings();
+		}
 	}
 }
 
@@ -376,6 +404,37 @@ void WisBlockLoRaWAN::setP2PSyncWord(uint16_t syncWord)
 	applyP2PSettings();
 }
 
+void WisBlockLoRaWAN::setP2PFskBitrate(uint32_t bitrate)
+{
+	config.p2p.fskBitrate = bitrate;
+	applyP2PSettings();
+}
+
+void WisBlockLoRaWAN::setP2PFskFrequencyDeviation(uint32_t deviationHz)
+{
+	config.p2p.fskFreqDevHz = deviationHz;
+	applyP2PSettings();
+}
+
+void WisBlockLoRaWAN::setP2PFskBandwidth(uint32_t bandwidthHz)
+{
+	config.p2p.fskBandwidthHz = bandwidthHz;
+	applyP2PSettings();
+}
+
+bool WisBlockLoRaWAN::setP2PFskSyncWord(const uint8_t *syncWord, uint8_t length)
+{
+	if (syncWord == nullptr || length < 1 || length > WISBLOCK_FSK_SYNCWORD_MAX_LEN)
+	{
+		return false;
+	}
+	memset(config.p2p.fskSyncWord, 0, sizeof(config.p2p.fskSyncWord));
+	memcpy(config.p2p.fskSyncWord, syncWord, length);
+	config.p2p.fskSyncWordLen = length;
+	applyP2PSettings();
+	return true;
+}
+
 bool WisBlockLoRaWAN::sendP2P(const uint8_t *data, uint8_t length)
 {
 	return p2p.send(data, length);
@@ -403,7 +462,7 @@ void WisBlockLoRaWAN::startP2PCad()
 
 void WisBlockLoRaWAN::sleepRadio()
 {
-	if (config.workMode == WISBLOCK_MODE_LORA_P2P)
+	if (config.workMode == WISBLOCK_MODE_LORA_P2P || config.workMode == WISBLOCK_MODE_FSK_P2P)
 	{
 		p2p.sleep();
 	}

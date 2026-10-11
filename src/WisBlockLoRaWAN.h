@@ -70,9 +70,13 @@ public:
 
 	// --- Work mode -----------------------------------------------------
 	/**
-	 * @brief Select the work mode (LoRaWAN or LoRa P2P)
+	 * @brief Select the work mode (LoRaWAN, LoRa P2P or FSK P2P)
 	 *
-	 * @param mode WISBLOCK_MODE_LORAWAN or WISBLOCK_MODE_LORA_P2P
+	 * WISBLOCK_MODE_FSK_P2P switches the P2P engine to GFSK modulation, WISBLOCK_MODE_LORA_P2P back to
+	 * LoRa. The FSK parameters are set with setP2PFskBitrate() and the following functions, the
+	 * frequency, preamble length (bytes in FSK), TX power and RX boosted gain are shared with LoRa.
+	 *
+	 * @param mode WISBLOCK_MODE_LORAWAN, WISBLOCK_MODE_LORA_P2P or WISBLOCK_MODE_FSK_P2P
 	 */
 	void setWorkMode(WisBlockWorkMode mode);
 	/**
@@ -574,6 +578,34 @@ public:
 	 */
 	void setP2PSyncWord(uint16_t syncWord);
 	/**
+	 * @brief FSK bit rate (RUI3 AT+PBR), used in WISBLOCK_MODE_FSK_P2P
+	 *
+	 * @param bitrate Bit rate in bit/s, 600..300000 (values outside are limited by the engine)
+	 */
+	void setP2PFskBitrate(uint32_t bitrate);
+	/**
+	 * @brief FSK frequency deviation (RUI3 AT+PFDEV), used in WISBLOCK_MODE_FSK_P2P
+	 *
+	 * @param deviationHz Deviation in Hz, 600..200000
+	 */
+	void setP2PFskFrequencyDeviation(uint32_t deviationHz);
+	/**
+	 * @brief FSK RX bandwidth (RUI3 AT+PBW in FSK mode), used in WISBLOCK_MODE_FSK_P2P
+	 *
+	 * The next larger bandwidth step of the radio is used. It should be at least bit rate + 2 * deviation.
+	 *
+	 * @param bandwidthHz Bandwidth in Hz, 4800..467000
+	 */
+	void setP2PFskBandwidth(uint32_t bandwidthHz);
+	/**
+	 * @brief FSK sync word, both ends of a link must use the same
+	 *
+	 * @param syncWord Sync word bytes
+	 * @param length Number of bytes, 1..8
+	 * @return false if the length is invalid
+	 */
+	bool setP2PFskSyncWord(const uint8_t *syncWord, uint8_t length);
+	/**
 	 * @brief Send a P2P packet
 	 *
 	 * @param data Payload
@@ -581,6 +613,37 @@ public:
 	 * @return true if the transmission was started
 	 */
 	bool sendP2P(const uint8_t *data, uint8_t length);
+	/**
+	 * @brief Instantaneous RSSI of the radio while a P2P receive is running (diagnostics)
+	 *
+	 * @param rssiDbm Receives the RSSI in dBm, about -100 to -120 dBm without a signal
+	 * @return true if the value was read
+	 */
+	bool getP2PInstantRssi(int16_t &rssiDbm) { return p2p.getInstantRssi(rssiDbm); }
+	/**
+	 * @brief Packet counters of the radio in FSK mode (diagnostics), see LoRaP2PEngine::getFskStats()
+	 *
+	 * @param received Packets received with a correct CRC
+	 * @param crcErrors Packets with a wrong CRC
+	 * @param lengthErrors Packets with a wrong length
+	 * @return true if the counters were read
+	 */
+	bool getP2PFskStats(uint16_t &received, uint16_t &crcErrors, uint16_t &lengthErrors)
+	{
+		return p2p.getFskStats(received, crcErrors, lengthErrors);
+	}
+	/**
+	 * @brief Chip mode, status of the last command and device errors of the radio (diagnostics)
+	 *
+	 * @param chipMode 5 while receiving, 6 while transmitting, 2 or 3 in standby
+	 * @param cmdStatus Status of the previous command, see LoRaP2PEngine::getRadioStatus()
+	 * @param deviceErrors Error bit mask of the radio, 0 = no error
+	 * @return true if the values were read
+	 */
+	bool getP2PRadioStatus(uint8_t &chipMode, uint8_t &cmdStatus, uint16_t &deviceErrors)
+	{
+		return p2p.getRadioStatus(chipMode, cmdStatus, deviceErrors);
+	}
 	/**
 	 * @brief Start receiving P2P packets
 	 *

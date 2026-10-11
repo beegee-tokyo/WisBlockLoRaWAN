@@ -158,6 +158,42 @@ public:
 	void startCad(); // one-shot CAD; result delivered via onCadResult callback
 
 	/**
+	 * @brief Read the instantaneous RSSI of the radio (diagnostics)
+	 *
+	 * Only valid while the radio is receiving (startReceive()). Without a signal the value is the
+	 * noise floor (about -100 to -120 dBm), a transmitter in range makes it rise during its packet.
+	 *
+	 * @param rssiDbm Receives the RSSI in dBm
+	 * @return true if the value was read
+	 */
+	bool getInstantRssi(int16_t &rssiDbm);
+
+	/**
+	 * @brief Read the packet counters of the radio in FSK mode (diagnostics)
+	 *
+	 * The counters count every packet the radio detected since the last reset of the radio statistics,
+	 * also the ones that were dropped: wrong CRC and wrong length. They do not need the interrupts.
+	 *
+	 * @param received Packets received (with a correct CRC)
+	 * @param crcErrors Packets with a wrong CRC
+	 * @param lengthErrors Packets with a wrong length
+	 * @return true if the counters were read (FSK mode only)
+	 */
+	bool getFskStats(uint16_t &received, uint16_t &crcErrors, uint16_t &lengthErrors);
+
+	/**
+	 * @brief Read the chip mode, the status of the last command and the device errors (diagnostics)
+	 *
+	 * @param chipMode 2 = STBY_RC, 3 = STBY_XOSC, 4 = FS, 5 = RX, 6 = TX
+	 * @param cmdStatus Status of the previous command: 1 = RFU, 2 = data available, 3 = command timeout,
+	 * 4 = command processing error, 5 = command execution failure, 6 = TX done
+	 * @param deviceErrors Bit mask: 0x01 RC64k calibration, 0x02 RC13M calibration, 0x04 PLL calibration,
+	 * 0x08 ADC calibration, 0x10 image calibration, 0x20 XOSC start, 0x40 PLL lock, 0x100 PA ramp
+	 * @return true if the values were read
+	 */
+	bool getRadioStatus(uint8_t &chipMode, uint8_t &cmdStatus, uint16_t &deviceErrors);
+
+	/**
 	 * @brief Put the radio into sleep mode
 	 *
 	 * Puts the radio into low-power sleep (SX126x SetSleep, cold-start).
@@ -233,7 +269,10 @@ private:
 	/**
 	 * @brief Write the stored settings to the radio
 	 */
-	void applyRadioParams(); // pushes settings into sx126x_set_lora_mod_params / sx126x_set_lora_pkt_params
+	void applyRadioParams(); // pushes settings into sx126x_set_lora_mod_params / sx126x_set_lora_pkt_params (or the GFSK ones)
+	void applyFskParams();	 // GFSK part of applyRadioParams(): modulation, packet, sync word, CRC, whitening
+	void applyPktParams(uint8_t payloadLen); // LoRa or GFSK packet parameters, payloadLen matters for TX only
+	bool isFsk() const { return settings.modulation == WISBLOCK_P2P_MOD_FSK; }
 	/**
 	 * @brief Configure the radio again after it woke up from sleep
 	 *

@@ -19,3 +19,7 @@ For Arduino IDE, download the repository as ZIP file and add it to Arduino IDE l
 ## RP2040
 
 - RAK11300/RAK11310 now use the Arduino-Pico core (Arduino IDE) / maxgerhardt platform-raspberrypi (PlatformIO) with FreeRTOS SMP instead of the mbed core; radio on SPI1; AT interface, background task and examples work as on RAK4631/RAK3312. See Creation-Log-From-Claude-AI.md.
+
+## FSK P2P
+
+- New FSK (GFSK) P2P mode: `WISBLOCK_MODE_FSK_P2P` / `AT+NWM=2`, `AT+PBR`, `AT+PFDEV`, FSK `AT+PBW`/`AT+PPL`, example `BasicFskP2P`. Persisted config is now version 5 (older configs are converted). See Creation-Log-From-Claude-AI.md.

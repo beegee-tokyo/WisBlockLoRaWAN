@@ -27,7 +27,10 @@
 // Version 3 blobs are NOT discarded: wisblockConfigLoad()/wisblockConfigLoadFactory() read
 // them with the old layout and fill the new fields with their defaults, so keys and other
 // settings survive a library update. They are rewritten as version 4 on the next save.
-#define WISBLOCK_CONFIG_VERSION 4
+//
+// Version 5: WisBlockP2PSettings gained the FSK fields (modulation, bit rate, deviation, bandwidth,
+// sync word). Version 3 and 4 blobs are converted the same way, see WisBlockLoRaWANConfig.cpp.
+#define WISBLOCK_CONFIG_VERSION 5
 struct WisBlockPersistedConfig
 {
 	uint32_t magic = WISBLOCK_CONFIG_MAGIC;

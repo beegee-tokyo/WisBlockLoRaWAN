@@ -103,6 +103,93 @@ uint8_t computeLdro(uint8_t sf, WisBlockP2PBandwidth bw)
 	return symbolPeriodMs > 16.38 ? 1 : 0;
 }
 
+// ---- GFSK helpers -------------------------------------------------------------------------
+
+struct GfskBwEntry
+{
+	uint32_t hz;
+	sx126x_gfsk_bw_t value;
+};
+// RX bandwidth steps of the SX126x (double side band), ascending
+const GfskBwEntry kGfskBw[] = {
+	{4800, SX126X_GFSK_BW_4800},	 {5800, SX126X_GFSK_BW_5800},	  {7300, SX126X_GFSK_BW_7300},
+	{9700, SX126X_GFSK_BW_9700},	 {11700, SX126X_GFSK_BW_11700},	  {14600, SX126X_GFSK_BW_14600},
+	{19500, SX126X_GFSK_BW_19500},	 {23400, SX126X_GFSK_BW_23400},	  {29300, SX126X_GFSK_BW_29300},
+	{39000, SX126X_GFSK_BW_39000},	 {46900, SX126X_GFSK_BW_46900},	  {58600, SX126X_GFSK_BW_58600},
+	{78200, SX126X_GFSK_BW_78200},	 {93800, SX126X_GFSK_BW_93800},	  {117300, SX126X_GFSK_BW_117300},
+	{156200, SX126X_GFSK_BW_156200}, {187200, SX126X_GFSK_BW_187200}, {234300, SX126X_GFSK_BW_234300},
+	{312000, SX126X_GFSK_BW_312000}, {373600, SX126X_GFSK_BW_373600}, {467000, SX126X_GFSK_BW_467000},
+};
+
+/**
+ * @brief Smallest GFSK RX bandwidth step that is at least the requested bandwidth
+ *
+ * @param hz Requested bandwidth in Hz
+ * @return Driver value, the widest step if hz is above all of them
+ */
+sx126x_gfsk_bw_t toSx126xGfskBandwidth(uint32_t hz)
+{
+	for (const GfskBwEntry &e : kGfskBw)
+	{
+		if (e.hz >= hz)
+		{
+			return e.value;
+		}
+	}
+	return SX126X_GFSK_BW_467000;
+}
+
+uint32_t clampU32(uint32_t v, uint32_t lo, uint32_t hi)
+{
+	return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/**
+ * @brief GFSK modulation parameters from the P2P settings
+ *
+ * @param s P2P settings
+ * @return Driver parameters (bit rate and deviation limited to what the modem supports)
+ */
+sx126x_mod_params_gfsk_t buildGfskModParams(const WisBlockP2PSettings &s)
+{
+	sx126x_mod_params_gfsk_t p;
+	p.br_in_bps = clampU32(s.fskBitrate, WISBLOCK_FSK_BITRATE_MIN, WISBLOCK_FSK_BITRATE_MAX);
+	p.fdev_in_hz = clampU32(s.fskFreqDevHz, WISBLOCK_FSK_FDEV_MIN, WISBLOCK_FSK_FDEV_MAX);
+	p.pulse_shape = SX126X_GFSK_PULSE_SHAPE_BT_1;
+	p.bw_dsb_param = toSx126xGfskBandwidth(s.fskBandwidthHz);
+	return p;
+}
+
+/**
+ * @brief GFSK packet parameters from the P2P settings
+ *
+ * Variable length packets (the length is sent in the packet), 2 byte inverted CCITT CRC, whitening,
+ * no address filtering. preambleLength is in bytes.
+ *
+ * @param s P2P settings
+ * @param payloadLen Payload length for TX, 255 (maximum) for RX
+ * @return Driver parameters
+ */
+sx126x_pkt_params_gfsk_t buildGfskPktParams(const WisBlockP2PSettings &s, uint8_t payloadLen)
+{
+	sx126x_pkt_params_gfsk_t p;
+	uint32_t bits = clampU32(s.preambleLength, 1, 8191) * 8;
+	p.preamble_len_in_bits = (uint16_t)bits;
+	p.preamble_detector = bits >= 16 ? SX126X_GFSK_PREAMBLE_DETECTOR_MIN_16BITS : SX126X_GFSK_PREAMBLE_DETECTOR_MIN_8BITS;
+	uint8_t swLen = s.fskSyncWordLen;
+	if (swLen < 1 || swLen > WISBLOCK_FSK_SYNCWORD_MAX_LEN)
+	{
+		swLen = 3;
+	}
+	p.sync_word_len_in_bits = swLen * 8;
+	p.address_filtering = SX126X_GFSK_ADDRESS_FILTERING_DISABLE;
+	p.header_type = SX126X_GFSK_PKT_VAR_LEN;
+	p.pld_len_in_bytes = payloadLen;
+	p.crc_type = SX126X_GFSK_CRC_2_BYTES_INV;
+	p.dc_free = SX126X_GFSK_DC_FREE_WHITENING;
+	return p;
+}
+
 constexpr uint16_t kAllIrqsForTx = SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT;
 constexpr uint16_t kAllIrqsForRx = SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR;
 constexpr uint16_t kAllIrqsForCad = SX126X_IRQ_CAD_DONE | SX126X_IRQ_CAD_DETECTED;
@@ -163,6 +250,10 @@ bool LoRaP2PEngine::computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleep
 bool LoRaP2PEngine::computeRxDutyCycleTiming(uint16_t txPreambleLengthSymbols, uint32_t &rxTimeMs,
 											  uint32_t &sleepTimeMs, uint8_t marginSymbols) const
 {
+	if (settings.modulation == WISBLOCK_P2P_MOD_FSK)
+	{
+		return false; // the formula is LoRa specific, use startReceiveDutyCycle() with your own times
+	}
 	// Bandwidth and SF still come from this radio's own settings - those
 	// two have to match the transmitter's for the link to work at all, so
 	// unlike preamble length there's no meaningful "transmitter's value"
@@ -215,7 +306,7 @@ void LoRaP2PEngine::begin(const WisBlockP2PSettings &initial)
 
 	sx126x_reset(kCtx);
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
-	sx126x_set_pkt_type(kCtx, SX126X_PKT_TYPE_LORA);
+	sx126x_set_pkt_type(kCtx, isFsk() ? SX126X_PKT_TYPE_GFSK : SX126X_PKT_TYPE_LORA);
 
 	// RF switch (DIO2) and TCXO config come from the active WisBlockLoRaHwConfig
 	// (see wisblock_radio_hal_get_bsp_config() / WisBlockRadioHal::init()) -
@@ -238,7 +329,14 @@ void LoRaP2PEngine::begin(const WisBlockP2PSettings &initial)
 
 void LoRaP2PEngine::applySettings(const WisBlockP2PSettings &newSettings)
 {
+	bool modulationChanged = settings.modulation != newSettings.modulation;
 	settings = newSettings;
+	if (modulationChanged)
+	{
+		// The packet type can only be changed in standby
+		sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
+		sx126x_set_pkt_type(kCtx, isFsk() ? SX126X_PKT_TYPE_GFSK : SX126X_PKT_TYPE_LORA);
+	}
 	applyRadioParams();
 }
 
@@ -246,28 +344,29 @@ void LoRaP2PEngine::applyRadioParams()
 {
 	sx126x_set_rf_freq(kCtx, settings.frequencyHz);
 
-	sx126x_mod_params_lora_t modParams;
-	modParams.sf = (sx126x_lora_sf_t)settings.spreadingFactor;
-	modParams.bw = toSx126xBandwidth(settings.bandwidth);
-	modParams.cr = (sx126x_lora_cr_t)settings.codingRate; // WisBlockP2PCodingRate values (1..4) match sx126x_lora_cr_t exactly
-	modParams.ldro = computeLdro(settings.spreadingFactor, settings.bandwidth);
-	sx126x_set_lora_mod_params(kCtx, &modParams);
-
-	sx126x_pkt_params_lora_t pktParams;
-	pktParams.preamble_len_in_symb = settings.preambleLength;
-	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
-	pktParams.pld_len_in_bytes = 255; // max; overridden per-TX in send(), irrelevant for RX (explicit header)
-	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = settings.iqInversion;
-	sx126x_set_lora_pkt_params(kCtx, &pktParams);
-
-	// 16-bit LoRa sync word (SX126x register 0x0740/0x0741). The driver's own
-	// sx126x_set_lora_sync_word() only takes the 8-bit short form (0x12/0x34 ->
-	// 0x1424/0x3444), so write the full 16-bit value directly.
+	if (isFsk())
 	{
-		const uint16_t kRegLoraSyncWord = 0x0740;
-		uint8_t sw[2] = {(uint8_t)(settings.syncWord >> 8), (uint8_t)(settings.syncWord & 0xFF)};
-		sx126x_write_register(kCtx, kRegLoraSyncWord, sw, 2);
+		applyFskParams();
+	}
+	else
+	{
+		sx126x_mod_params_lora_t modParams;
+		modParams.sf = (sx126x_lora_sf_t)settings.spreadingFactor;
+		modParams.bw = toSx126xBandwidth(settings.bandwidth);
+		modParams.cr = (sx126x_lora_cr_t)settings.codingRate; // WisBlockP2PCodingRate values (1..4) match sx126x_lora_cr_t exactly
+		modParams.ldro = computeLdro(settings.spreadingFactor, settings.bandwidth);
+		sx126x_set_lora_mod_params(kCtx, &modParams);
+
+		applyPktParams(255); // max; overridden per-TX in send(), irrelevant for RX (explicit header)
+
+		// 16-bit LoRa sync word (SX126x register 0x0740/0x0741). The driver's own
+		// sx126x_set_lora_sync_word() only takes the 8-bit short form (0x12/0x34 ->
+		// 0x1424/0x3444), so write the full 16-bit value directly.
+		{
+			const uint16_t kRegLoraSyncWord = 0x0740;
+			uint8_t sw[2] = {(uint8_t)(settings.syncWord >> 8), (uint8_t)(settings.syncWord & 0xFF)};
+			sx126x_write_register(kCtx, kRegLoraSyncWord, sw, 2);
+		}
 	}
 
 	// CRITICAL, previously missing: SetTxParams alone (below) only sets the
@@ -315,6 +414,53 @@ void LoRaP2PEngine::applyRadioParams()
 	sx126x_cfg_rx_boosted(kCtx, settings.rxBoostedGainEnabled);
 }
 
+void LoRaP2PEngine::applyFskParams()
+{
+	// Undo a bit rate workaround of an earlier configuration before the modulation changes
+	sx126x_workaround_gfsk_reset(kCtx);
+
+	sx126x_mod_params_gfsk_t mod = buildGfskModParams(settings);
+	sx126x_set_gfsk_mod_params(kCtx, &mod);
+	applyPktParams(255);
+
+	// Semtech workarounds for two bit rate/deviation/bandwidth combinations, see the driver's docs
+	if (mod.br_in_bps == 1200 && mod.fdev_in_hz == 5000 && mod.bw_dsb_param == SX126X_GFSK_BW_19500)
+	{
+		sx126x_workaround_gfsk_1_2_kbps(kCtx);
+	}
+	else if (mod.br_in_bps == 600 && mod.fdev_in_hz == 800 && mod.bw_dsb_param == SX126X_GFSK_BW_4800)
+	{
+		sx126x_workaround_gfsk_0_6_kbps(kCtx);
+	}
+
+	uint8_t swLen = settings.fskSyncWordLen;
+	if (swLen < 1 || swLen > WISBLOCK_FSK_SYNCWORD_MAX_LEN)
+	{
+		swLen = 3;
+	}
+	sx126x_set_gfsk_sync_word(kCtx, settings.fskSyncWord, swLen);
+	sx126x_set_gfsk_crc_seed(kCtx, 0x1D0F); // CRC_2_BYTES_INV: inverted CCITT
+	sx126x_set_gfsk_crc_polynomial(kCtx, 0x1021);
+	sx126x_set_gfsk_whitening_seed(kCtx, 0x01FF);
+}
+
+void LoRaP2PEngine::applyPktParams(uint8_t payloadLen)
+{
+	if (isFsk())
+	{
+		sx126x_pkt_params_gfsk_t pktParams = buildGfskPktParams(settings, payloadLen);
+		sx126x_set_gfsk_pkt_params(kCtx, &pktParams);
+		return;
+	}
+	sx126x_pkt_params_lora_t pktParams;
+	pktParams.preamble_len_in_symb = settings.preambleLength;
+	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
+	pktParams.pld_len_in_bytes = payloadLen;
+	pktParams.crc_is_on = true;
+	pktParams.invert_iq_is_on = settings.iqInversion;
+	sx126x_set_lora_pkt_params(kCtx, &pktParams);
+}
+
 bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 {
 	if (data == nullptr || length == 0)
@@ -329,13 +475,7 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	// immediately, since blocking on CAD here would stall loop().
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
-	sx126x_pkt_params_lora_t pktParams;
-	pktParams.preamble_len_in_symb = settings.preambleLength;
-	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
-	pktParams.pld_len_in_bytes = length;
-	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = settings.iqInversion;
-	sx126x_set_lora_pkt_params(kCtx, &pktParams);
+	applyPktParams(length);
 
 	sx126x_write_buffer(kCtx, 0, data, length);
 	lastTxPayloadLength = length;
@@ -354,19 +494,24 @@ void LoRaP2PEngine::startReceive(uint32_t timeoutMs)
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
-	sx126x_pkt_params_lora_t pktParams;
-	pktParams.preamble_len_in_symb = settings.preambleLength;
-	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
-	pktParams.pld_len_in_bytes = 255; // ignored on RX with explicit header; actual length comes from sx126x_get_rx_buffer_status
-	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = settings.iqInversion;
-	sx126x_set_lora_pkt_params(kCtx, &pktParams);
+	applyPktParams(255);
 
 	sx126x_set_dio_irq_params(kCtx, kAllIrqsForRx, kAllIrqsForRx, 0, 0);
 	sx126x_clear_irq_status(kCtx, SX126X_IRQ_ALL);
 
-	uint32_t timeout = (timeoutMs == 0) ? SX126X_RX_CONTINUOUS : timeoutMs;
-	sx126x_set_rx(kCtx, timeout);
+	if (timeoutMs == 0)
+	{
+		// Continuous reception. SX126X_RX_CONTINUOUS (0x00FFFFFF) is a value in RTC steps, so it must
+		// go to the _with_timeout_in_rtc_step() variant. sx126x_set_rx() takes milliseconds and
+		// rejects everything above SX126X_MAX_TIMEOUT_IN_MS without sending the command - the radio
+		// then stays in standby and never receives.
+		sx126x_set_rx_with_timeout_in_rtc_step(kCtx, SX126X_RX_CONTINUOUS);
+	}
+	else
+	{
+		// A timeout above the maximum of the radio (about 262 s) is limited, not dropped
+		sx126x_set_rx(kCtx, timeoutMs > SX126X_MAX_TIMEOUT_IN_MS ? SX126X_MAX_TIMEOUT_IN_MS : timeoutMs);
+	}
 }
 
 void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs)
@@ -374,13 +519,7 @@ void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeM
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
-	sx126x_pkt_params_lora_t pktParams;
-	pktParams.preamble_len_in_symb = settings.preambleLength;
-	pktParams.header_type = SX126X_LORA_PKT_EXPLICIT;
-	pktParams.pld_len_in_bytes = 255; // ignored on RX with explicit header; actual length comes from sx126x_get_rx_buffer_status
-	pktParams.crc_is_on = true;
-	pktParams.invert_iq_is_on = settings.iqInversion;
-	sx126x_set_lora_pkt_params(kCtx, &pktParams);
+	applyPktParams(255);
 
 	// Same IRQ routing as startReceive() - a packet arriving during a duty
 	// cycle's RX phase raises the exact same RX_DONE/CRC_ERROR/etc. flags
@@ -432,7 +571,7 @@ void LoRaP2PEngine::reconfigureAfterColdSleep()
 	// requires waiting out the chip's boot time on top of everything
 	// else).
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
-	sx126x_set_pkt_type(kCtx, SX126X_PKT_TYPE_LORA);
+	sx126x_set_pkt_type(kCtx, isFsk() ? SX126X_PKT_TYPE_GFSK : SX126X_PKT_TYPE_LORA);
 	{
 		const WisBlockLoRaRadioBspConfig *bspCfg = wisblock_radio_hal_get_bsp_config();
 		sx126x_set_dio2_as_rf_sw_ctrl(kCtx, bspCfg->dio2AntSwitch);
@@ -444,8 +583,53 @@ void LoRaP2PEngine::reconfigureAfterColdSleep()
 	applyRadioParams();
 }
 
+bool LoRaP2PEngine::getInstantRssi(int16_t &rssiDbm)
+{
+	return sx126x_get_rssi_inst(kCtx, &rssiDbm) == SX126X_STATUS_OK;
+}
+
+bool LoRaP2PEngine::getRadioStatus(uint8_t &chipMode, uint8_t &cmdStatus, uint16_t &deviceErrors)
+{
+	sx126x_chip_status_t st;
+	sx126x_errors_mask_t errs = 0;
+	if (sx126x_get_status(kCtx, &st) != SX126X_STATUS_OK || sx126x_get_device_errors(kCtx, &errs) != SX126X_STATUS_OK)
+	{
+		return false;
+	}
+	chipMode = (uint8_t)st.chip_mode;
+	cmdStatus = (uint8_t)st.cmd_status;
+	deviceErrors = errs;
+	return true;
+}
+
+bool LoRaP2PEngine::getFskStats(uint16_t &received, uint16_t &crcErrors, uint16_t &lengthErrors)
+{
+	if (!isFsk())
+	{
+		return false;
+	}
+	sx126x_stats_gfsk_t stats;
+	if (sx126x_get_gfsk_stats(kCtx, &stats) != SX126X_STATUS_OK)
+	{
+		return false;
+	}
+	received = stats.nb_pkt_received;
+	crcErrors = stats.nb_pkt_crc_error;
+	lengthErrors = stats.nb_pkt_len_error;
+	return true;
+}
+
 void LoRaP2PEngine::startCad()
 {
+	if (isFsk())
+	{
+		// Channel activity detection only exists for LoRa
+		if (cadResultCb)
+		{
+			cadResultCb(WISBLOCK_CAD_ERROR);
+		}
+		return;
+	}
 	reconfigureAfterColdSleep();
 	sx126x_cad_params_t cadParams;
 	cadParams.cad_symb_nb = SX126X_CAD_04_SYMB;
@@ -502,9 +686,18 @@ uint32_t LoRaP2PEngine::handleEvents()
 	{
 		WisBlockTxResult r;
 		r.success = true;
-		r.airtimeMs = computeAirtimeMs(settings.spreadingFactor, settings.bandwidth, (uint8_t)settings.codingRate,
-										settings.preambleLength, lastTxPayloadLength,
-										computeLdro(settings.spreadingFactor, settings.bandwidth));
+		if (isFsk())
+		{
+			sx126x_pkt_params_gfsk_t pkt = buildGfskPktParams(settings, lastTxPayloadLength);
+			sx126x_mod_params_gfsk_t mod = buildGfskModParams(settings);
+			r.airtimeMs = sx126x_get_gfsk_time_on_air_in_ms(&pkt, &mod);
+		}
+		else
+		{
+			r.airtimeMs = computeAirtimeMs(settings.spreadingFactor, settings.bandwidth, (uint8_t)settings.codingRate,
+										   settings.preambleLength, lastTxPayloadLength,
+										   computeLdro(settings.spreadingFactor, settings.bandwidth));
+		}
 		if (txFinishedCb)
 		{
 			txFinishedCb(r);
@@ -516,14 +709,30 @@ uint32_t LoRaP2PEngine::handleEvents()
 		WisBlockRxResult r;
 		sx126x_rx_buffer_status_t bufStatus;
 		sx126x_pkt_status_lora_t pktStatus;
+		// FSK: the radio reports RX_DONE together with CRC_ERROR for a damaged packet. A damaged
+		// packet is reported like an RX timeout (no data), so the application can start the RX again.
+		bool fskCrcError = isFsk() && (irq & SX126X_IRQ_CRC_ERROR);
 
-		if (sx126x_get_rx_buffer_status(kCtx, &bufStatus) == SX126X_STATUS_OK)
+		if (!fskCrcError && sx126x_get_rx_buffer_status(kCtx, &bufStatus) == SX126X_STATUS_OK)
 		{
 			uint8_t len = bufStatus.pld_len_in_bytes > sizeof(r.data) ? sizeof(r.data) : bufStatus.pld_len_in_bytes;
 			sx126x_read_buffer(kCtx, bufStatus.buffer_start_pointer, r.data, len);
 			r.length = len;
 		}
-		if (sx126x_get_lora_pkt_status(kCtx, &pktStatus) == SX126X_STATUS_OK)
+		if (fskCrcError)
+		{
+			// nothing to read
+		}
+		else if (isFsk())
+		{
+			sx126x_pkt_status_gfsk_t fskStatus;
+			if (sx126x_get_gfsk_pkt_status(kCtx, &fskStatus) == SX126X_STATUS_OK)
+			{
+				r.rssi = fskStatus.rssi_avg; // dBm, there is no SNR in FSK
+				r.snr = 0;
+			}
+		}
+		else if (sx126x_get_lora_pkt_status(kCtx, &pktStatus) == SX126X_STATUS_OK)
 		{
 			r.rssi = pktStatus.rssi_pkt_in_dbm;
 			r.snr = pktStatus.snr_pkt_in_db;

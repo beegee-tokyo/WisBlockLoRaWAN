@@ -215,8 +215,9 @@ namespace
 #endif
 			Serial.printf("Version: %s\r\n", lora.getFirmwareVer());
 			Serial.printf("Send interval: %d s\r\n", g_customSettings.sendIntervalS);
-			/// \todo
-			nw_mode = lora.getWorkMode() == WISBLOCK_MODE_LORAWAN ? 1 : 0;
+			// Same numbering as AT+NWM: 0 = P2P (LoRa), 1 = LoRaWAN, 2 = FSK P2P
+			WisBlockWorkMode work_mode = lora.getWorkMode();
+			nw_mode = work_mode == WISBLOCK_MODE_LORAWAN ? 1 : (work_mode == WISBLOCK_MODE_FSK_P2P ? 2 : 0);
 			Serial.printf("Network mode %s\r\n", nwm_list[nw_mode]);
 			if (nw_mode == 1)
 			{
@@ -272,6 +273,22 @@ namespace
 				Serial.printf("CR = %d\r\n", (int)s.codingRate);
 				Serial.printf("Preamble length = %d\r\n", s.preambleLength);
 				Serial.printf("TX power = %d\r\n", s.txPowerDbm);
+			}
+			else if (nw_mode == 2)
+			{
+				const WisBlockP2PSettings &s = lora.getP2PSettings();
+				Serial.printf("Frequency = %lu\r\n", (unsigned long)s.frequencyHz);
+				Serial.printf("Bit rate = %lu\r\n", (unsigned long)s.fskBitrate);
+				Serial.printf("Frequency deviation = %lu\r\n", (unsigned long)s.fskFreqDevHz);
+				Serial.printf("RX bandwidth = %lu\r\n", (unsigned long)s.fskBandwidthHz);
+				Serial.printf("Preamble length = %d bytes\r\n", s.preambleLength);
+				Serial.printf("TX power = %d\r\n", s.txPowerDbm);
+				Serial.print("Sync word = ");
+				for (uint8_t i = 0; i < s.fskSyncWordLen && i < WISBLOCK_FSK_SYNCWORD_MAX_LEN; i++)
+				{
+					Serial.printf("%02X", s.fskSyncWord[i]);
+				}
+				Serial.println("\r");
 			}
 		}
 		else

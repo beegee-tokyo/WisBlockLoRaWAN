@@ -13,7 +13,6 @@ It supports Class A, Class C and Class B (not yet tested), LinkCheck, ServerTime
 _**Not supported**_    
 - LoRaWAN FUOTA function is not implemented and is not planned at this time due to the complexity of FUOTA and challenge to implement it in an Arduino library.     
 - LoRaWAN Relay function is not implemented and it is not planned at this time. 
-- LoRa P2P FSK transmission are not supported yet.
 
 # IMPORTANT
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
@@ -92,6 +91,19 @@ Depending on timing of power on, one device will act as a master and send PING m
 
 ### RX-Duty-LoRaP2P
 LoRa P2P example that uses the DutyCycle feature to listen to incoming packets.
+
+###  BasicFskP2P
+Simple FSK P2P application.    
+Alternates between CAD-gated TX and RX every few seconds.    
+The AT command interface runs on the USB serial port. It is polled from loop() with at_serial.handleSerial(), the same way as lora.handleEvents().
+
+### FSKP2PPingPong
+PingPong example using FSK modulation for transmission. Requires two devices flashed with the same application.     
+Depending on timing of power on, one device will act as a master and send PING messages. The other device will act as a slave and is responding with PONG messages.    
+
+### FskP2PTest
+Simple example using FSK modulation for transmission. Requires two devices flashed with the same application.     
+One device has to be set as sender, the other one has to be set as receiver.    
 
 ### ATCommandInterface
 Exposes the full AT command set (see README.md) over USB serial.     

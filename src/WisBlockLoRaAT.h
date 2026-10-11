@@ -615,6 +615,8 @@ private:
 	 * @param value Text after the '=' (null for query and run)
 	 */
 	void atPBw(AtOp op, const char *value);
+	void atPBr(AtOp op, const char *value);	  // FSK bit rate
+	void atPFdev(AtOp op, const char *value); // FSK frequency deviation
 	/**
 	 * @brief Handler for AT+PCR (P2P mode coding rate)
 	 *

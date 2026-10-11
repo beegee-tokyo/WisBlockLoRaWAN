@@ -193,6 +193,8 @@ const WisBlockLoRaAT::AtCommandEntry WisBlockLoRaAT::atCommandTable[] = {
 	{"+PFREQ", &WisBlockLoRaAT::atPFreq},
 	{"+PSF", &WisBlockLoRaAT::atPSf},
 	{"+PBW", &WisBlockLoRaAT::atPBw},
+	{"+PBR", &WisBlockLoRaAT::atPBr},
+	{"+PFDEV", &WisBlockLoRaAT::atPFdev},
 	{"+PCR", &WisBlockLoRaAT::atPCr},
 	{"+PPL", &WisBlockLoRaAT::atPPl},
 	{"+PTP", &WisBlockLoRaAT::atPTp},
@@ -376,7 +378,7 @@ void WisBlockLoRaAT::handleStatusQuery()
 {
 	const WisBlockPersistedConfig &cfg = lora->getConfig();
 	port->print("MODE=");
-	port->println(cfg.workMode == WISBLOCK_MODE_LORAWAN ? "LORAWAN" : "LORA_P2P");
+	port->println(cfg.workMode == WISBLOCK_MODE_LORAWAN ? "LORAWAN" : (cfg.workMode == WISBLOCK_MODE_FSK_P2P ? "FSK_P2P" : "LORA_P2P"));
 	if (cfg.workMode == WISBLOCK_MODE_LORAWAN)
 	{
 		port->print("REGION=");
@@ -394,6 +396,29 @@ void WisBlockLoRaAT::handleStatusQuery()
 		}
 		port->print("JOINSTATE=");
 		port->println((int)lora->joinState());
+	}
+	else if (cfg.workMode == WISBLOCK_MODE_FSK_P2P)
+	{
+		port->print("FREQ=");
+		port->println(cfg.p2p.frequencyHz);
+		port->print("BR=");
+		port->println(cfg.p2p.fskBitrate);
+		port->print("FDEV=");
+		port->println(cfg.p2p.fskFreqDevHz);
+		port->print("BW=");
+		port->println(cfg.p2p.fskBandwidthHz);
+		port->print("PPL="); // preamble length in bytes
+		port->println(cfg.p2p.preambleLength);
+		port->print("TXP=");
+		port->println(cfg.p2p.txPowerDbm);
+		port->print("SYNC=");
+		for (uint8_t i = 0; i < cfg.p2p.fskSyncWordLen && i < WISBLOCK_FSK_SYNCWORD_MAX_LEN; i++)
+		{
+			char hex[3];
+			snprintf(hex, sizeof(hex), "%02X", cfg.p2p.fskSyncWord[i]);
+			port->print(hex);
+		}
+		port->println();
 	}
 	else
 	{
@@ -600,23 +625,23 @@ bool WisBlockLoRaAT::addCustomATCommand(const char *cmd, const char *usage, Cust
 
 void WisBlockLoRaAT::atNwm(AtOp op, const char *value)
 {
-	// RUI3 numbering: 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK (FSK not
-	// implemented by this library - see the write branch below).
+	// RUI3 numbering: 0 = P2P_LORA, 1 = LoRaWAN, 2 = P2P_FSK
 	if (op == AtOp::Query)
 	{
 		port->printf("AT+NWM=");
-		port->println(lora->getWorkMode() == WISBLOCK_MODE_LORAWAN ? 1 : 0);
+		WisBlockWorkMode m = lora->getWorkMode();
+		port->println(m == WISBLOCK_MODE_LORAWAN ? 1 : (m == WISBLOCK_MODE_FSK_P2P ? 2 : 0));
 		replyOk();
 	}
 	else if (op == AtOp::Write)
 	{
 		int v = atoi(value);
-		if (v == 2)
+		if (v < 0 || v > 2)
 		{
-			replyError("AT_PARAM_ERROR"); // P2P_FSK not supported by this library
+			replyError("AT_PARAM_ERROR");
 			return;
 		}
-		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORAWAN : WISBLOCK_MODE_LORA_P2P);
+		lora->setWorkMode(v == 1 ? WISBLOCK_MODE_LORAWAN : (v == 2 ? WISBLOCK_MODE_FSK_P2P : WISBLOCK_MODE_LORA_P2P));
 		replyOk();
 	}
 	else
@@ -1330,6 +1355,61 @@ void WisBlockLoRaAT::atTimeReq(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 {
+	if (lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P)
+	{
+		// FSK: <freqHz>:<bitrate>:<fdev>:<bwHz>:<preamble bytes>:<txpower> (this library's own
+		// layout, the FSK parameters can also be set one by one: AT+PFREQ, PBR, PFDEV, PBW, PPL, PTP)
+		const WisBlockP2PSettings &s = lora->getP2PSettings();
+		if (op == AtOp::Query)
+		{
+			port->printf("AT+P2P=");
+			port->print(s.frequencyHz);
+			port->print(":");
+			port->print(s.fskBitrate);
+			port->print(":");
+			port->print(s.fskFreqDevHz);
+			port->print(":");
+			port->print(s.fskBandwidthHz);
+			port->print(":");
+			port->print(s.preambleLength);
+			port->print(":");
+			port->println(s.txPowerDbm);
+			replyOk();
+			return;
+		}
+		if (op == AtOp::Write)
+		{
+			char buf[96];
+			strncpy(buf, value, sizeof(buf) - 1);
+			buf[sizeof(buf) - 1] = '\0';
+			uint32_t f[5] = {0, 0, 0, 0, 0};
+			char *tok = strtok(buf, ":");
+			int n = 0;
+			while (tok && n < 5)
+			{
+				f[n++] = strtoul(tok, nullptr, 10);
+				tok = strtok(nullptr, ":");
+			}
+			int txp = tok ? atoi(tok) : s.txPowerDbm;
+			if (n < 5 || f[0] < kP2pFreqMin || f[0] > kP2pFreqMax || f[1] < WISBLOCK_FSK_BITRATE_MIN || f[1] > WISBLOCK_FSK_BITRATE_MAX ||
+				f[2] < WISBLOCK_FSK_FDEV_MIN || f[2] > WISBLOCK_FSK_FDEV_MAX || f[3] < WISBLOCK_FSK_BW_MIN || f[3] > WISBLOCK_FSK_BW_MAX ||
+				f[4] < 1 || f[4] > 8191 || txp < (int)kP2pTxPowerMin || txp > (int)kP2pTxPowerMax)
+			{
+				replyError("AT_PARAM_ERROR");
+				return;
+			}
+			lora->setP2PFrequency(f[0]);
+			lora->setP2PFskBitrate(f[1]);
+			lora->setP2PFskFrequencyDeviation(f[2]);
+			lora->setP2PFskBandwidth(f[3]);
+			lora->setP2PPreambleLength((uint16_t)f[4]);
+			lora->setP2PTxPower((int8_t)txp);
+			replyOk();
+			return;
+		}
+		replyError("AT_ERROR");
+		return;
+	}
 	if (op == AtOp::Query)
 	{
 		// Same field order as the write branch below: <freqHz>:<sf>:<bw>:<cr>:<preamble>:<txpower>
@@ -1447,13 +1527,32 @@ void WisBlockLoRaAT::atPBw(AtOp op, const char *value)
 	if (op == AtOp::Query)
 	{
 		// 0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83, 7=31.25, 8=41.67, 9=62.5 kHz
+		// FSK mode: the RX bandwidth in Hz (4800..467000)
 		port->printf("AT+PBW=");
-		port->println((int)p2pBwToggle((uint8_t)lora->getP2PSettings().bandwidth));
+		if (lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P)
+		{
+			port->println(lora->getP2PSettings().fskBandwidthHz);
+		}
+		else
+		{
+			port->println((int)p2pBwToggle((uint8_t)lora->getP2PSettings().bandwidth));
+		}
 		replyOk();
 	}
 	else if (op == AtOp::Write)
 	{
 		uint32_t v;
+		if (lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P)
+		{
+			if (!parseUintStrict(value, WISBLOCK_FSK_BW_MIN, WISBLOCK_FSK_BW_MAX, v))
+			{
+				replyError("AT_PARAM_ERROR");
+				return;
+			}
+			lora->setP2PFskBandwidth(v);
+			replyOk();
+			return;
+		}
 		if (!parseUintStrict(value, 0, kP2pBwMax, v))
 		{
 			replyError("AT_PARAM_ERROR");
@@ -1505,7 +1604,9 @@ void WisBlockLoRaAT::atPPl(AtOp op, const char *value)
 	else if (op == AtOp::Write)
 	{
 		uint32_t v;
-		if (!parseUintStrict(value, kP2pPreambleMin, kP2pPreambleMax, v))
+		// FSK: the preamble length is in bytes (1..8191), LoRa: in symbols
+		bool fsk = lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P;
+		if (!parseUintStrict(value, fsk ? 1 : kP2pPreambleMin, fsk ? 8191 : kP2pPreambleMax, v))
 		{
 			replyError("AT_PARAM_ERROR");
 			return;
@@ -1593,6 +1694,58 @@ void WisBlockLoRaAT::atSyncWord(AtOp op, const char *value)
 			return;
 		}
 		lora->setP2PSyncWord((uint16_t)strtoul(value, nullptr, 16));
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPBr(AtOp op, const char *value)
+{
+	// RUI3 AT+PBR: FSK bit rate in bit/s
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PBR=");
+		port->println(lora->getP2PSettings().fskBitrate);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, WISBLOCK_FSK_BITRATE_MIN, WISBLOCK_FSK_BITRATE_MAX, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PFskBitrate(v);
+		replyOk();
+	}
+	else
+	{
+		replyError("AT_ERROR");
+	}
+}
+
+void WisBlockLoRaAT::atPFdev(AtOp op, const char *value)
+{
+	// RUI3 AT+PFDEV: FSK frequency deviation in Hz
+	if (op == AtOp::Query)
+	{
+		port->printf("AT+PFDEV=");
+		port->println(lora->getP2PSettings().fskFreqDevHz);
+		replyOk();
+	}
+	else if (op == AtOp::Write)
+	{
+		uint32_t v;
+		if (!parseUintStrict(value, WISBLOCK_FSK_FDEV_MIN, WISBLOCK_FSK_FDEV_MAX, v))
+		{
+			replyError("AT_PARAM_ERROR");
+			return;
+		}
+		lora->setP2PFskFrequencyDeviation(v);
 		replyOk();
 	}
 	else
