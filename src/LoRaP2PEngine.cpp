@@ -631,6 +631,10 @@ void LoRaP2PEngine::startCad()
 		return;
 	}
 	reconfigureAfterColdSleep();
+	// SetCadParams and SetCad are only accepted from standby. A running receive (continuous or with a
+	// timeout) is not left by itself, so without this the CAD never started while the radio was
+	// listening and the result callback was never called.
+	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 	sx126x_cad_params_t cadParams;
 	cadParams.cad_symb_nb = SX126X_CAD_04_SYMB;
 	cadParams.cad_detect_peak = 22; // Semtech reference apps' default for SF7-SF10; retune for your SF/BW if you see false positives/negatives

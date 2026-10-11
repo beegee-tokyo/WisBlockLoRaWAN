@@ -17,9 +17,9 @@
  *    from loop() (GET_PENDING_DLP 0).
  *  - The network time is converted to local time and printed (UTC+8, change it for your location).
  *  - Optional multicast group in Class C (ENA_MULTICAST).
- *  - AT commands: USB receive only wakes up loop() through a wake callback (atRxWake()), the command is
- *    processed in loop() by at_serial.handleSerial(). The custom AT commands ATC+SENDINT and
- *    ATC+STATUS are registered in setup().
+ *  - AT commands: executed in the background by the task of the library, loop() is not involved. Lines
+ *    that are not AT commands are handed to loop() with the USB_DATA event (onUnhandledLine()). The
+ *    custom AT commands ATC+SENDINT and ATC+STATUS are registered in setup().
  */
 #include "main.h"
 
@@ -95,7 +95,7 @@ static inline void taskEventSet(uint16_t bits)
  *
  * Counterpart of taskEventSet(), runs in a critical section as well.
  *
- * @param mask Inverted event mask, e.g. N_AT_CMD (all bits set except the one to clear)
+ * @param mask Inverted event mask, e.g. N_USB_DATA (all bits set except the one to clear)
  */
 static inline void taskEventClear(uint16_t mask)
 {
@@ -161,38 +161,31 @@ void periodic_wakeup(void)
 #warning MCU not supported
 #endif
 
-#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+/** USB data buffer for lines that are not AT commands */
+char usb_data[256];
+
 /**
- * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives.
+ * @brief Handler for received lines that are not AT commands
  *
- * Runs in the USB driver's task context, so it only flags the event and wakes
- * loop(). The AT command itself is parsed and executed in loop() by
- * at_serial.handleSerial().
+ * The AT commands themselves are executed in the background by the task of the library (see
+ * at_serial.enableBackgroundRx() in setup()). Everything that does not start with "AT" is passed to
+ * this function instead, in the context of that task. It only copies the line, sets the USB_DATA
+ * event and wakes up loop(), where the line is handled. Use it to run your own serial protocol
+ * next to the AT commands. Only the last line is kept if several arrive before loop() ran.
+ *
+ * @param line Zero terminated text of the received line
  */
-void atRxWake(void)
+void onUnhandledLine(const char *line)
 {
-	taskEventSet(AT_CMD);
-	if (g_task_sem == NULL)
+	if (g_task_sem != NULL)
 	{
-		return;
-	}
-#if defined ARDUINO_ARCH_NRF52
-	bool inIsr = isInISR();
-#else
-	bool inIsr = xPortInIsrContext();
-#endif
-	if (inIsr)
-	{
-		BaseType_t woken = pdFALSE;
-		xSemaphoreGiveFromISR(g_task_sem, &woken);
-		portYIELD_FROM_ISR(woken);
-	}
-	else
-	{
+		strncpy(usb_data, line, sizeof(usb_data) - 1);
+		usb_data[sizeof(usb_data) - 1] = 0;
+		taskEventSet(USB_DATA);
+		// Wake up the loop task to handle the USB data
 		xSemaphoreGive(g_task_sem);
 	}
 }
-#endif
 
 /**
  * @brief LoRaWAN join success callback
@@ -531,12 +524,11 @@ void setup()
 		Serial.println("[Setup] Failed to save settings");
 	}
 
-	// Start AT command interface. USB RX only wakes loop() (atRxWake), the
-	// AT commands are processed in loop() via at_serial.handleSerial()
+	// Start AT command interface. The AT commands run in the background task of the library (needs
+	// lora.enableBackgroundTask()), loop() is not involved. Lines that are not AT commands are passed
+	// to onUnhandledLine(), set before enableBackgroundRx().
 	at_serial.begin(lora, Serial);
-	// at_serial.setRxWakeCallback(atRxWake);	// Arduino-Pico (RP2040): Serial has no receive notification, so there is no wake callback. The AT
-	// Arduino-Pico (RP2040): Serial has no receive notification, so there is no wake callback. The AT
-	// task of the library (needs lora.enableBackgroundTask(), FreeRTOS SMP) polls Serial and runs the commands.
+	at_serial.onUnhandledData(onUnhandledLine);
 	if (!at_serial.enableBackgroundRx())
 	{
 		Serial.println("[Setup] AT command USB RX hook failed");
@@ -567,7 +559,7 @@ void setup()
  *
  * Sleeps on the semaphore until an event wakes it up. Handles: join finished (ADR, data rate, start
  * uplink timer, optional multicast), STATUS (send Cayenne LPP uplink), LORA_DATA (print received
- * downlink, optionally pull pending downlinks), LORA_TIME (set and print local time), AT_CMD (process AT command).
+ * downlink, optionally pull pending downlinks), LORA_TIME (set and print local time), USB_DATA (print a line that is no AT command).
  */
 void loop()
 {
@@ -691,11 +683,12 @@ void loop()
 			Serial.flush();
 		}
 		// Serial input event
-		if ((g_task_event_type & AT_CMD) == AT_CMD)
+		if ((g_task_event_type & USB_DATA) == USB_DATA)
 		{
-			taskEventClear(N_AT_CMD);
-			// Reads and executes everything that is available
-			at_serial.handleSerial();
+			taskEventClear(N_USB_DATA);
+			// Add handling of non AT commands here
+			// In this example, just print it out
+			Serial.printf("USB RX: %s\n", usb_data);
 		}
 	}
 }

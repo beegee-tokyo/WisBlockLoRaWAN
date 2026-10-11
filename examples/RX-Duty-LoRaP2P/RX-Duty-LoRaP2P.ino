@@ -13,8 +13,8 @@
  * the RX duty cycle is started again. Received packets are printed.
  *
  * Supports RAK4631 (nRF52840) and RAK3312 (ESP32-S3). The library background task handles the LoRa
- * events. AT commands: USB receive only wakes up loop() through a wake callback (atRxWake()), the
- * command is processed in loop() by at_serial.handleSerial().
+ * events. AT commands: executed in the background by the task of the library, loop() is not involved.
+ * Lines that are not AT commands are handed to loop() with the USB_DATA event (onUnhandledLine()).
  */
 #include "main.h"
 
@@ -71,7 +71,7 @@ static inline void taskEventSet(uint16_t bits)
  *
  * Counterpart of taskEventSet(), runs in a critical section as well.
  *
- * @param mask Inverted event mask, e.g. N_AT_CMD (all bits set except the one to clear)
+ * @param mask Inverted event mask, e.g. N_USB_DATA (all bits set except the one to clear)
  */
 static inline void taskEventClear(uint16_t mask)
 {
@@ -134,37 +134,31 @@ void periodic_wakeup(void)
 #warning MCU not supported
 #endif
 
-#if defined ARDUINO_ARCH_NRF52 || defined ESP32
+/** USB data buffer for lines that are not AT commands */
+char usb_data[256];
+
 /**
- * @brief Called by WisBlockLoRaAT when USB CDC RX data arrives
+ * @brief Handler for received lines that are not AT commands
  *
- * Runs in the USB driver's task context, so it only sets the AT_CMD event and wakes up loop(). The
- * AT command itself is parsed and executed in loop() by at_serial.handleSerial().
+ * The AT commands themselves are executed in the background by the task of the library (see
+ * at_serial.enableBackgroundRx() in setup()). Everything that does not start with "AT" is passed to
+ * this function instead, in the context of that task. It only copies the line, sets the USB_DATA
+ * event and wakes up loop(), where the line is handled. Use it to run your own serial protocol
+ * next to the AT commands. Only the last line is kept if several arrive before loop() ran.
+ *
+ * @param line Zero terminated text of the received line
  */
-void atRxWake(void)
+void onUnhandledLine(const char *line)
 {
-	taskEventSet(AT_CMD);
-	if (g_task_sem == NULL)
+	if (g_task_sem != NULL)
 	{
-		return;
-	}
-#if defined ARDUINO_ARCH_NRF52
-	bool inIsr = isInISR();
-#else
-	bool inIsr = xPortInIsrContext();
-#endif
-	if (inIsr)
-	{
-		BaseType_t woken = pdFALSE;
-		xSemaphoreGiveFromISR(g_task_sem, &woken);
-		portYIELD_FROM_ISR(woken);
-	}
-	else
-	{
+		strncpy(usb_data, line, sizeof(usb_data) - 1);
+		usb_data[sizeof(usb_data) - 1] = 0;
+		taskEventSet(USB_DATA);
+		// Wake up the loop task to handle the USB data
 		xSemaphoreGive(g_task_sem);
 	}
 }
-#endif
 
 /**
  * @brief LoRa P2P TX finished callback
@@ -324,22 +318,13 @@ void setup()
 	}
 
 	at_serial.begin(lora, Serial);
-#if defined ARDUINO_ARCH_NRF52 || defined ESP32
-	// USB RX only wakes loop() (atRxWake), the AT commands are processed in
-	// loop() with at_serial.handleSerial()
-	at_serial.setRxWakeCallback(atRxWake);
-	if (!at_serial.enableBackgroundRx())
-	{
-		Serial.println("[Setup] AT command USB RX hook failed");
-	}
-#elif defined ARDUINO_ARCH_RP2040
-	// Arduino-Pico: Serial has no receive notification, so there is no wake callback. The AT task of
-	// the library (needs lora.enableBackgroundTask(), FreeRTOS SMP) polls Serial and runs the commands.
+	// The AT commands run in the background task of the library (needs lora.enableBackgroundTask()).
+	// Lines that are not AT commands are passed to onUnhandledLine(), set before enableBackgroundRx().
+	at_serial.onUnhandledData(onUnhandledLine);
 	if (!at_serial.enableBackgroundRx())
 	{
 		Serial.println("[Setup] AT command background task failed");
 	}
-#endif
 
 	// Prepare timer and seamphore to wake up loop for frequent sending
 #if defined ARDUINO_ARCH_NRF52 || defined ESP32 || defined ARDUINO_ARCH_RP2040
@@ -379,8 +364,8 @@ void setup()
 /**
  * @brief Arduino loop function
  *
- * Sleeps on the semaphore until an event wakes it up. A STATUS event (timer) starts a CAD, an AT_CMD
- * event (USB data) lets at_serial.handleSerial() process the AT command, a LORA_TX_FIN event
+ * Sleeps on the semaphore until an event wakes it up. A STATUS event (timer) starts a CAD, a USB_DATA
+ * event (a line that is no AT command) is printed, a LORA_TX_FIN event
  * restarts the RX duty cycle.
  */
 void loop()
@@ -414,11 +399,12 @@ void loop()
 			}
 		}
 		// Serial input event
-		if ((g_task_event_type & AT_CMD) == AT_CMD)
+		if ((g_task_event_type & USB_DATA) == USB_DATA)
 		{
-			taskEventClear(N_AT_CMD);
-			// Reads and executes everything that is available
-			at_serial.handleSerial();
+			taskEventClear(N_USB_DATA);
+			// Add handling of non AT commands here
+			// In this example, just print it out
+			Serial.printf("USB RX: %s\n", usb_data);
 		}
 		// TX finished
 		if ((g_task_event_type & LORA_TX_FIN) == LORA_TX_FIN)

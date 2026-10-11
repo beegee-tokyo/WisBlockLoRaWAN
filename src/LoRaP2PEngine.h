@@ -154,6 +154,9 @@ public:
 
 	/**
 	 * @brief Start a channel activity detection
+	 *
+	 * Stops a running receive first. The CAD is a one-shot operation, the radio is in standby when
+	 * the result is reported: start the receive again (startReceive()) or send in the result callback.
 	 */
 	void startCad(); // one-shot CAD; result delivered via onCadResult callback
 

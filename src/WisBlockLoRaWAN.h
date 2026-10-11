@@ -708,6 +708,9 @@ public:
 	void stopP2PReceive();
 	/**
 	 * @brief Start a channel activity detection (CAD), the result comes through onP2PCadResult()
+	 *
+	 * A running receive (startP2PReceive()) is stopped. The CAD is one-shot and the radio is in
+	 * standby when the result arrives: start the receive again or send in the result callback.
 	 */
 	void startP2PCad();
 	/**
