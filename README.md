@@ -3,18 +3,18 @@
 | -- | -- | -- | -- |    
 
 This library is created to replace the [SX126x-Arduino](https://github.com/beegee-tokyo/SX126x-Arduino) in the future.     
-It includes     
-- an API for LoRa P2P and FSK P2P communication, including P2P CAD and RX-Duty-Cycle implementation.
+## Supported    
+- an API for LoRa P2P and FSK P2P communication, including LoRa P2P CAD and RX-Duty-Cycle implementation.
 - an API to use a LoRaWAN modem stack based on Semtechs [SWL2001 Basic Modem](https://github.com/Lora-net/SWL2001/tree/master) implementation.     
 It supports Class A, Class C and Class B (not yet tested), LinkCheck, ServerTime and a full implementation of the [TS001-LoRaWAN L2 1.0.4](https://resources.lora-alliance.org/technical-specifications/ts001-1-0-4-lorawan-l2-1-0-4-specification) and [Regional Parameters RP2-1.0.3](https://resources.lora-alliance.org/technical-specifications/rp2-1-0-3-lorawan-regional-parameters) specifications.     
 - an AT command interface and a local storage for device setup, e.g. LoRa P2P settings, LoRaWAN credentials, DevNonces, ...     
 - same as with the SX126x-Arduino library, it uses an FreeRTOS task in the background to handle LoRa and LoRaWAN events. This allows to create application with minimum power consumption as there is no need to use the loop() to check for events and keep the LoRa and LoRaWAN engines running.     
 
-_**Not supported**_    
+## Not supported
 - LoRaWAN FUOTA function is not implemented and is not planned at this time due to the complexity of FUOTA and challenge to implement it in an Arduino library.     
 - LoRaWAN Relay function is not implemented and it is not planned at this time. 
 
-# IMPORTANT
+# ⚠️ IMPORTANT
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
 - This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
 
@@ -35,7 +35,7 @@ After that, picotool uploads and the automatic reset into BOOTSEL both work.
 
 ## Supported hardware
 
-Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (_**only with Earle F. Philhower BSP, MBED is BSP is not supported**_).       
+Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, _**only with Earle F. Philhower BSP, MBED is BSP is not supported**_).       
 `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
 
 On nRF52840, ESP32-S3 and RP2040, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
@@ -112,14 +112,14 @@ Demonstrates fully background, non-polled operation on RAK4631/RAK3312:
 - lora.enableBackgroundTask()      - LoRaWAN/P2P event handling
 - atCommands.enableBackgroundRx()  - AT command processing
 
-## Arduino IDE
+## Arduino IDE / PlatformIO
 
 The library builds in the Arduino IDE / arduino-cli as well as in PlatformIO. Install it into your `libraries` folder (or from the ZIP) and select a WisBlock board (RAK4631, RAK3112/RAK3312). Notes:
 
 - The Arduino IDE only adds the library's `src/` folder to the include path and cannot pass per-library compiler flags. So every `#include` of a vendored LoRa Basics Modem (LBM) header inside this library is a path relative to the including file, and `src/wb_lbm_config.h` supplies the build flags. The library therefore does **not** depend on the include path or on any other installed library, and never uses headers from other libraries that happen to ship files with the same names. PlatformIO keeps using `extra_script.py`; both work with the same sources.
 - After re-vendoring LBM, run `python3 tools/make_lbm_includes_relative.py` once to convert the new files.
 
-## Production flow: factory defaults vs. user config
+## 💡Production flow: factory defaults vs. user config
 
 Two complete configs are kept on flash, in separate slots - a "factory" backup and the regular "user" config (the one AT+SAVE/AT+RESTORE/`saveConfig()`/`restoreConfig()` already worked with before AT+FACTORY/ATR existed):
 
