@@ -660,7 +660,12 @@ private:
 	 */
 	void atPSend(AtOp op, const char *value);
 	/**
-	 * @brief Handler for AT+PRECV (P2P receive)
+	 * @brief Handler for AT+PRECV (P2P receive), same values as RUI3
+	 *
+	 * 0 stops the receive, 1 to 65532 is a receive window in ms, 65533 receives continuously and still
+	 * allows sending, 65534 receives continuously and refuses AT+PSEND (AT_BUSY_ERROR) until AT+PRECV=0,
+	 * 65535 receives without timeout until one packet is received. AT+PRECV=? answers only OK (P2P mode)
+	 * or AT_ERROR (LoRaWAN mode), like RUI3.
 	 *
 	 * @param op Operation: query (AT+PRECV=?), write (AT+PRECV=value) or run (AT+PRECV)
 	 * @param value Text after the '=' (null for query and run)

@@ -3850,3 +3850,25 @@ FSK is unknown (packet format defaults, preamble unit). Note: the LoRa RX path d
 `LoRaP2PEngine::startReceive(0)` passed `SX126X_RX_CONTINUOUS` (0x00FFFFFF, RTC steps) to `sx126x_set_rx()`, which takes milliseconds and returns `UNKNOWN_VALUE` without sending the command for anything above 262143 ms. The radio stayed in standby (chip mode 2, RSSI raw 0xFF = -128 dBm), so `startP2PReceive(0)` never received anything. Found with the FSK receiver diagnostics. Fixed with `sx126x_set_rx_with_timeout_in_rtc_step(SX126X_RX_CONTINUOUS)`; finite timeouts above the radio maximum are now limited instead of dropped. Finite timeouts (PingPong, the 5 s window after a TX) were never affected. The device error 0x0020 (XOSC start) seen in the same output is probably the flag the SX126x raises after SetDIO3AsTCXOCtrl, it does not clear itself.
 - Example `FSKP2PPingPong`: the LoRaP2PPingPong Master/Slave example in FSK mode (916.4 MHz, 100 kbit/s, 50 kHz deviation, 225 kHz bandwidth), with the library background task, the AT interface in the background and the FreeRTOS semaphore wake-up. FSK and PingPong tested separately on RAK4631 <-> RAK3112 (FskP2PTest, both directions); this example itself was only compiled.
 - `AT+STATUS` in FSK mode now also prints PPL (bytes), TXP and SYNC (hex). `ATC+STATUS` in `examples/LowPowerLoRaWAN/custom_at.cpp` handled every non-LoRaWAN mode as LoRa P2P; it now follows the `AT+NWM` numbering (0 P2P, 1 LoRaWAN, 2 FSK) and prints bit rate, deviation, RX bandwidth, preamble (bytes), TX power and sync word in FSK mode.
+
+### Examples: AT commands in the background, non-AT lines through onUnhandledData
+
+LowPowerLoRaP2P, LowPowerLoRaWAN and RX-Duty-LoRaP2P registered `setRxWakeCallback(atRxWake)`, which puts `enableBackgroundRx()` into loop mode: the commands ran in loop() through the AT_CMD event and `handleSerial()`. Without a wake callback the library task "WB_AT" runs the commands itself (task mode) and `handleSerial()` does nothing, so `atRxWake()`, the AT_CMD event and the `handleSerial()` call were removed. Lines that are no AT commands are now passed with `at_serial.onUnhandledData(onUnhandledLine)` (set before `enableBackgroundRx()`): the line is copied to `usb_data[]`, the new USB_DATA event is set (same bit as the old AT_CMD) and loop() prints it. The setup code is the same on nRF52, ESP32 and RP2040. Only the last line is kept if several arrive before loop() ran.
+
+### Bug: CAD never ran while a receive was active
+
+`LoRaP2PEngine::startCad()` sent SetCadParams/SetCad without going to standby first (`send()` and `startReceive()` do). The radio does not leave a running receive by itself, so after `startP2PReceive()` the CAD never started and the CAD callback was never called. `startCad()` now enters standby first. After a CAD (one-shot) and after a TX the radio is in standby: start the receive again in the callback.
+
+## P2P receive modes like RUI3 (AT+PRECV / api.lora.precv)
+
+Source: RUI3 AT Command Manual and release notes 3.4.0/3.4.2. `startP2PReceive(timeout)` and `AT+PRECV` now use the same special values (the parameter is a uint32_t, the special values are 16 bit values, the AT command accepts 0 to 65535):
+
+- `0` stops the receive (WISBLOCK_P2P_RX_STOP). It was "continuous" before: continuous receive could not work at all until the SetRx fix above, so no working code depended on it. Examples were changed to `WISBLOCK_P2P_RX_CONTINUOUS_TX`.
+- `1..65532` receive window in ms, ends with the empty RX result (timeout). Values above 65535 are a window in ms as well (not in RUI3), limited to 262 s.
+- `65533` (WISBLOCK_P2P_RX_CONTINUOUS_TX) continuous, TX allowed: the receive starts again after a `sendP2P()` (before the TX callback) and after a CAD (before the CAD callback, so a `sendP2P()` in the callback works).
+- `65534` (WISBLOCK_P2P_RX_CONTINUOUS) continuous, TX refused: `sendP2P()` returns false, `AT+PSEND` answers `AT_BUSY_ERROR`, any `startP2PReceive(x != 0)` returns false, `AT+PRECV=x` answers `AT_BUSY_ERROR`. Only 0 is accepted. A CAD is allowed and resumes the receive.
+- `65535` (WISBLOCK_P2P_RX_SINGLE) no timeout, ends with the first packet.
+- `startP2PReceive()` returns bool now (false = refused), default argument is 65533. `getP2PReceiveMode()` returns the active value (0 if the receive ended: window, single packet, stop, send or CAD in a window, sleep). `AT+PRECV=?` answers only OK (P2P modes) or AT_ERROR (LoRaWAN mode), like RUI3, it prints no value. RUI3 asynchronous events (+EVT:RXP2P ...) are not implemented, they are for plain AT firmware.
+- Deviation from RUI3: in a receive window (1..65532) and in single mode `sendP2P()` is accepted and ends the receive, RUI3 answers AT_BUSY_ERROR there. Only 65534 refuses.
+- RX duty cycle (`startP2PReceiveDutyCycle`) is not one of these modes, send and CAD interrupt it as before.
+- Checked with a host test (stubbed radio driver): stop, all special values, resume after TX and CAD in 65533, busy rules in 65534, window end, single end, clamp above 262 s, send/CAD in a window, duty cycle, sleep. Not tested on hardware.

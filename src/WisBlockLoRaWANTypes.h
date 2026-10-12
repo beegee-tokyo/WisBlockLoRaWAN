@@ -27,6 +27,24 @@ enum WisBlockP2PModulation : uint8_t
 	WISBLOCK_P2P_MOD_FSK = 1,
 };
 
+/**
+ * Special values of the P2P receive "timeout", the same as RUI3 AT+PRECV / api.lora.precv().
+ * The parameter is a uint32_t, but the special values are 16 bit values (the AT command accepts 0 to 65535).
+ * - WISBLOCK_P2P_RX_STOP: stop receiving, the radio goes to standby
+ * - 1 to WISBLOCK_P2P_RX_TIMEOUT_MAX: receive for this time in ms, then the receive stops (timeout callback)
+ * - WISBLOCK_P2P_RX_CONTINUOUS_TX: receive continuously and still allow sending. After a TX or a CAD the
+ *   receive is started again automatically
+ * - WISBLOCK_P2P_RX_CONTINUOUS: receive continuously, sending is refused (busy) until the receive is
+ *   stopped with WISBLOCK_P2P_RX_STOP. Another receive command is refused as well
+ * - WISBLOCK_P2P_RX_SINGLE: receive without timeout until one packet is received, then the receive stops
+ * Values above 65535 are a timeout in ms as well (not in RUI3), limited to the maximum of the radio (262 s).
+ */
+#define WISBLOCK_P2P_RX_STOP 0UL
+#define WISBLOCK_P2P_RX_TIMEOUT_MAX 65532UL
+#define WISBLOCK_P2P_RX_CONTINUOUS_TX 65533UL
+#define WISBLOCK_P2P_RX_CONTINUOUS 65534UL
+#define WISBLOCK_P2P_RX_SINGLE 65535UL
+
 /** Limits of the SX126x GFSK modem. */
 #define WISBLOCK_FSK_BITRATE_MIN 600UL
 #define WISBLOCK_FSK_BITRATE_MAX 300000UL

@@ -1,11 +1,12 @@
 /**
  * @file BasicFskP2P.ino
- * @brief Basic FSK P2P example: GFSK transmission every 10 seconds with a receive window
+ * @brief Basic FSK P2P example: GFSK transmission every 10 seconds with continuous reception
  *
  * @details Configures the FSK P2P mode (916 MHz, 50 kbit/s, 25 kHz deviation, 117.3 kHz RX
- * bandwidth, 14 dBm) and starts continuous reception. Every 10 seconds the packet "hello fsk" is
- * sent, after each transmission the node listens for 5 seconds. Received packets are printed with
- * their RSSI (there is no SNR in FSK).
+ * bandwidth, 14 dBm) and starts continuous reception with WISBLOCK_P2P_RX_CONTINUOUS_TX (65533, the
+ * same as RUI3 AT+PRECV=65533): the library starts the receive again after every transmission.
+ * Every 10 seconds the packet "hello fsk" is sent. Received packets are printed with their RSSI
+ * (there is no SNR in FSK).
  *
  * Both ends of a link must use the same frequency, bit rate, deviation, bandwidth, sync word and
  * preamble length. The FSK preamble length is counted in bytes (LoRa: symbols). The default sync
@@ -30,21 +31,19 @@ uint32_t lastActionMs = 0;
 /**
  * @brief FSK P2P TX finished callback
  *
- * Prints the result and the airtime, then opens a 5 second receive window.
+ * Prints the result and the airtime. The receive continues by itself (WISBLOCK_P2P_RX_CONTINUOUS_TX).
  *
  * @param result TX result, result.success is true if the packet was sent
  */
 void onTxDone(const WisBlockTxResult &result)
 {
 	Serial.printf("[FSK] TX %s, airtime %lu ms\n", result.success ? "OK" : "FAILED", (unsigned long)result.airtimeMs);
-	lora.startP2PReceive(5000); // listen for 5s after each TX
 }
 
 /**
  * @brief FSK P2P packet received callback
  *
- * A length of 0 means that the receive window ended without a packet (timeout) or with a packet
- * with a wrong CRC. The receiver is started again after a timeout or a CRC error.
+ * A length of 0 means that a packet with a wrong CRC was received. The continuous receive goes on.
  *
  * @param result RX result with payload, length and RSSI
  */
@@ -52,8 +51,7 @@ void onRxDone(const WisBlockRxResult &result)
 {
 	if (result.length == 0)
 	{
-		Serial.println("[FSK] RX window ended without a valid packet");
-		lora.startP2PReceive(0); // back to continuous reception
+		Serial.println("[FSK] Packet with a wrong CRC");
 		return;
 	}
 	Serial.printf("[FSK] RX %u bytes, RSSI %d dBm: %.*s\n", result.length, result.rssi, result.length, (const char *)result.data);
@@ -87,7 +85,7 @@ void setup()
 	// AT commands over USB serial, processed in loop()
 	at_serial.begin(lora, Serial);
 
-	lora.startP2PReceive(0);
+	lora.startP2PReceive(WISBLOCK_P2P_RX_CONTINUOUS_TX);
 }
 
 /**

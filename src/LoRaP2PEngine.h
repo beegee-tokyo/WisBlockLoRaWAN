@@ -43,11 +43,23 @@ public:
 	 */
 	bool send(const uint8_t *data, uint8_t length); // optionally preceded by CAD, see settings.cadEnabled
 	/**
-	 * @brief Start receiving
+	 * @brief Start receiving, with the special values of RUI3 AT+PRECV / api.lora.precv()
 	 *
-	 * @param timeoutMs Receive timeout in ms, 0 = continuous
+	 * @param mode WISBLOCK_P2P_RX_STOP (0) stops the receive. 1 to 65532 is a receive window in ms
+	 * (the timeout callback comes when it ends). 65533 (WISBLOCK_P2P_RX_CONTINUOUS_TX) receives
+	 * continuously and goes back to receive after a send() or a CAD. 65534 (WISBLOCK_P2P_RX_CONTINUOUS)
+	 * receives continuously, send() fails until the receive is stopped. 65535 (WISBLOCK_P2P_RX_SINGLE)
+	 * receives without timeout until one packet arrived. Larger values are a timeout in ms.
+	 * @return false if the receive is refused: in mode 65534 only 0 (stop) is accepted
 	 */
-	void startReceive(uint32_t timeoutMs);		 // 0 = continuous RX
+	bool startReceive(uint32_t mode);
+	/**
+	 * @brief Current receive mode
+	 *
+	 * @return The value of the running startReceive(), 0 if the radio is not receiving (the receive
+	 * ended with a packet or a timeout, was stopped, or was interrupted by send()/CAD)
+	 */
+	uint32_t getReceiveMode() const { return rxMode; }
 	/**
 	 * @brief Start receiving with the SX126x RX duty cycle mode
 	 *
@@ -262,6 +274,9 @@ private:
 	RxFinishedCb rxFinishedCb = nullptr;
 	CadResultCb cadResultCb = nullptr;
 	uint8_t lastTxPayloadLength = 0; // captured in send(), consumed in handleEvents() to compute airtime on TX_DONE
+	uint32_t rxMode = 0;			 // value of the running startReceive(), see getReceiveMode()
+	bool cadResumeRx = false;		 // a CAD interrupted a continuous receive, start it again when the CAD is done
+	void startRadioReceive(uint32_t mode); // puts the radio into the receive mode, no state handling
 
 	// FIX: see sleep()'s doc comment - cold-start SLEEP loses all radio
 	// configuration, so every wake needs a full reconfigure before the

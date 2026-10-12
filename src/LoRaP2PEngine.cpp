@@ -467,6 +467,10 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	{
 		return false;
 	}
+	if (rxMode == WISBLOCK_P2P_RX_CONTINUOUS)
+	{
+		return false; // like RUI3 (AT_BUSY_ERROR): stop the continuous receive first with startReceive(0)
+	}
 	reconfigureAfterColdSleep();
 
 	// settings.cadEnabled gates whether the *caller* should run CAD first
@@ -474,6 +478,10 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	// WISBLOCK_CAD_CHANNEL_CLEAR comes back) - this method always sends
 	// immediately, since blocking on CAD here would stall loop().
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
+	if (rxMode != WISBLOCK_P2P_RX_CONTINUOUS_TX)
+	{
+		rxMode = 0; // the send ends a running receive window, only mode 65533 continues after the TX
+	}
 
 	applyPktParams(length);
 
@@ -489,7 +497,23 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	return true;
 }
 
-void LoRaP2PEngine::startReceive(uint32_t timeoutMs)
+bool LoRaP2PEngine::startReceive(uint32_t mode)
+{
+	if (mode == WISBLOCK_P2P_RX_STOP)
+	{
+		stopReceive();
+		return true;
+	}
+	if (rxMode == WISBLOCK_P2P_RX_CONTINUOUS)
+	{
+		return false; // like RUI3: in continuous receive only startReceive(0) is accepted
+	}
+	rxMode = mode;
+	startRadioReceive(mode);
+	return true;
+}
+
+void LoRaP2PEngine::startRadioReceive(uint32_t mode)
 {
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
@@ -499,7 +523,7 @@ void LoRaP2PEngine::startReceive(uint32_t timeoutMs)
 	sx126x_set_dio_irq_params(kCtx, kAllIrqsForRx, kAllIrqsForRx, 0, 0);
 	sx126x_clear_irq_status(kCtx, SX126X_IRQ_ALL);
 
-	if (timeoutMs == 0)
+	if (mode == WISBLOCK_P2P_RX_CONTINUOUS_TX || mode == WISBLOCK_P2P_RX_CONTINUOUS)
 	{
 		// Continuous reception. SX126X_RX_CONTINUOUS (0x00FFFFFF) is a value in RTC steps, so it must
 		// go to the _with_timeout_in_rtc_step() variant. sx126x_set_rx() takes milliseconds and
@@ -507,15 +531,21 @@ void LoRaP2PEngine::startReceive(uint32_t timeoutMs)
 		// then stays in standby and never receives.
 		sx126x_set_rx_with_timeout_in_rtc_step(kCtx, SX126X_RX_CONTINUOUS);
 	}
+	else if (mode == WISBLOCK_P2P_RX_SINGLE)
+	{
+		// No timeout, the radio goes to standby after the first packet
+		sx126x_set_rx_with_timeout_in_rtc_step(kCtx, SX126X_RX_SINGLE_MODE);
+	}
 	else
 	{
 		// A timeout above the maximum of the radio (about 262 s) is limited, not dropped
-		sx126x_set_rx(kCtx, timeoutMs > SX126X_MAX_TIMEOUT_IN_MS ? SX126X_MAX_TIMEOUT_IN_MS : timeoutMs);
+		sx126x_set_rx(kCtx, mode > SX126X_MAX_TIMEOUT_IN_MS ? SX126X_MAX_TIMEOUT_IN_MS : mode);
 	}
 }
 
 void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs)
 {
+	rxMode = 0; // not one of the startReceive() modes, send() and CAD interrupt it
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
@@ -542,6 +572,8 @@ void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeM
 
 void LoRaP2PEngine::stopReceive()
 {
+	rxMode = 0;
+	cadResumeRx = false;
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 }
 
@@ -554,6 +586,8 @@ void LoRaP2PEngine::sleep()
 	// SX1262's internal wakeup timer.
 	sx126x_set_sleep(kCtx, SX126X_SLEEP_CFG_COLD_START);
 	needsReconfigureAfterSleep = true;
+	rxMode = 0;
+	cadResumeRx = false;
 }
 
 void LoRaP2PEngine::reconfigureAfterColdSleep()
@@ -635,6 +669,12 @@ void LoRaP2PEngine::startCad()
 	// timeout) is not left by itself, so without this the CAD never started while the radio was
 	// listening and the result callback was never called.
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
+	// A continuous receive is started again when the CAD is done, any other receive ends here
+	cadResumeRx = (rxMode == WISBLOCK_P2P_RX_CONTINUOUS_TX || rxMode == WISBLOCK_P2P_RX_CONTINUOUS);
+	if (!cadResumeRx)
+	{
+		rxMode = 0;
+	}
 	sx126x_cad_params_t cadParams;
 	cadParams.cad_symb_nb = SX126X_CAD_04_SYMB;
 	cadParams.cad_detect_peak = 22; // Semtech reference apps' default for SF7-SF10; retune for your SF/BW if you see false positives/negatives
@@ -702,6 +742,11 @@ uint32_t LoRaP2PEngine::handleEvents()
 										   settings.preambleLength, lastTxPayloadLength,
 										   computeLdro(settings.spreadingFactor, settings.bandwidth));
 		}
+		// Mode 65533: back to receive before the callback, so a send() in the callback works as well
+		if (rxMode == WISBLOCK_P2P_RX_CONTINUOUS_TX)
+		{
+			startRadioReceive(rxMode);
+		}
 		if (txFinishedCb)
 		{
 			txFinishedCb(r);
@@ -741,6 +786,11 @@ uint32_t LoRaP2PEngine::handleEvents()
 			r.rssi = pktStatus.rssi_pkt_in_dbm;
 			r.snr = pktStatus.snr_pkt_in_db;
 		}
+		// A receive window or a single receive is finished, the radio is in standby
+		if (rxMode != WISBLOCK_P2P_RX_CONTINUOUS_TX && rxMode != WISBLOCK_P2P_RX_CONTINUOUS)
+		{
+			rxMode = 0;
+		}
 		if (rxFinishedCb)
 		{
 			rxFinishedCb(r);
@@ -749,6 +799,10 @@ uint32_t LoRaP2PEngine::handleEvents()
 
 	if (irq & SX126X_IRQ_TIMEOUT)
 	{
+		if (rxMode != WISBLOCK_P2P_RX_CONTINUOUS_TX && rxMode != WISBLOCK_P2P_RX_CONTINUOUS)
+		{
+			rxMode = 0; // the receive window ended
+		}
 		// Surfaces as an empty RX result today; add a dedicated
 		// onRxTimeout callback if your app needs to distinguish "nothing
 		// received in time" from "received 0 bytes" (which can't actually
@@ -764,6 +818,12 @@ uint32_t LoRaP2PEngine::handleEvents()
 	if (irq & SX126X_IRQ_CAD_DONE)
 	{
 		bool detected = (irq & SX126X_IRQ_CAD_DETECTED) != 0;
+		if (cadResumeRx)
+		{
+			// Back to the continuous receive before the callback, a send() in the callback works as well
+			cadResumeRx = false;
+			startRadioReceive(rxMode);
+		}
 		if (cadResultCb)
 		{
 			cadResultCb(detected ? WISBLOCK_CAD_CHANNEL_DETECTED : WISBLOCK_CAD_CHANNEL_CLEAR);

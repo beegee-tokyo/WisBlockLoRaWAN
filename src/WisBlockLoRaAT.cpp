@@ -1817,20 +1817,47 @@ void WisBlockLoRaAT::atPSend(AtOp op, const char *value)
 		return;
 	}
 	bool ok = lora->sendP2P(payload, (uint8_t)(hexLen / 2));
-	ok ? replyOk() : replyError("AT_ERROR"); // send failed
+	if (ok)
+	{
+		replyOk();
+	}
+	else if (lora->getP2PReceiveMode() == WISBLOCK_P2P_RX_CONTINUOUS)
+	{
+		replyError("AT_BUSY_ERROR"); // like RUI3: stop the continuous receive first with AT+PRECV=0
+	}
+	else
+	{
+		replyError("AT_ERROR"); // send failed
+	}
 }
 
 void WisBlockLoRaAT::atPRecv(AtOp op, const char *value)
 {
-	// Write-only, same as the old code.
+	// Same values as RUI3 AT+PRECV:
+	//   0       stop the receive
+	//   1-65532 receive window in ms, then the receive stops (empty RX result)
+	//   65533   receive continuously, sending is allowed, the receive starts again after a send or a CAD
+	//   65534   receive continuously, AT+PSEND gives AT_BUSY_ERROR and only AT+PRECV=0 is accepted
+	//   65535   receive without timeout until one packet is received
+	// AT+PRECV=? answers only OK (P2P mode) or AT_ERROR (LoRaWAN mode), like RUI3 - no value is
+	// printed. The active mode is available with lora.getP2PReceiveMode().
+	if (op == AtOp::Query)
+	{
+		lora->getWorkMode() == WISBLOCK_MODE_LORAWAN ? replyError("AT_ERROR") : replyOk();
+		return;
+	}
 	if (op != AtOp::Write)
 	{
 		replyError("AT_ERROR");
 		return;
 	}
-	uint32_t timeout = strtoul(value, nullptr, 10);
-	lora->startP2PReceive(timeout);
-	replyOk();
+	uint32_t mode;
+	if (!parseUintStrict(value, 0, 65535, mode))
+	{
+		replyError("AT_PARAM_ERROR");
+		return;
+	}
+	lora->startP2PReceive(mode) ? replyOk() : replyError("AT_BUSY_ERROR");
 }
 
 void WisBlockLoRaAT::atPRecvDc(AtOp op, const char *value)

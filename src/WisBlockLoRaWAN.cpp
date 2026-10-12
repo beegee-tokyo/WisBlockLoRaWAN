@@ -440,9 +440,9 @@ bool WisBlockLoRaWAN::sendP2P(const uint8_t *data, uint8_t length)
 	return p2p.send(data, length);
 }
 
-void WisBlockLoRaWAN::startP2PReceive(uint32_t timeoutMs)
+bool WisBlockLoRaWAN::startP2PReceive(uint32_t timeoutMs)
 {
-	p2p.startReceive(timeoutMs);
+	return p2p.startReceive(timeoutMs);
 }
 
 void WisBlockLoRaWAN::startP2PReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs)

@@ -645,11 +645,30 @@ public:
 		return p2p.getRadioStatus(chipMode, cmdStatus, deviceErrors);
 	}
 	/**
-	 * @brief Start receiving P2P packets
+	 * @brief Start receiving P2P packets, same values as RUI3 AT+PRECV / api.lora.precv()
 	 *
-	 * @param timeoutMs Receive timeout in ms, 0 = continuous
+	 * - 0 (WISBLOCK_P2P_RX_STOP): stop the receive
+	 * - 1 to 65532: receive window in ms, then the receive stops (empty RX result)
+	 * - 65533 (WISBLOCK_P2P_RX_CONTINUOUS_TX): receive continuously, sending is allowed, the receive
+	 *   starts again after a send and after a CAD
+	 * - 65534 (WISBLOCK_P2P_RX_CONTINUOUS): receive continuously, sendP2P() fails until startP2PReceive(0)
+	 * - 65535 (WISBLOCK_P2P_RX_SINGLE): receive without timeout until one packet is received
+	 * - above 65535: receive window in ms (not in RUI3), limited to 262 s
+	 *
+	 * Without an argument the receive is continuous with sending allowed (65533). Note: 0 was
+	 * "continuous" in earlier versions of this library, it is "stop" now like in RUI3.
+	 *
+	 * @param timeoutMs Receive mode or timeout in ms, see above
+	 * @return false if the receive is refused: in mode 65534 only 0 (stop) is accepted
 	 */
-	void startP2PReceive(uint32_t timeoutMs = 0);
+	bool startP2PReceive(uint32_t timeoutMs = WISBLOCK_P2P_RX_CONTINUOUS_TX);
+	/**
+	 * @brief Receive mode that is active now
+	 *
+	 * @return The value given to startP2PReceive(), 0 if the radio is not receiving: stopped, the
+	 * window or the single receive ended, or a send or CAD ended it
+	 */
+	uint32_t getP2PReceiveMode() const { return p2p.getReceiveMode(); }
 	/**
 	 * @brief Start receiving with the RX duty cycle mode
 	 *

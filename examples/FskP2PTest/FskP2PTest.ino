@@ -56,7 +56,7 @@ void onTxDone(const WisBlockTxResult &result)
 /**
  * @brief FSK RX callback
  *
- * A length of 0 is an RX window that ended without a valid packet (timeout or wrong CRC).
+ * A length of 0 is a packet with a wrong CRC, the continuous receive goes on.
  *
  * @param result RX result with payload, length and RSSI
  */
@@ -65,7 +65,6 @@ void onRxDone(const WisBlockRxResult &result)
 	if (result.length == 0)
 	{
 		Serial.println("[FSK] RX without a valid packet");
-		lora.startP2PReceive(0);
 		return;
 	}
 	rxOk++;
@@ -177,7 +176,7 @@ void setup()
 	Serial.println("[FSK] sender");
 #else
 	Serial.println("[FSK] receiver");
-	lora.startP2PReceive(0); // continuous reception
+	lora.startP2PReceive(WISBLOCK_P2P_RX_CONTINUOUS_TX); // continuous reception
 #endif
 }
 

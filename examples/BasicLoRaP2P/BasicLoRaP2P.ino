@@ -1,11 +1,12 @@
 /**
  * @file BasicLoRaP2P.ino
- * @brief Basic LoRa P2P example: CAD-gated transmission with a receive window
+ * @brief Basic LoRa P2P example: CAD-gated transmission with continuous reception
  *
  * @details Configures LoRa P2P mode (916 MHz, SF7, BW 125 kHz, CR 4/5, 14 dBm, CAD enabled) and
- * starts continuous reception. Every 10 seconds a channel activity detection (CAD) is started.
- * If the channel is clear, the packet "hello p2p" is sent. After each transmission the node
- * listens for 5 seconds. Received packets are printed with RSSI and SNR.
+ * starts continuous reception with WISBLOCK_P2P_RX_CONTINUOUS_TX (65533, the same as RUI3
+ * AT+PRECV=65533): the node keeps receiving and the library starts the receive again after every CAD
+ * and every transmission. Every 10 seconds a channel activity detection (CAD) is started. If the
+ * channel is clear, the packet "hello p2p" is sent. Received packets are printed with RSSI and SNR.
  *
  * The AT command interface runs on the USB serial port. It is polled from loop() with
  * at_serial.handleSerial(), the same way as lora.handleEvents().
@@ -21,14 +22,13 @@ bool waitingForCad = false;
 /**
  * @brief LoRa P2P TX finished callback
  *
- * Prints the result and opens a 5 second receive window.
+ * Prints the result. The receive continues by itself (WISBLOCK_P2P_RX_CONTINUOUS_TX).
  *
  * @param result TX result, result.success is true if the packet was sent
  */
 void onTxDone(const WisBlockTxResult &result)
 {
 	Serial.printf("[P2P] TX %s\n", result.success ? "OK" : "FAILED");
-	lora.startP2PReceive(5000); // listen for 5s after each TX
 }
 
 /**
@@ -94,7 +94,8 @@ void setup()
 	// AT commands over USB serial, processed in loop()
 	at_serial.begin(lora, Serial);
 
-	lora.startP2PReceive(0);
+	// Receive continuously, sending (CAD and TX) is allowed and the receive starts again afterwards
+	lora.startP2PReceive(WISBLOCK_P2P_RX_CONTINUOUS_TX);
 }
 
 /**
