@@ -52,7 +52,7 @@ All AT commands are documented in the [WisBlockLoRaWAN-AT-Commands](WisBlockLoRa
 
 The AT interface follows the RUI3 command set. Commands that only exist in this library (`AT+STATUS`, `AT+FPENDING`, `AT+RXBOOST`, `AT+PRECVDC`, `AT+LOWPOWER`, `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY`, `AT+FIRMWAREVER`) and the RUI3 commands that are not implemented are listed there as well.
 
-## Examples
+## Examples for Arduino IDE
 Multiple examples are available in the examples folder of the library.
 
 ### BasicLoRaWAN
@@ -115,9 +115,36 @@ Demonstrates fully background, non-polled operation on RAK4631/RAK3312:
 - lora.enableBackgroundTask()      - LoRaWAN/P2P event handling
 - atCommands.enableBackgroundRx()  - AT command processing
 
-## Arduino IDE / PlatformIO
+## Examples for PlatformIO
+Example projects for PlatformIO are in the folder [examples/PlatformIO](./examples/PlatformIO).      
+All examples come with platformio.ini files for RAK4631, RAK3312, RAK11300 and RAK3400+RAk1330x.     
+All examples assume that setup of LoRaWAN credentials and LoRa P2P settings are done via AT commands. None of these examples do explicit set any configuration with API calls. This is the usual way to setup devices if more than one is actually built.     
+For convinience of using RAKwireless WisBlock Core modules with PlatformIO platforms, an additional folder _**rakwireless**_ is added to the project. In this folder are WisBlock Core specific definitions as some of the platforms do not natively support WisBlock Core modules.    
 
-The library builds in the Arduino IDE / arduino-cli as well as in PlatformIO. Install it into your `libraries` folder (or from the ZIP) and select a WisBlock board (RAK4631, RAK3112/RAK3312). Notes:
+### BM-LoRa-P2P-Template
+This can be used as a simple template for a LoRa P2P application. It provides all required setups and callbacks for LoRa P2P communication and can be easily extended to specific use cases by adding sensor or actuator code in the loop(). This example is based on the low power example code and is event driven.
+
+### BM-LoRa-LoRaWAN-Template
+This can be used as a simple template for a LoRaWAN application. It provides all required setups and callbacks for LoRaWAN communication and can be easily extended to specific use cases by adding sensor or actuator code in the loop(). This example is based on the low power example code and is event driven.
+
+### BM-LoRaWAN-T_H
+This is a sensor application designed from the BM-LoRaWAN-Template by adding the handlers for a RAK1901 Temperature and Humidity sensor module.
+
+### LoRaP2PPingPong-PIO
+This example is converted from the ArduinoIDE based example LoRaP2PPingPong to be build with PlatformIO
+
+## Arduino IDE / PlatformIO usage of the library
+
+The library builds in the Arduino IDE / arduino-cli as well as in PlatformIO. Install it into your `libraries` folder (or from the ZIP) and select a WisBlock board (RAK4631, RAK3112/RAK3312). 
+
+For PlatformIO, simply add the library to the _**`lib_deps1**_ section in platformio.ini.     
+
+```
+lib_deps =
+   https://github.com/beegee-tokyo/WisBlockLoRaWAN
+```
+
+If you change the structure of the src folder of the library (e.g. you want to customize the library for your own needs), please note:
 
 - The Arduino IDE only adds the library's `src/` folder to the include path and cannot pass per-library compiler flags. So every `#include` of a vendored LoRa Basics Modem (LBM) header inside this library is a path relative to the including file, and `src/wb_lbm_config.h` supplies the build flags. The library therefore does **not** depend on the include path or on any other installed library, and never uses headers from other libraries that happen to ship files with the same names. PlatformIO keeps using `extra_script.py`; both work with the same sources.
 - After re-vendoring LBM, run `python3 tools/make_lbm_includes_relative.py` once to convert the new files.
