@@ -67,6 +67,9 @@ OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.
 Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in (see README).    
 This example shows as well how to add custom AT commands to an application.
 
+### LoRaWAN-T_H-Sensor
+Low power example for temperature and humidity sensing using the WisBlock RAK1901 temperature and humidity sensor.
+
 ### RAK3401_RAK13300
 Minimal OTAA join + periodic uplink, Class A, on a RAK3400 WisDuo module used as a WisBlock Core module with a RAK13300 (or RAK13302, same wiring).    
 SX1262 transceiver module - i.e. "RAK3401" in the sense this library uses the name (see WisBlockLoRaHwConfig.h).     
