@@ -3872,3 +3872,7 @@ Source: RUI3 AT Command Manual and release notes 3.4.0/3.4.2. `startP2PReceive(t
 - Deviation from RUI3: in a receive window (1..65532) and in single mode `sendP2P()` is accepted and ends the receive, RUI3 answers AT_BUSY_ERROR there. Only 65534 refuses.
 - RX duty cycle (`startP2PReceiveDutyCycle`) is not one of these modes, send and CAD interrupt it as before.
 - Checked with a host test (stubbed radio driver): stop, all special values, resume after TX and CAD in 65533, busy rules in 65534, window end, single end, clamp above 262 s, send/CAD in a window, duty cycle, sleep. Not tested on hardware.
+
+### Arduino IDE: LBM debug trace was always on
+
+`extra_script.py` sets `MODEM_HAL_DBG_TRACE` to 0, but it is a PlatformIO (SCons) hook and is not run by the Arduino IDE. There the only source of the defines is `src/wb_lbm_config.h`, which did not have it, so LBM used its own default (ON) and printed join, TX/RX window and MAC command traces. `wb_lbm_config.h` now defines `MODEM_HAL_DBG_TRACE` as 0 when it is not defined already (override with `-DMODEM_HAL_DBG_TRACE=1` or by editing the header). Checked by preprocessing every source: before, 38 translation units had the trace on and none had it off; now all 54 that use it have it off. All other defines of extra_script.py were already in wb_lbm_config.h.

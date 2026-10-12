@@ -31,6 +31,8 @@
 #ifndef __FREERTOS
 #error "Enable FreeRTOS SMP (Tools -> Operating System, or -DPIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS)"
 #endif
+// Needed to get prinf to work for RP2040
+__asm__(".global _printf_float");
 #include <FreeRTOS.h>
 #include <semphr.h>
 // Add missing WisBlock definitions
@@ -80,7 +82,7 @@
 #define N_USB_DATA 0b1111111011111111
 
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
-#define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
+#define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs)*configTICK_RATE_HZ) / 1000))
 
 /** Callbacks */
 #if defined ARDUINO_ARCH_ESP32
@@ -107,7 +109,7 @@ extern bool has_rak1901;
 /** Buffer for receive downlinks */
 extern WisBlockRxResult rx_buffered;
 /** Time received from LNS */
-extern time_t unixTime; // a time stamp
+extern time_t unixTime;  // a time stamp
 /** Semaphore used by events to wake up loop task */
 extern SemaphoreHandle_t g_task_sem;
 /** LoRa event handler */
@@ -149,8 +151,7 @@ static portMUX_TYPE g_event_mux = portMUX_INITIALIZER_UNLOCKED;
  *
  * @param bits event mask, e.g. AT_CMD
  */
-inline void taskEventSet(uint16_t bits)
-{
+inline void taskEventSet(uint16_t bits) {
 	EVENT_LOCK();
 	g_task_event_type |= bits;
 	EVENT_UNLOCK();
@@ -161,8 +162,7 @@ inline void taskEventSet(uint16_t bits)
  *
  * @param mask Inverted event mask, e.g. N_AT_CMD
  */
-inline void taskEventClear(uint16_t mask)
-{
+inline void taskEventClear(uint16_t mask) {
 	EVENT_LOCK();
 	g_task_event_type &= mask;
 	EVENT_UNLOCK();
@@ -172,21 +172,20 @@ inline void taskEventClear(uint16_t mask)
 // Debug output set to 0 to disable app debug output
 #ifndef MY_DEBUG
 #define MY_DEBUG 1
-#endif // MY_DEBUG
+#endif  // MY_DEBUG
 
 #if MY_DEBUG > 0
-#define MYLOG(tag, ...)                  \
-	do                                   \
-	{                                    \
-		if (tag)                         \
+#define MYLOG(tag, ...) \
+	do { \
+		if (tag) \
 			Serial.printf("[%s] ", tag); \
-		Serial.printf(__VA_ARGS__);      \
-		Serial.printf("\n");             \
-	} while (0);                         \
+		Serial.printf(__VA_ARGS__); \
+		Serial.printf("\n"); \
+	} while (0); \
 	delay(100)
 #else
 #define MYLOG(...)
-#endif // MY_DEBUG
+#endif  // MY_DEBUG
 
 /**
  * Application-defined settings, persisted separately from the library's own
@@ -206,8 +205,7 @@ inline void taskEventClear(uint16_t mask)
  * fields, or every device in the field will reset those to default on next
  * boot after an OTA update.
  */
-struct CustomAtSettings
-{
+struct CustomAtSettings {
 	/// Bump this whenever a field is added/changed below - see the
 	/// EXTENDING THIS STRUCT note above. loadCustomAtSettings() (in
 	/// custom_at.cpp) checks this against its own compiled-in
@@ -215,7 +213,7 @@ struct CustomAtSettings
 	/// mismatch, the same way it already does on a straight size
 	/// mismatch - belt and suspenders against loading a differently-laid-
 	/// out struct as if it were this one.
-	uint16_t version = 2; // bumped from 1: sendIntervalMs (ms) renamed/reinterpreted as sendIntervalS (s)
+	uint16_t version = 2;  // bumped from 1: sendIntervalMs (ms) renamed/reinterpreted as sendIntervalS (s)
 
 	/// AT+SENDINT= - application-defined periodic send interval, in
 	/// seconds. 0 (the default) means "no automatic sending" - it's up to
@@ -247,4 +245,4 @@ void registerCustomATCommands(WisBlockLoRaAT &atParser);
  */
 const CustomAtSettings &getCustomAtSettings();
 
-#endif // MAIN_H
+#endif  // MAIN_H

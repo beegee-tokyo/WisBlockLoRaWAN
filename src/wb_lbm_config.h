@@ -81,4 +81,13 @@
 #define SMTC_MULTICAST
 #endif
 
+// LBM's own debug trace (join, TX/RX windows, MAC commands ... printed through
+// smtc_modem_hal_print_trace()). 0 = off, same as extra_script.py for PlatformIO. LBM defaults to ON
+// when nothing is defined, so this must be here for the Arduino IDE, which does not run
+// extra_script.py. Set it to 1 for verbose output during bring-up: edit it here, or define
+// MODEM_HAL_DBG_TRACE=1 in the build flags (it is only set when it is not defined already).
+#ifndef MODEM_HAL_DBG_TRACE
+#define MODEM_HAL_DBG_TRACE 0
+#endif
+
 #endif /* WB_LBM_CONFIG_H */

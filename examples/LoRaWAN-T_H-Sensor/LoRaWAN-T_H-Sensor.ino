@@ -44,6 +44,10 @@ uint8_t join_attempt = 0;
  */
 void setup(void)
 {
+// #if defined (ARDUINO_ARCH_RP2040)
+//   // Needed to get prinf to work for RP2040
+// 	__asm__(".global _printf_float");
+// #endif
 	pinMode(LED_BLUE, OUTPUT);
 	pinMode(LED_GREEN, OUTPUT);
 	digitalWrite(LED_GREEN, HIGH);
