@@ -30,8 +30,6 @@ uint32_t package_cnt = 0;
 /** Timer to wakeup task frequently and send message */
 TimerHandle_t g_task_wakeup_timer;
 #elif defined ESP32
-/** Semaphore used by events to wake up loop task */
-SemaphoreHandle_t g_task_sem = NULL;
 /** Timer to wakeup task frequently and send message */
 Ticker g_task_wakeup_timer;
 #else
