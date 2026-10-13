@@ -45,6 +45,40 @@ enum WisBlockP2PModulation : uint8_t
 #define WISBLOCK_P2P_RX_CONTINUOUS 65534UL
 #define WISBLOCK_P2P_RX_SINGLE 65535UL
 
+/**
+ * Battery level of the LoRaWAN DevStatusAns (LoRaWAN 1.0.4 specification), the value returned by the
+ * device status callback registered with WisBlockLoRaWAN::onDeviceStatusRequest().
+ * - WISBLOCK_BATTERY_EXTERNAL_POWER (0): the device is connected to an external power source
+ * - 1 to 254: battery level, 1 is the minimum and 254 the maximum (see wisblockBatteryLevelFromPercent())
+ * - WISBLOCK_BATTERY_UNKNOWN (255): the device cannot measure the battery level (default)
+ */
+#define WISBLOCK_BATTERY_EXTERNAL_POWER 0
+#define WISBLOCK_BATTERY_MIN 1
+#define WISBLOCK_BATTERY_MAX 254
+#define WISBLOCK_BATTERY_UNKNOWN 255
+
+/**
+ * @brief Device status callback, returns the battery level for the DevStatusAns
+ *
+ * @return WISBLOCK_BATTERY_EXTERNAL_POWER, 1 to 254 or WISBLOCK_BATTERY_UNKNOWN
+ */
+typedef uint8_t (*WisBlockDeviceStatusCb)(void);
+
+/**
+ * @brief Convert a battery charge in percent into the battery level of the LoRaWAN specification
+ *
+ * @param percent Charge in percent, 0 to 100 (higher values count as 100)
+ * @return 1 (empty) to 254 (full), never 0 (external power) or 255 (unknown)
+ */
+inline uint8_t wisblockBatteryLevelFromPercent(uint8_t percent)
+{
+	if (percent > 100)
+	{
+		percent = 100;
+	}
+	return (uint8_t)(WISBLOCK_BATTERY_MIN + ((uint16_t)percent * (WISBLOCK_BATTERY_MAX - WISBLOCK_BATTERY_MIN)) / 100);
+}
+
 /** Limits of the SX126x GFSK modem. */
 #define WISBLOCK_FSK_BITRATE_MIN 600UL
 #define WISBLOCK_FSK_BITRATE_MAX 300000UL

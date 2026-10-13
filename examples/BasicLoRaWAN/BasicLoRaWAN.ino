@@ -112,6 +112,25 @@ void onLinkCheck(bool success, const WisBlockLinkCheckResult &r)
 }
 
 /**
+ * @brief Device status callback, called when the network sends a DevStatusReq (optional, not used by default)
+ *
+ * Returns the battery level for the answer. The callback is only used if it is registered with
+ * lora.onDeviceStatusRequest() in setup() (the line is commented out below). Without it the stack
+ * reports "unknown" (255), the same as before this callback existed.
+ * It runs inside the LoRaWAN stack: keep it short and do not call library functions here.
+ * Return WISBLOCK_BATTERY_EXTERNAL_POWER for a device that is not on a battery, or for a battery
+ * powered device the last measured level, for example
+ *     return wisblockBatteryLevelFromPercent(last_battery_percent);
+ * where last_battery_percent is updated in loop(), not here.
+ *
+ * @return Battery level, 0 = external power, 1..254 = battery, 255 = unknown
+ */
+uint8_t onDeviceStatus(void)
+{
+	return WISBLOCK_BATTERY_EXTERNAL_POWER;
+}
+
+/**
  * @brief Arduino setup function
  *
  * Sets the OTAA keys, region, class and ADR, registers all LoRaWAN callbacks, saves the
@@ -136,6 +155,9 @@ void setup()
 	lora.onLoRaWANRxFinished(onRxDone);
 	lora.onTimeRequestAnswer(onTimeAnswer);
 	lora.onLinkCheckAnswer(onLinkCheck);
+	// Optional: provide the battery level for the device status request of the network. Not every
+	// application can measure it - without this line the answer is "unknown" (255).
+	// lora.onDeviceStatusRequest(onDeviceStatus);
 
 	lora.saveConfig();
 

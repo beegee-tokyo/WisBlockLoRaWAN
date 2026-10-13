@@ -25,6 +25,9 @@
 // ---------------------------------------------------------------------------
 namespace
 {
+// Battery level provider for the DevStatusAns, see WisBlockLbmPort::setDeviceStatusCallback()
+WisBlockDeviceStatusCb volatile deviceStatusCallback = nullptr;
+
 void (*timerCallback)(void *) = nullptr;
 void *timerContext = nullptr;
 uint32_t timerDeadlineMs = 0;
@@ -168,6 +171,11 @@ void tick()
 			timerCallback(timerContext);
 		}
 	}
+}
+
+void setDeviceStatusCallback(WisBlockDeviceStatusCb cb)
+{
+	deviceStatusCallback = cb;
 }
 
 bool radioIrqPending()
@@ -521,17 +529,18 @@ extern "C"
 
 	// --- Environment management ---------------------------------------------
 	/**
-	 * @brief Get the battery level
-	 * @return 255 (unknown), not measured in this port
+	 * @brief Get the battery level for the DevStatusAns
+	 * @return The value of the application callback (WisBlockLoRaWAN::onDeviceStatusRequest()), or
+	 * 255 (unknown) if none is registered
 	 */
 	uint8_t smtc_modem_hal_get_battery_level(void)
 	{
-		// 0 = mains-powered, 1..254 = battery level, 255 = unknown.
-		// TODO: wire to a real fuel gauge / resistor-divider ADC read if
-		// your application is battery powered; 255 is a safe placeholder
-		// that tells the network "not measured" rather than lying with a
-		// fixed value.
-		return 255;
+		// 0 = mains-powered, 1..254 = battery level, 255 = unknown. Called by the LoRaWAN stack while it
+		// handles a DevStatusReq of the network, in the context of the LoRa Basics Modem task (or loop()
+		// when no background task is used). 255 tells the network "not measured" rather than lying with
+		// a fixed value.
+		WisBlockDeviceStatusCb cb = deviceStatusCallback;
+		return cb != nullptr ? cb() : WISBLOCK_BATTERY_UNKNOWN;
 	}
 
 	/**

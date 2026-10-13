@@ -933,6 +933,24 @@ public:
 	 * @param cb Function called with the answer to requestLinkCheck()
 	 */
 	void onLinkCheckAnswer(LoRaWANEngine::LinkCheckCb cb) { lorawan.onLinkCheckAnswer(cb); }
+	/**
+	 * @brief Register the callback for the device status request of the network (optional)
+	 *
+	 * The network server can send a DevStatusReq MAC command. The stack answers with the battery
+	 * level and the SNR of the request. Without this callback the battery level is reported as
+	 * "unknown" (255). The callback returns the battery level of the LoRaWAN specification:
+	 * WISBLOCK_BATTERY_EXTERNAL_POWER (0) for a device on an external power source, 1 (minimum) to
+	 * 254 (maximum) for a battery, WISBLOCK_BATTERY_UNKNOWN (255) if it cannot be measured.
+	 * wisblockBatteryLevelFromPercent() converts a charge in percent.
+	 *
+	 * The callback is called inside the LoRaWAN stack, in the context of the library background task
+	 * (or of loop() if the background task is not used), while the stack is busy and the radio
+	 * planner is running. It must be short and must NOT call any function of this library. Do not
+	 * start a slow measurement in it: measure in loop() or with a timer and return the last value.
+	 *
+	 * @param cb Function that returns the battery level, nullptr removes it
+	 */
+	void onDeviceStatusRequest(WisBlockDeviceStatusCb cb);
 
 	// --- Callback registration (LoRa P2P) -----------------------------
 	/**

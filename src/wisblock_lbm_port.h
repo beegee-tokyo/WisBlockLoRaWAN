@@ -14,6 +14,8 @@
 #ifndef WISBLOCK_LBM_PORT_H
 #define WISBLOCK_LBM_PORT_H
 
+#include "WisBlockLoRaWANTypes.h"
+
 namespace WisBlockLbmPort
 {
 /**
@@ -56,6 +58,15 @@ bool consumeRadioIrqFlag();
  * @return true if the radio interrupt flag is set
  */
 bool radioIrqPending();
+
+/**
+ * @brief Register the callback that provides the battery level for the LoRaWAN DevStatusAns
+ *
+ * Called by smtc_modem_hal_get_battery_level() when the network sends a DevStatusReq.
+ *
+ * @param cb Callback, nullptr = report WISBLOCK_BATTERY_UNKNOWN
+ */
+void setDeviceStatusCallback(WisBlockDeviceStatusCb cb);
 } // namespace WisBlockLbmPort
 
 #endif // WISBLOCK_LBM_PORT_H

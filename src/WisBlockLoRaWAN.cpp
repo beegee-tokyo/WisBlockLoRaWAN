@@ -404,6 +404,11 @@ void WisBlockLoRaWAN::setP2PSyncWord(uint16_t syncWord)
 	applyP2PSettings();
 }
 
+void WisBlockLoRaWAN::onDeviceStatusRequest(WisBlockDeviceStatusCb cb)
+{
+	WisBlockLbmPort::setDeviceStatusCallback(cb);
+}
+
 void WisBlockLoRaWAN::setP2PFskBitrate(uint32_t bitrate)
 {
 	config.p2p.fskBitrate = bitrate;
