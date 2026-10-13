@@ -35,7 +35,7 @@ After that, picotool uploads and the automatic reset into BOOTSEL both work.
 
 ## Supported hardware
 
-Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, _**only with Earle F. Philhower BSP, MBED is BSP is not supported**_).       
+Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, _**only with Earle F. Philhower BSP, MBED BSP is not supported**_).       
 `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
 
 On nRF52840, ESP32-S3 and RP2040, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
@@ -56,15 +56,15 @@ The AT interface follows the RUI3 command set. Commands that only exist in this 
 Multiple examples are available in the examples folder of the library.
 
 ### BasicLoRaWAN
-Simple LoRaWAN application.     
+Simple LoRaWAN application. Everything is handled in _**`loop()`**_ where calls to _**`at_serial.handleSerial();`**_ and _**`lora.handleEvents();`**_ are mandatory.    
 OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.    
-Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in (see README).    
+Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in.    
 The AT command interface runs on the USB serial port. It is polled from loop() with at_serial.handleSerial(), the same way as lora.handleEvents().
 
 ### LowPowerLoRaWAN
 Low power example for LoRaWAN. Using semaphores to keep the MCU in low power state unless an action is required.
 OTAA join, Class A, periodic uplink on port 1, all LoRaWAN callbacks wired.    
-Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in (see README).    
+Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in.    
 This example shows as well how to add custom AT commands to an application.
 
 ### LoRaWAN-T_H-Sensor
@@ -80,13 +80,13 @@ Everything else - every other API call, the AT command layer if you add it, the 
 **Only builds for nRF52840 targets (RAK3400 is an nRF52840 module)**
 
 ###  BasicLoRaP2P
-Simple LoRa P2P application.    
+Simple LoRa P2P application. Everything is handled in _**`loop()`**_ where calls to _**`at_serial.handleSerial();`**_ and _**`lora.handleEvents();`**_ are mandatory.    
 Alternates between CAD-gated TX and RX every few seconds.    
 The AT command interface runs on the USB serial port. It is polled from loop() with at_serial.handleSerial(), the same way as lora.handleEvents().
 
 ### LowPowerLoRaP2P
 Low power example for LoRa P2P. Using semaphores to keep the MCU in low power state unless an action is required.     
-Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in (see README).
+Works unmodified on RAK4631 / RAK3312 / RAK11310 once WisBlockLoRaBoards.h has the right pins for your revision and LBM is vendored in.
 
 ### LoRaP2PPingPong
 PingPong example. Requires two devices flashed with the same application.     
@@ -117,7 +117,7 @@ Demonstrates fully background, non-polled operation on RAK4631/RAK3312:
 
 ## Examples for PlatformIO
 Example projects for PlatformIO are in the folder [examples/PlatformIO](./examples/PlatformIO).      
-All examples come with platformio.ini files for RAK4631, RAK3312, RAK11300 and RAK3400+RAk1330x.     
+All examples come with platformio.ini files for RAK4631, RAK3312, RAK11300 and RAK3400+RAK1330x.     
 All examples assume that setup of LoRaWAN credentials and LoRa P2P settings are done via AT commands. None of these examples do explicit set any configuration with API calls. This is the usual way to setup devices if more than one is actually built.     
 For convinience of using RAKwireless WisBlock Core modules with PlatformIO platforms, an additional folder _**rakwireless**_ is added to the project. In this folder are WisBlock Core specific definitions as some of the platforms do not natively support WisBlock Core modules.    
 
