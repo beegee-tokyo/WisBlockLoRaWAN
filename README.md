@@ -39,8 +39,18 @@ Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) 
 `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
 
 On nRF52840, ESP32-S3 and RP2040, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
-`WisBlockLoRaHwConfig` (`src/WisBlockLoRaHwConfig.h`) and pass it to `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` instead of plain `begin()`. A RAK3401 (RAK3400 WisDuo module + RAK13300/RAK13302 transceiver) preset is included as a worked example - `wisblockLoRaHwConfigRAK3401()` - see `examples/RAK3401_RAK13300/`. This flexible path is
+`WisBlockLoRaHwConfig` (`src/WisBlockLoRaHwConfig.h`) and pass it to `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` instead of plain `begin()`. A RAK3401 (RAK3400 WisDuo module + RAK13300/RAK13302 transceiver) preset is included as a worked example - `wisblockLoRaHwConfigRAK3401_RAK13300()` (formerly `wisblockLoRaHwConfigRAK3401()`, still available) - see `examples/RAK3401_RAK13300/`. The wiring of a RAK3401 with a RAK13702 (Semtech LR2021) module is described by `wisblockLoRaHwConfigRAK3401_RAK13702()`; the LR2021 backend is **optional and off by default**, see "LR2021 (RAK13702)" below (`examples/RAK3401_RAK13702/`). This flexible path is
 nRF52840/ESP32-S3/RP2040 only. Other MCU types are not supported.
+
+### LR2021 (RAK13702) on a RAK3401
+
+Support for the Semtech LR2021 (RAK13702 module) on a RAK3401 is built in, but compiled in only when you ask for it, so builds for the SX1262 modules do not change and do not grow:
+
+- Enable it by removing the `//` in front of `#define WISBLOCK_ENABLE_LR2021` in `src/wb_lbm_config.h`, or in PlatformIO with `build_flags = -DWISBLOCK_ENABLE_LR2021`. It is only available for the nRF52840.
+- Start the library with `lora.begin(wisblockLoRaHwConfigRAK3401_RAK13702());` (SX1262 modules: `wisblockLoRaHwConfigRAK3401_RAK13300()`). The radio is selected at run time from the `chipType` of that config, both LoRaWAN and LoRa/FSK P2P work with it. See `examples/RAK3401_RAK13702/`.
+- **Not tested on hardware yet.** Two things of the RAK13702 are assumptions that have to be checked, both are marked at the top of `src/wisblock_ral_lr20xx_bsp.c`: the truth table of the two antenna switches (assumed like DIO2 of an SX1262: high only while transmitting) and the transmit power amplifier settings (`kLfPa[]` is a placeholder, the real output power can differ from the requested one until it is filled in and measured).
+- `rxBoostedGainEnabled` has no effect with the LR2021.
+- **2.4 GHz.** In P2P mode the frequency alone decides the band: 1.5 GHz and above uses the 2.4 GHz path (HF receiver, HF power amplifier, DIO9 antenna switch), anything below the sub-GHz path (DIO7 switch). The P2P bandwidth choices stop at 500 kHz, the wider 2.4 GHz bandwidths are not offered by the P2P API yet. For LoRaWAN the 2.4 GHz region `WISBLOCK_REGION_WW2G4` (DR0-DR7 = SF12-SF5, 812.5 kHz, +10 dBm EIRP) is part of the build together with the LR2021: select it with `lora.setRegion(WISBLOCK_RUI3_BAND_WW2G4);` (or `setRegion(WISBLOCK_REGION_WW2G4)`) after `begin()`, or `AT+BAND=13`. RUI3 has no 2.4 GHz region, so 13 is a library addition after the last RUI3 band number (12 = LA915). One region is active at a time and it is set before joining, so switching between sub-GHz and 2.4 GHz means selecting the other region and joining again. On a board without an LR2021 `setRegion()` returns false and a restored WW2G4 region makes `join()` refuse instead of joining on another band.
 
 ## API documentation
 
@@ -74,7 +84,7 @@ Low power example for temperature and humidity sensing using the WisBlock RAK190
 Minimal OTAA join + periodic uplink, Class A, on a RAK3400 WisDuo module used as a WisBlock Core module with a RAK13300 (or RAK13302, same wiring).    
 SX1262 transceiver module - i.e. "RAK3401" in the sense this library uses the name (see WisBlockLoRaHwConfig.h).     
 This is the same OTAA/join/uplink flow as BasicLoRaWAN.ino, the only difference is this single line in setup():    
-```lora.begin(wisblockLoRaHwConfigRAK3401());   // instead of plain lora.begin() ```
+```lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300());   // instead of plain lora.begin() ```
 
 Everything else - every other API call, the AT command layer if you add it, the examples under examples/ - works exactly the same regardless of which begin() you call, since it's only the radio wiring that differs.      
 **Only builds for nRF52840 targets (RAK3400 is an nRF52840 module)**

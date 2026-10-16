@@ -72,7 +72,7 @@
 #elif defined( SX127X )
 #include "sx127x_hal.h"
 #elif defined( LR20XX )
-#include "lr20xx_hal.h"
+#include "radio_drivers/lr20xx_driver/src/lr20xx_hal.h"
 #else
 #error "Please select radio board.."
 #endif

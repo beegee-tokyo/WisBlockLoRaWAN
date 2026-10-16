@@ -138,9 +138,13 @@ enum WisBlockRUI3Band : uint8_t
 	WISBLOCK_RUI3_BAND_AS923_3 = 10,
 	WISBLOCK_RUI3_BAND_AS923_4 = 11,
 	WISBLOCK_RUI3_BAND_LA915 = 12,
+	/** 2.4 GHz worldwide (WISBLOCK_REGION_WW2G4). Not a RUI3 band: RUI3 has no 2.4 GHz region, this
+	 * library number is added after the last RUI3 one. Needs the LR2021 radio and the library built with
+	 * WISBLOCK_ENABLE_LR2021, otherwise setRegion() returns false and AT+BAND=13 is refused. */
+	WISBLOCK_RUI3_BAND_WW2G4 = 13,
 	/** Returned by wisblockRegionToRUI3Band()/getRegion() when the current WisBlockRegion has no
-	 * RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4 -
-	 * library-specific regions beyond RUI3's set). Never a valid value to pass to setRegion(). */
+	 * RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0 - a library-specific region beyond
+	 * RUI3's set). Never a valid value to pass to setRegion(). */
 	WISBLOCK_RUI3_BAND_UNKNOWN = 0xFF,
 };
 
@@ -153,7 +157,8 @@ enum WisBlockRUI3Band : uint8_t
  * @param outRegion Receives the region
  * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_LA915,
  * WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion equivalent in this
- * vendored LBM build.
+ * vendored LBM build. WISBLOCK_RUI3_BAND_WW2G4 converts here whatever the radio is, whether the
+ * region can be used is a separate question, see wisblockRegionUsable().
  */
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);
 
@@ -164,9 +169,21 @@ bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);
  * the RUI3 AT+BAND numbering (WisBlockRUI3Band) used by WisBlockLoRaWAN::getRegion() and AT+BAND.
  * @param region Region of the library
  * @return WISBLOCK_RUI3_BAND_UNKNOWN for WisBlockRegion values with no RUI3 band index
- * (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4).
+ * (WISBLOCK_REGION_CN470_RP_1_0). Use WisBlockLoRaWAN::setRegion(WisBlockRegion) to select that one.
  */
 WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region);
+
+/**
+ * @brief Check if a region can be used with the radio of this board
+ *
+ * Every region is usable except WISBLOCK_REGION_WW2G4 (2.4 GHz), which needs the LR2021 radio:
+ * the library has to be built with WISBLOCK_ENABLE_LR2021 (wb_lbm_config.h) and the board
+ * configuration passed to begin() must have the LR2021 (wisblockLoRaHwConfigRAK3401_RAK13702()). An
+ * SX1262 cannot transmit at 2.4 GHz. The radio is known after WisBlockLoRaWAN::begin(), call this after it.
+ * @param region Region of the library
+ * @return true if the region can be used
+ */
+bool wisblockRegionUsable(WisBlockRegion region);
 
 enum WisBlockDeviceClass : uint8_t
 {
@@ -174,6 +191,40 @@ enum WisBlockDeviceClass : uint8_t
 	WISBLOCK_CLASS_B = 1,
 	WISBLOCK_CLASS_C = 2,
 };
+
+/**
+ * @brief State of the Class B set-up, the S0 ... S3 of RUI3's AT+CLASS=? (B,S0 ... B,S3)
+ *
+ * Only meaningful while Class B is the requested class. A normal start is S0, S1, S2.
+ */
+enum WisBlockClassBState : uint8_t
+{
+	/** Class B is requested, the device is not joined yet (or the join was lost), or it is joined but
+	 * has not sent an uplink since the class was set. */
+	WISBLOCK_CLASS_B_S0 = 0,
+	/** Joined and the first uplink is sent (it carries the time and ping slot requests): the stack
+	 * waits for a beacon from the gateway. */
+	WISBLOCK_CLASS_B_S1 = 1,
+	/** Beacon locked: the ping slots are open, the device receives Class B downlinks. */
+	WISBLOCK_CLASS_B_S2 = 2,
+	/** The beacon lock failed (the beacon was missed) or was lost again. The stack keeps searching, the
+	 * state returns to S2 when a beacon is received. */
+	WISBLOCK_CLASS_B_S3 = 3,
+};
+
+/**
+ * @brief Compute the Class B state from what the stack reports (the rules behind WisBlockClassBState)
+ *
+ * Used by LoRaWANEngine, a separate function so the rules can be tested without a radio.
+ * @param joined The device is joined
+ * @param classApplied The class B request was accepted by the stack (needs a joined device)
+ * @param uplinkSent An uplink was sent since the join / since Class B was requested
+ * @param beaconLocked The stack reports Class B ready (beacon locked)
+ * @param beaconLost A lock was lost, or beacons were missed while searching
+ * @return The state S0 ... S3
+ */
+WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, bool uplinkSent, bool beaconLocked,
+											   bool beaconLost);
 
 enum WisBlockJoinMode : uint8_t
 {

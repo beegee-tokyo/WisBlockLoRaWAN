@@ -26,6 +26,14 @@
  * wisblock_radio_hal.cpp and wisblock_ral_sx126x_bsp.c implement all four
  * combinations; see their doc comments for exactly how.
  *
+ * Semtech LR2021 (LR20xx) transceivers (RAK13702 module) are described with the same struct:
+ * chipType = WISBLOCK_LORA_CHIP_LR2021 plus the lr* fields below. The SPI/NSS/RESET/BUSY/IRQ
+ * wiring and the antenna switch power pin are the same fields as for the SX126x. See
+ * wisblockLoRaHwConfigRAK3401_RAK13702(). The LR2021 backend is only compiled in when
+ * WISBLOCK_ENABLE_LR2021 is defined (see wb_lbm_config.h), otherwise WisBlockLoRaWAN::begin() refuses
+ * a config with this chip type. Which radio is used is decided at run time by chipType, so one build
+ * can run an SX126x or an LR2021 board.
+ *
  * A custom board only needs to fill in this struct (or start from one of
  * the preset builder functions below and override individual fields) and
  * pass it to WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&) instead of
@@ -51,7 +59,7 @@ typedef SPIClass WisBlockLoRaSpiClass;
 #endif
 #endif
 
-/** Which SX126x variant the board carries. Only SX1262 (the HP PA variant)
+/** Which radio chip the board carries. For the SX126x variants: only SX1262 (the HP PA variant)
  * is actually wired up in wisblock_ral_sx126x_bsp.c's TX power table today -
  * see that file's doc comment. Kept as a field for completeness/parity with
  * SX126x-Arduino's hw_config; setting SX1261 does not yet change the PA
@@ -60,6 +68,7 @@ enum WisBlockLoRaChipType : uint8_t
 {
 	WISBLOCK_LORA_CHIP_SX1261 = 0,
 	WISBLOCK_LORA_CHIP_SX1262 = 1,
+	WISBLOCK_LORA_CHIP_LR2021 = 2, ///< Semtech LR2021 (LR20xx), RAK13702 module
 };
 
 struct WisBlockLoRaHwConfig
@@ -73,7 +82,7 @@ struct WisBlockLoRaHwConfig
 	int8_t pinNss = -1;
 	int8_t pinReset = -1;
 	int8_t pinBusy = -1;
-	int8_t pinDio1 = -1;
+	int8_t pinDio1 = -1; ///< MCU pin of the radio IRQ line: DIO1 of an SX126x, the DIO named in lrIrqDio of an LR2021
 	int8_t pinSck = -1;
 	int8_t pinMosi = -1;
 	int8_t pinMiso = -1;
@@ -96,6 +105,15 @@ struct WisBlockLoRaHwConfig
 	sx126x_tcxo_ctrl_voltages_t tcxoCtrlVoltage = SX126X_TCXO_CTRL_3_3V;
 	uint32_t tcxoStartupTimeUs = 5000; ///< TCXO startup delay. Ignored unless useDio3Tcxo is set.
 
+	// LR2021 (LR20xx) only, ignored for the SX126x chips. These are DIO numbers of the radio chip,
+	// not MCU pins. -1 = unused. For the LR2021 the antenna switch power pin is radioRxEn with
+	// useRxenAntPwr (same as the SX126x presets), the TCXO uses tcxoCtrlVoltage/tcxoStartupTimeUs
+	// and the regulator is DC-DC unless useLdo is set. useDio2AntSwitch, useDio3Tcxo and
+	// useDio3AntSwitch do not apply to the LR2021.
+	int8_t lrIrqDio = -1;		 ///< LR2021 DIO that drives the IRQ line wired to pinDio1 (RAK13702: DIO8)
+	int8_t lrRfSwitchDioLf = -1; ///< LR2021 DIO steering the sub-GHz antenna switch, RF_LF1/RF_LF2 (RAK13702: DIO7)
+	int8_t lrRfSwitchDioHf = -1; ///< LR2021 DIO steering the 2.4 GHz antenna switch, RFI_HF (RAK13702: DIO9)
+
 	uint32_t spiHz = 8000000UL; ///< SPI clock; SX1262's datasheet max is 16 MHz.
 
 #if WISBLOCK_LORA_HW_CONFIG_HAS_SPI_INSTANCE
@@ -103,7 +121,7 @@ struct WisBlockLoRaHwConfig
 	 * Arduino core's global `SPI` object with the pins above (RP2040: `SPI` or `SPI1`,
 	 * whichever one the SCK pin belongs to). Set this if
 	 * your board wires the radio to a second SPI peripheral instead - see
-	 * wisblockLoRaHwConfigRAK3401() below for a real example (RAK3400's
+	 * wisblockLoRaHwConfigRAK3401_RAK13300() below for a real example (RAK3400's
 	 * default SPI is already committed to onboard flash). */
 	WisBlockLoRaSpiClass *spiInstance = nullptr;
 #endif
@@ -143,12 +161,12 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11300();
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
 /**
- * @brief Radio wiring of the RAK3401 (RAK3400 module with a RAK13300 / RAK13302 SX1262 module)
+ * @brief Radio wiring of the RAK3401 with a RAK13300 / RAK13302 SX1262 module
  *
  * RAK3401: a RAK3400 WisDuo nRF52840 module used as a WisBlock Core module,
  * combined with a RAK13300 or RAK13302 SX1262 LoRa transceiver module (both
- * share the same HW connection) - see the Creation Log entry "Flexible
- * hw_config-based radio init (RAK3401 / non-WisBlock boards)" for where
+ * share the same HW connection) - see the Creation Log entry \"Flexible
+ * hw_config-based radio init (RAK3401 / non-WisBlock boards)\" for where
  * these values come from.
  *
  * Unlike the other three presets, this one uses a second SPI peripheral
@@ -157,9 +175,38 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK11300();
  * SPIClass instance itself is a static local inside this function's .cpp
  * file; every call returns a config pointing at the same one.
  *
+ * Formerly named wisblockLoRaHwConfigRAK3401(), which still exists as an alias.
+ *
  * @return Hardware configuration
  */
-WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401();
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13300();
+
+/**
+ * @brief Radio wiring of the RAK3401 with a RAK13702 LR2021 module
+ *
+ * Same MCU pins and SPI peripheral as wisblockLoRaHwConfigRAK3401_RAK13300() (SPI, NSS, RESET,
+ * BUSY, antenna switch power), with chipType WISBLOCK_LORA_CHIP_LR2021. The LR2021 drives its IRQ
+ * on DIO8, which is wired to the same MCU pin as DIO1 of the RAK13300. Antenna switch RFI_HF
+ * (2.4 GHz) is steered by DIO9, RF_LF1/RF_LF2 (sub-GHz) by DIO7, both powered by the same pin
+ * as on the RAK13300. TCXO 3.3 V / 50 ms, DC-DC regulator.
+ *
+ * Needs WISBLOCK_ENABLE_LR2021 (wb_lbm_config.h or the build flags), without it
+ * WisBlockLoRaWAN::begin() refuses this configuration. Not tested on hardware yet, see the top of
+ * wisblock_ral_lr20xx_bsp.c for the assumptions (antenna switch truth table, PA settings).
+ *
+ * @return Hardware configuration
+ */
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13702();
+
+/**
+ * @brief Old name of wisblockLoRaHwConfigRAK3401_RAK13300(), kept so existing sketches build unchanged
+ *
+ * @return Hardware configuration
+ */
+inline WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401()
+{
+	return wisblockLoRaHwConfigRAK3401_RAK13300();
+}
 #endif
 
 #endif // WISBLOCK_LORA_HW_CONFIG_H

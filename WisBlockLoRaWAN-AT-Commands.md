@@ -946,7 +946,7 @@ This command is used to access the LoRaWAN class.
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+CLASS=?` | - | `AT+CLASS=<A, B or C>` | OK |
+| `AT+CLASS=?` | - | `AT+CLASS=<A, B,S0 - B,S3 or C>` | OK |
 | `AT+CLASS=<Input>` | A, B or C | - | OK |
 
 **Example:**
@@ -958,13 +958,20 @@ OK
 AT+CLASS=?
 AT+CLASS=C
 OK
+
+AT+CLASS=B
+OK
+
+AT+CLASS=?
+AT+CLASS=B,S2
+OK
 ```
 
 ## _💡 NOTE_
 ----
 _The class can only change on a joined device. A request before the join is stored and applied automatically after the join, `OK` is returned in both cases._
 
-_The query returns the **requested** class. RUI3's Class B state suffix (`B:S0` ... `B:S3`) does not exist._
+_The query returns the **requested** class. For Class B the state of the Class B set-up follows the letter, like RUI3: `B,S0` ... `B,S3`. `S0`: Class B requested, not joined yet (or nothing sent since the join). `S1`: joined, the first uplink is sent, the stack waits for the beacon of the gateway. `S2`: beacon locked, the ping slots are open. `S3`: the beacon lock failed or was lost, the stack keeps searching, back to `S2` when a beacon is received. The same states are reported by `onClassBStateChanged()` and `getClassBState()`. There is no event line on the serial port for a state change._
 
 _Only the first character is evaluated, `b` and `B` are equal. Any other character selects Class A, `AT_PARAM_ERROR` is **not** returned._
 
@@ -1293,8 +1300,8 @@ This command sets numbers corresponding to active regions. It uses the **same nu
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+BAND=?` | - | `AT+BAND=<0 - 11>` | OK<br/>`AT_ERROR` |
-| `AT+BAND=<Input>` | 0,1,2,3,4,5,6,7,8,9,10,11 | - | OK<br/>`AT_ERROR` |
+| `AT+BAND=?` | - | `AT+BAND=<0 - 11>`, or `AT+BAND=13` for 2.4 GHz | OK<br/>`AT_ERROR` |
+| `AT+BAND=<Input>` | 0,1,2,3,4,5,6,7,8,9,10,11, 13 (2.4 GHz, LR2021 only) | - | OK<br/>`AT_ERROR` |
 
 **Example:**
 
@@ -1309,13 +1316,15 @@ OK
 
 ## _💡 NOTE_
 ----
-_0: EU433, 1: CN470, 2: RU864, 3: IN865, 4: EU868, 5: US915, 6: AU915, 7: KR920, 8: AS923-1, 9: AS923-2, 10: AS923-3, 11: AS923-4, 12: LA915._
+_0: EU433, 1: CN470, 2: RU864, 3: IN865, 4: EU868, 5: US915, 6: AU915, 7: KR920, 8: AS923-1, 9: AS923-2, 10: AS923-3, 11: AS923-4, 12: LA915, 13: WW2G4 (2.4 GHz, library addition, not a RUI3 band)._
 
 _The default value is **4** (EU868)._
 
-_`12` (LA915) is **not supported**. `AT_ERROR` is returned, preceded by the text `unsupported band index - LA915 not built into this LBM vendoring`. The same happens for values above 12. It is **not** `AT_PARAM_ERROR`._
+_`12` (LA915) is **not supported**. `AT_ERROR` is returned, preceded by the text `unsupported band index - LA915 not built into this LBM vendoring`. The same happens for values above 13. It is **not** `AT_PARAM_ERROR`._
 
-_If the active region has no RUI3 number (`CN470_RP_1_0`, 2.4 GHz), the query returns `AT_ERROR` with the text `current region has no RUI3 band index`._
+_`13` (WW2G4, 2.4 GHz) needs an LR2021 radio (`wisblockLoRaHwConfigRAK3401_RAK13702()`) and the library built with `WISBLOCK_ENABLE_LR2021`. Otherwise `AT_ERROR` is returned, preceded by the text `band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021`. Like every region, it can only be changed before joining._
+
+_If the active region has no RUI3 number (`CN470_RP_1_0`), the query returns `AT_ERROR` with the text `current region has no RUI3 band index`._
 
 _**EU433** is provided by the library itself (RP002-1.0.4 defaults: channels 433.175 / 433.375 / 433.575 MHz, RX2 434.665 MHz DR0, DR0 - DR7, 1 % duty cycle). Semtech's LoRa Basics Modem does not contain it anymore._
 

@@ -242,6 +242,15 @@ uint32_t computeAirtimeMs(uint8_t sf, WisBlockP2PBandwidth bw, uint8_t codingRat
 
 } // namespace
 
+bool LoRaP2PEngine::isLr2021() const
+{
+#if defined(WISBLOCK_ENABLE_LR2021)
+	return wisblock_radio_hal_is_lr2021();
+#else
+	return false;
+#endif
+}
+
 bool LoRaP2PEngine::computeRxDutyCycleTiming(uint32_t &rxTimeMs, uint32_t &sleepTimeMs, uint8_t marginSymbols) const
 {
 	return computeRxDutyCycleTiming(settings.preambleLength, rxTimeMs, sleepTimeMs, marginSymbols);
@@ -304,6 +313,14 @@ void LoRaP2PEngine::begin(const WisBlockP2PSettings &initial)
 {
 	settings = initial;
 
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrBegin();
+		return;
+	}
+#endif
+
 	sx126x_reset(kCtx);
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 	sx126x_set_pkt_type(kCtx, isFsk() ? SX126X_PKT_TYPE_GFSK : SX126X_PKT_TYPE_LORA);
@@ -331,6 +348,13 @@ void LoRaP2PEngine::applySettings(const WisBlockP2PSettings &newSettings)
 {
 	bool modulationChanged = settings.modulation != newSettings.modulation;
 	settings = newSettings;
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrApplySettings(modulationChanged);
+		return;
+	}
+#endif
 	if (modulationChanged)
 	{
 		// The packet type can only be changed in standby
@@ -471,6 +495,12 @@ bool LoRaP2PEngine::send(const uint8_t *data, uint8_t length)
 	{
 		return false; // like RUI3 (AT_BUSY_ERROR): stop the continuous receive first with startReceive(0)
 	}
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		return lrSend(data, length);
+	}
+#endif
 	reconfigureAfterColdSleep();
 
 	// settings.cadEnabled gates whether the *caller* should run CAD first
@@ -515,6 +545,13 @@ bool LoRaP2PEngine::startReceive(uint32_t mode)
 
 void LoRaP2PEngine::startRadioReceive(uint32_t mode)
 {
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrStartRadioReceive(mode);
+		return;
+	}
+#endif
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
@@ -546,6 +583,13 @@ void LoRaP2PEngine::startRadioReceive(uint32_t mode)
 void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs)
 {
 	rxMode = 0; // not one of the startReceive() modes, send() and CAD interrupt it
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrStartReceiveDutyCycle(rxTimeMs, sleepTimeMs);
+		return;
+	}
+#endif
 	reconfigureAfterColdSleep();
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
 
@@ -572,6 +616,13 @@ void LoRaP2PEngine::startReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeM
 
 void LoRaP2PEngine::stopReceive()
 {
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrStopReceive();
+		return;
+	}
+#endif
 	rxMode = 0;
 	cadResumeRx = false;
 	sx126x_set_standby(kCtx, SX126X_STANDBY_CFG_RC);
@@ -579,6 +630,13 @@ void LoRaP2PEngine::stopReceive()
 
 void LoRaP2PEngine::sleep()
 {
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrSleep();
+		return;
+	}
+#endif
 	// Cold-start: see sleep()'s doc comment in LoRaP2PEngine.h for why this
 	// changed from warm-start. RTC-wakeup bit intentionally left clear
 	// either way - this library manages timing on the MCU side
@@ -619,11 +677,23 @@ void LoRaP2PEngine::reconfigureAfterColdSleep()
 
 bool LoRaP2PEngine::getInstantRssi(int16_t &rssiDbm)
 {
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		return lrGetInstantRssi(rssiDbm);
+	}
+#endif
 	return sx126x_get_rssi_inst(kCtx, &rssiDbm) == SX126X_STATUS_OK;
 }
 
 bool LoRaP2PEngine::getRadioStatus(uint8_t &chipMode, uint8_t &cmdStatus, uint16_t &deviceErrors)
 {
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		return lrGetRadioStatus(chipMode, cmdStatus, deviceErrors);
+	}
+#endif
 	sx126x_chip_status_t st;
 	sx126x_errors_mask_t errs = 0;
 	if (sx126x_get_status(kCtx, &st) != SX126X_STATUS_OK || sx126x_get_device_errors(kCtx, &errs) != SX126X_STATUS_OK)
@@ -642,6 +712,12 @@ bool LoRaP2PEngine::getFskStats(uint16_t &received, uint16_t &crcErrors, uint16_
 	{
 		return false;
 	}
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		return lrGetFskStats(received, crcErrors, lengthErrors);
+	}
+#endif
 	sx126x_stats_gfsk_t stats;
 	if (sx126x_get_gfsk_stats(kCtx, &stats) != SX126X_STATUS_OK)
 	{
@@ -664,6 +740,13 @@ void LoRaP2PEngine::startCad()
 		}
 		return;
 	}
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		lrStartCad();
+		return;
+	}
+#endif
 	reconfigureAfterColdSleep();
 	// SetCadParams and SetCad are only accepted from standby. A running receive (continuous or with a
 	// timeout) is not left by itself, so without this the CAD never started while the radio was
@@ -697,6 +780,13 @@ uint32_t LoRaP2PEngine::handleEvents()
 	// WisBlockLbmTask's task loop for how this gets clamped to a sane
 	// background-task wait ceiling regardless.
 	constexpr uint32_t kNoScheduledDeadlineMs = 60000;
+
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (isLr2021())
+	{
+		return lrHandleEvents();
+	}
+#endif
 
 	// FIX (was the direct cause of "sleepRadio() called every cycle, idle
 	// current still ~20x higher than expected"): sx126x_get_irq_status()

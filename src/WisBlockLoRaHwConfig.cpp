@@ -111,7 +111,7 @@ namespace
 SPIClass spiLoraRak3401(NRF_SPIM1, 29, 3, 30);
 } // namespace
 
-WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401()
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13300()
 {
 	WisBlockLoRaHwConfig cfg;
 	cfg.chipType = WISBLOCK_LORA_CHIP_SX1262;
@@ -133,6 +133,28 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401()
 	cfg.tcxoStartupTimeUs = 50000;
 	cfg.spiHz = 8000000UL;
 	cfg.spiInstance = &spiLoraRak3401;
+	return cfg;
+}
+
+WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13702()
+{
+	// Same MCU-side wiring as the RAK13300 (SPI1 pins, NSS, RESET, BUSY, IRQ pin, antenna
+	// switch power, TCXO 3.3 V / 50 ms), so start from that preset and change only what differs.
+	WisBlockLoRaHwConfig cfg = wisblockLoRaHwConfigRAK3401_RAK13300();
+	cfg.chipType = WISBLOCK_LORA_CHIP_LR2021;
+	// The SX1262-only DIO2/DIO3 functions do not exist on the LR2021
+	cfg.useDio2AntSwitch = false;
+	cfg.useDio3Tcxo = false;
+	cfg.useDio3AntSwitch = false;
+	// Pin 21 (WB_IO3) powers both antenna switches, as on the RAK13300
+	cfg.radioTxEn = -1;
+	cfg.radioRxEn = 21;
+	cfg.useRxenAntPwr = true;
+	cfg.useLdo = false; // DC-DC
+	// LR2021 chip DIOs: the IRQ (DIO8) is wired to the MCU pin that is DIO1 on the RAK13300
+	cfg.lrIrqDio = 8;
+	cfg.lrRfSwitchDioLf = 7; // RF_LF1 / RF_LF2 (sub-GHz) antenna switch
+	cfg.lrRfSwitchDioHf = 9; // RFI_HF (2.4 GHz) antenna switch
 	return cfg;
 }
 #endif

@@ -3880,3 +3880,131 @@ Source: RUI3 AT Command Manual and release notes 3.4.0/3.4.2. `startP2PReceive(t
 ## Device status (battery level) callback
 
 The network server can send a DevStatusReq; LBM answers in `dev_status_parser()` with the battery byte from `smtc_modem_hal_get_battery_level()` plus the SNR. The port returned a fixed 255 (unknown). New optional `lora.onDeviceStatusRequest(WisBlockDeviceStatusCb)` (callback `uint8_t cb(void)`): 0 = external power (`WISBLOCK_BATTERY_EXTERNAL_POWER`), 1..254 = battery, 255 = unknown (`WISBLOCK_BATTERY_UNKNOWN`, still the default without a callback). `wisblockBatteryLevelFromPercent(0..100)` gives 1..254. The callback runs inside the LBM task (or loop() without the background task) while the stack handles the downlink: keep it short, do not call library functions, return a value that was measured earlier. The callback is optional: it is only called if registered, otherwise the answer stays 255 as before. The `BasicLoRaWAN` example contains a demo callback (external power, battery variant in the comment), the registration line is commented out so the default behaviour is unchanged. Checked: compiles, the percent conversion on the host; the real DevStatusReq/Ans exchange was not tested (needs a network server that sends the request, e.g. ChirpStack "request device status").
+
+## RAK3401 + RAK13702 (Semtech LR2021): groundwork, radio backend still missing
+
+*Superseded in part: the radio backend described under "RAK3401 + RAK13702: LR2021 radio backend" further down was added afterwards. `begin()` no longer always refuses an LR2021 config, it does so only without `WISBLOCK_ENABLE_LR2021`.*
+
+Request: support an external Semtech LR2021 (RAK13702 module) on the RAK3401 core, next to the existing RAK3401 + SX1262 (RAK13300) support, started with `lora.begin(hwConfig)`. The existing SX1262 configuration must not change. Same MCU pins for SPI, NSS, RESET, BUSY and antenna switch power; the LR2021 interrupt is DIO8 instead of DIO1, on the same WisBlock GPIO (WB_IO6, MCU pin 10).
+
+Hardware data from the request: two antenna switches, RFI_HF (2.4 GHz) steered by DIO9 and RF_LF1/RF_LF2 (sub-GHz, tied together) steered by DIO7, both powered by WB_IO3 (pin 21) like on the RAK13300. TCXO 3.3 V / 50 ms as on the SX1262 WisBlock cores, DC-DC regulator, sub-GHz and 2.4 GHz. Follow-up from the request: the TCXO power is controlled by the VTCXO/VNTC pin of the LR2021 (so `RAL_XOSC_CFG_TCXO_RADIO_CTRL` in the supplied RAL), a 32 kHz oscillator sits between DIO10 and DIO11, and a 100 kOhm thermistor is on the NTC pin. None of these three is in the code yet: they belong into the RAK13702 board support (`ral_lr20xx_bsp_get_xosc_cfg()`, `ral_bsp_lr20xx_get_lfclk_cfg()`, DIO10/DIO11 left unassigned, NTC set-up). (Correction after the driver check below: the driver has no NTC set-up call, see there.)
+
+### Done in this step (no radio code yet)
+
+- `wisblockLoRaHwConfigRAK3401()` renamed to `wisblockLoRaHwConfigRAK3401_RAK13300()` (SX1262 modules use RAK13300, LR2021 modules use RAK13702). The old name stays as an inline alias returning the RAK13300 config, so existing sketches build unchanged. The body of the SX1262 preset is unchanged. Examples `RAK3401_RAK13300` and `LowPowerLoRaWAN`, the README and two comments use the new name.
+- New `wisblockLoRaHwConfigRAK3401_RAK13702()`: takes the RAK13300 preset (same wiring) and sets `chipType = WISBLOCK_LORA_CHIP_LR2021`, antenna switch power on pin 21, DC-DC, and the new LR2021 fields.
+- `WisBlockLoRaChipType` got `WISBLOCK_LORA_CHIP_LR2021`. `WisBlockLoRaHwConfig` got `lrIrqDio` (8), `lrRfSwitchDioLf` (7) and `lrRfSwitchDioHf` (9), all default -1 and ignored for SX126x. `pinDio1` is kept as the name of the MCU IRQ pin.
+- `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` returns right away with a message on `Serial` when `chipType` is LR2021, because there is no LR2021 backend yet and the SX126x code would be run on a chip it does not fit. `began` stays false.
+
+### Checked
+
+- `WisBlockLoRaHwConfig.cpp` compiled with g++ and Arduino stubs for nRF52, ESP32 and RP2040 (no warnings with -Wall -Wextra). A test program printed every field of the old `wisblockLoRaHwConfigRAK3401()` (from the previous tree), the new `_RAK13300()` and the alias: identical. RAK4631 preset: identical.
+- Brace check (comment/string aware) on all edited C++/ino files, line endings of every file kept (CRLF files stay CRLF).
+- Not checked: `WisBlockLoRaWAN.cpp` was not compiled (needs the real Arduino/FreeRTOS environment); nothing was run on hardware.
+
+### What the supplied LR20xx files are, and what is still missing
+
+- `ral_lr20xx.[ch]`, `ral_lr20xx_bsp.h`, `ralf_lr20xx.[ch]` were supplied. Their driver function table has exactly the same 69 members as the vendored LBM v4.9.0 `ral_drv_t`, so the LBM core RAL/RALF interface needs no change, and `smtc_modem.c` / `smtc_modem_test.c` already have `LR20XX` branches. They are not added to `src/lbm/` yet: they include the low-level LR20xx driver (`lr20xx_system`, `lr20xx_radio_common`, `lr20xx_radio_lora`, `lr20xx_radio_fsk`, `lr20xx_radio_fifo`, `lr20xx_radio_lr_fhss`, `lr20xx_regmem`, `lr20xx_rttof`, `lr20xx_workarounds`, the `*_types.h` headers and `lr20xx_hal.h`), which was not in the zip, so they cannot be compiled.
+- Still to do once the driver is available: vendor driver + RAL/RALF, SPI/GPIO glue for the LR20xx HAL (own command framing, antenna power tracking like the SX126x one), `ral_lr20xx_bsp_*` for the RAK13702 (the header declares `ral_bsp_lr20xx_get_lfclk_cfg`, the RAL calls that spelling), runtime radio selection for `modem_radio` in `smtc_modem.c` (now fixed to SX126X at compile time, so SX1262 and LR2021 can share one build), a build flag so SX1262-only builds do not grow, then a second LoRa P2P backend (`LoRaP2PEngine.cpp` is written directly on `sx126x_*`).
+
+### LR20xx driver check (lr20xx_driver.zip, driver changelog says v1.3.0 UNRELEASED)
+
+- Complete: all headers the RAL includes are present (system, radio_common, lora, fsk, fifo, lr_fhss, regmem, rttof, workarounds, hal, types) plus the other modulations. All 18 driver `.c` files plus `ral_lr20xx.c` and `ralf_lr20xx.c` compile with gcc (-std=gnu11 -Wall -Wextra -DLR20XX) against the vendored LBM v4.9.0 `ral.h`/`ral_defs.h`/`ralf.h`: 0 errors, 0 warnings in the driver, 27 `-Wunused-parameter` warnings in RAL/RALF (stubs of unsupported features: FLRC, `cfg_rx_boosted`, LR-FHSS time on air, `get_lora_cad_det_peak`). Not added to `src/lbm/` yet.
+- Undefined symbols over all objects (= what this library has to provide, nothing else): 6 HAL functions `lr20xx_hal_reset/wakeup/write/read/direct_read/direct_read_fifo` and 14 BSP functions (`ral_lr20xx_bsp_get_tx_cfg/rx_cfg/front_end_calibration_cfg/dio_function/dio_sleep_drive/dio_irq_mask/dio_rf_switch_cfg/dio_hf_clk_scaling_cfg/reg_mode/xosc_cfg/lora_cad_det_peak`, the three `..._instantaneous_*_power_consumption`, and `ral_bsp_lr20xx_get_lfclk_cfg`).
+- HAL differs from the SX126x one: `lr20xx_hal_read` is a two-step transfer (command, NSS released and asserted again, one dummy byte, then data) and MOSI must carry zeros while reading; `direct_read` (status only) and `direct_read_fifo` (one-step read) are new.
+- TCXO start delay unit is 31.25 ns steps (`lr20xx_system_set_tcxo_mode`), not the 15.625 us ticks of the SX126x: 50 ms = 1 600 000. The RAL passes the BSP value straight to the driver.
+- 32 kHz clock: `LR20XX_SYSTEM_LFCLK_XTAL` (crystal on DIO10/DIO11; fails if either DIO has another function) or `LR20XX_SYSTEM_LFCLK_EXT` (external clock into DIO11); the RAL sets the clock before the DIO functions. Which one the RAK13702 uses was assumed from "oscillator between DIO10 and DIO11" (XTAL), to be confirmed.
+- NTC: the driver has no NTC configuration; `LR20XX_SYSTEM_TEMP_SRC_NTC` is only a source for `lr20xx_system_get_temp()`. Nothing to configure for normal operation.
+- RF switch: `lr20xx_system_dio_rf_switch_cfg_t` is a per-DIO bit mask of the modes in which that DIO is high (STANDBY, RX_LF, TX_LF, RX_HF, TX_HF). The RAK13702 truth table for DIO7 and DIO9 is needed to fill it in. DIO numbers in the driver run from DIO5 to DIO11.
+- The RAL includes `lr20xx_workarounds.h` but calls none of it. The driver README says the workarounds are for engineering samples (date code 2513, version 0x0110); which silicon the RAK13702 carries is not known yet.
+
+## RAK3401 + RAK13702: LR2021 radio backend
+
+Request: after the LR20xx driver and RAL/RALF were supplied, add the LR2021 for real, selectable by a flag, SX1262 behavior unchanged. Answers to the open points: RF switch truth table "assume same as for SX1262" (hardware arrives next week), 32 kHz clock is a 32.768 kHz crystal (12.5 pF, +-20 ppm), silicon revision unknown (QFN32).
+
+### How it is selected
+
+- `WISBLOCK_ENABLE_LR2021` in `src/wb_lbm_config.h` (commented out by default; or `-DWISBLOCK_ENABLE_LR2021` in the build flags; `#error` on anything but nRF52840). Off: every LR2021 file compiles to nothing, builds are as before. On: the radio is chosen at run time by `WisBlockLoRaHwConfig::chipType`, so one build runs SX1262 and LR2021 boards. Without the flag, `begin()` with an LR2021 config prints a message and returns.
+- LoRaWAN: `smtc_modem_init()` switches `modem_radio` from the SX126x to `RALF_LR20XX_INSTANTIATE(NULL)` when `wisblock_radio_hal_is_lr2021()` (only change to `smtc_modem.c`, plus the include). LBM's RAL dispatches through a function table, so nothing else in the modem core changes.
+
+### What was added
+
+- Vendored from the supplied sources, under `src/lbm/smtc_modem_core/`: `radio_drivers/lr20xx_driver/src/` (31 of the driver's files: system, radio_common/lora/fsk/fifo/lr_fhss/ook, regmem, rttof, workarounds, hal and the types headers that these include; BLE, BPSK, FLRC, O-QPSK, Wi-SUN, wM-Bus, Z-Wave not vendored, the RAL does not use them), `smtc_ral/src/ral_lr20xx.[ch]`, `ral_lr20xx_bsp.h`, `smtc_ralf/src/ralf_lr20xx.[ch]`. Each `.c` is wrapped in `#if defined(WISBLOCK_ENABLE_LR2021)`. Includes made relative with `tools/make_lbm_includes_relative.py`, which also rewrote the two inactive `#elif defined(LR20XX)` includes in `smtc_modem.c` / `smtc_modem_test.c` (no effect). `extra_script.py` got the driver folder for PlatformIO.
+- `wisblock_radio_hal.cpp`: the six `lr20xx_hal_*` functions (reset, wakeup, write, two-step read, direct read, FIFO read), same BUSY/wake/antenna-power/SPI-power-down handling as the SX126x ones; SetSleepMode is recognized by opcode `0x0127`. `init()` resets with `lr20xx_hal_reset()` for an LR2021. `wisblock_radio_bsp_config.h` got the LR fields and `wisblock_radio_hal_is_lr2021()`; the TCXO start-up time is computed in 31.25 ns steps (50 ms = 1 600 000).
+- `wisblock_ral_lr20xx_bsp.c`: the 14 `ral_lr20xx_bsp_*` functions: DC-DC, TCXO 3.3 V from VTCXO, 32 kHz crystal (DIO10/DIO11 left without function), DIO8 = IRQ (all IRQs), DIO7 and DIO9 = RF switches (high only in TX of their band), pins from the HW config, RX path and PA by frequency (LF below 1.5 GHz, power limited to -9..+22 dBm LF, -19..+12 dBm HF), front end calibration at 868 / 915 MHz and 2.44 GHz, rough power consumption figures for LBM's charge statistics. `wisblock_lr20xx_get_ral()` gives the P2P engine its RAL.
+- `LoRaP2PEngineLR2021.cpp`: LR2021 twins of all radio methods of the P2P engine (LoRa and FSK, TX, RX modes, RX duty cycle, CAD, sleep with cold-start re-configuration, RSSI, status, FSK statistics, event handling) on top of the RAL. `LoRaP2PEngine.cpp` only got a short `#if defined(WISBLOCK_ENABLE_LR2021) if (isLr2021()) ... #endif` branch at the top of each radio method; `LoRaP2PEngine.h` the declarations (no data members).
+- Example `RAK3401_RAK13702`, README section, CHANGELOG entry, library keywords.
+
+### Checked (no hardware, no LoRaWAN network)
+
+- All new C files compile with gcc `-Wall -Wextra` (driver and BSP: 0 warnings; RAL/RALF: the 27 `-Wunused-parameter` of Semtech's stubs); the C++ files compile for gnu++11/14/17 with the flag on and off; `smtc_modem.c` compiles on and off; the include tool finds nothing more to rewrite; no global symbol exists in both the SX126x and the LR20xx driver.
+- Mock-hardware run: the real HAL, driver, RAL, BSP and P2P code linked against a logging SPI/GPIO mock. The command stream was decoded and matches the board data: DC-DC, TCXO 3.3 V / 1 600 000 steps, XTAL 32 kHz, DIO7/DIO9 RF switch with TX_LF / TX_HF masks, DIO8 IRQ, DIO10/11 none, 868.1 MHz, SF7/BW125, sync word 0x12 from 0x1424, +14 dBm = 0x1C half-dB, 2.4 GHz selects the HF path and PA and limits +20 dBm to +12 dBm, RX timeouts in 32 kHz steps (1000 ms = 0x8000), CAD peak 51 (SF7, 4 symbols), sleep opcode seen, antenna power off and SPI stopped on sleep, wake + full re-initialization afterwards, FSK frequency/sync word/CRC/whitening.
+- SX1262 regression: the same scenario (begin, send, RX, CAD, event handling, SF/frequency change, RX duty cycle, RSSI, status, switch to FSK, FSK stats and send, sleep, wake and receive, stop) on the SX1262 preset gives a byte-identical SPI and pin stream with the original tree, the new tree without the flag and the new tree with the flag (145 events).
+- Not checked: the LoRaWAN stack was not run (only `smtc_modem.c` compiled and the RAL init sequence seen through P2P), `WisBlockLoRaWAN.cpp` not compiled for real, nothing on hardware.
+
+### To verify on the RAK13702
+
+1. Antenna switch truth table (DIO7 sub-GHz, DIO9 2.4 GHz): assumed high only while transmitting in the band. Change in `ral_lr20xx_bsp_get_dio_rf_switch_cfg()`.
+2. TX power amplifier: `kLfPa[]` (duty cycle / slices per dBm), the PA mode `LR2021_LF_PA_MODE` (assumed full single-ended because RF_LF1 and RF_LF2 are tied together) and `LR2021_HF_PA_DUTY_CYCLE` in `wisblock_ral_lr20xx_bsp.c` are placeholders (driver defaults). The datasheet says these depend on the board's matching network; measure the output power.
+3. `ral_lr20xx_init()` (Semtech) sets the 32 kHz crystal first and then writes "no function" to DIO10 and DIO11; check that the crystal runs. It also writes a fixed SIMO workaround register value.
+4. The RAL does not call `lr20xx_workarounds_*`; silicon revision is unknown (engineering sample workarounds per the driver README).
+5. The RAL has no RX boost function for the LR20xx, `rxBoostedGainEnabled` has no effect; the RAL's GFSK sync word and whitening work, FLRC and LR-FHSS time on air are unsupported stubs.
+
+## 2.4 GHz LoRaWAN region (WW2G4) for the LR2021
+
+Request: the LR2021 does sub-GHz and 2.4 GHz LoRa; how does the application switch between them, and is the 2.4 GHz LoRaWAN region in the library? It was not (it had been removed when only the SX1262 was supported, see "Patches made to vendored LBM source"), the three files `region_ww_2g4.c`, `region_ww_2g4.h`, `region_ww_2g4_defs.h` were supplied.
+
+### How the band is selected
+
+- P2P: only by the frequency. `ral_lr20xx_bsp_get_rx_cfg()` and `_get_tx_cfg()` choose the HF path (receiver, PA, DIO9 switch) from 1.5 GHz up and the LF path below. The P2P bandwidth enum stops at 500 kHz (not changed, the RAL would take 200/400/800/1000 kHz).
+- LoRaWAN: by the region. The region's channel frequencies decide the path through the same BSP functions. One region is active at a time and it is set before the join (the API doc already says the region cannot change after a join), so moving between sub-GHz and 2.4 GHz means selecting the other region and joining again.
+
+### What was done
+
+- Vendored the three region files into `src/lbm/smtc_modem_core/lr1mac/src/smtc_real/src/` (`smtc_real.c`, `smtc_real_defs.h`, `smtc_real_defs_str.h` and `smtc_modem_api.h` already had the `REGION_WW_2G4` hooks). Includes made relative with the tool. `region_ww_2g4.c` is wrapped in `#if defined(WISBLOCK_ENABLE_LR2021)` (this file was the one that broke the build without `REGION_WW_2G4`, see the old patch note); `wb_lbm_config.h` defines `REGION_WW_2G4` when `WISBLOCK_ENABLE_LR2021` is defined, so the region is in or out together with the LR2021. Builds without the flag are unchanged: no code from the region file, no reference to it from `smtc_real.c`.
+- `wisblockRegionUsable(region)` (`WisBlockLoRaWANTypes.h/.cpp`): every region is usable except WW2G4, which is usable only when the flag is set and the radio is an LR2021 (`wisblock_radio_hal_is_lr2021()`, known after `begin()`).
+- `LoRaWANEngine.cpp`: `WISBLOCK_REGION_WW2G4` maps to `SMTC_MODEM_REGION_WW_2G4` with the flag. Before, it silently mapped to EU868. Now `applySettings()` does not set the region and `join()` refuses (join state FAILED, message on `Serial`) when the region is not usable, instead of ever joining on another band (this also covers a WW2G4 config restored from flash on an SX1262 board). `drToSfBw()` got WW2G4 DR0-DR5 (SF12-SF7 at 812.5 kHz) for the reported airtime; DR6/DR7 (SF6/SF5) return 0 like the other unverified entries because the formula is only checked for SF7 and up.
+- `WisBlockLoRaWAN::setRegion(WisBlockRegion)`: the way to select regions with no RUI3 band number (WW2G4, CN470_RP_1_0); `setRegion(WisBlockRUI3Band)` and `AT+BAND` could not at first (superseded: see the next paragraph). Returns false if `wisblockRegionUsable()` is false.
+- Example `RAK3401_RAK13702`: `USE_2G4_REGION` switch. README, API doc (new `setRegion()` section, two corrected statements), CHANGELOG.
+
+### Checked (no hardware, no network)
+
+- `region_ww_2g4.c` and `smtc_real.c` compile with `-Wall -Wextra`, flag on and off, 0 errors; the region provides exactly the 7 functions `smtc_real.c` calls; flag off gives an empty object and no reference.
+- The real region code ran on the host (smtc_real linked with 4 stubs): DR0-DR7 = SF12-SF5 with the RAL's `RAL_LORA_BW_800_KHZ` (the RAL maps it to the driver's 812 kHz), max payload 59/123/228..., sync word 0x21, 8 dBm default max EIRP, join on 2403 / 2425 / 2479 MHz, RX1 DR offsets, beacon 2424 MHz DR3. RX2 at join reads 0 as for EU868 (same getter behavior).
+- `wisblockRegionUsable()` on both boards, flag on and off: WW2G4 usable only with the flag and the RAK13702 config, the other 13 regions always.
+- `LoRaWANEngine.cpp` and `WisBlockLoRaWANTypes.cpp` compile with the flag on and off. `WisBlockLoRaWAN.cpp` type-checks with the same single error (`waitForEvent`, missing from the stubs) as the original tree.
+- Not checked: no LoRaWAN join was run, not on hardware, not against a 2.4 GHz gateway.
+
+### To verify on the RAK13702 for 2.4 GHz
+
+1. The DIO9 (RFI_HF) switch truth table and the HF PA settings (`LR2021_HF_PA_DUTY_CYCLE`, power limit +12 dBm) are the same assumptions as before.
+2. LoRaWAN 2.4 GHz uses the LoRa sync word 0x21 (public). The RAL hands it unchanged to `lr20xx_radio_lora_set_syncword()`, whose documentation describes the byte as two 4-bit blocks and uses 0x34/0x12 for sub-GHz LoRaWAN; whether 0x21 interoperates with a 2.4 GHz gateway has to be confirmed on the air.
+3. A 2.4 GHz gateway (e.g. SX1280-based) is needed to test the join.
+
+### WW2G4 as RUI3 band number 13
+
+Request: add WW2G4 to the RUI3 band numbering as a new number at the end of the list. `WISBLOCK_RUI3_BAND_WW2G4 = 13` (after `LA915 = 12`; RUI3 has no 2.4 GHz band, so this is a library addition and is documented as such). `wisblockRUI3BandToRegion()` / `wisblockRegionToRUI3Band()` convert it both ways, so `getRegion()` now returns 13 for 2.4 GHz and `WISBLOCK_RUI3_BAND_UNKNOWN` is left for `CN470_RP_1_0` only. `setRegion(WisBlockRUI3Band)` returns false for 13 unless `wisblockRegionUsable()` (LR2021 and the flag), so a board that cannot do 2.4 GHz can never select it; `AT+BAND=13` goes through the same function and gets its own error text (`band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021`), `AT+BAND=?` answers 13 when the region is active. `setRegion(WisBlockRegion)` stays, it is still the only way to select `CN470_RP_1_0`. Docs (API, AT commands, README), the example and the CHANGELOG were updated.
+
+## Class B state callback and AT+CLASS=? state
+
+Request: the Class B set-up is a sequence (set Class B and join = S0, send a packet = S1 while the stack waits for the beacon, beacon locked = S2, beacon lock failed = S3 and another packet), RUI3 shows it with `AT+CLASS=?` as B,S0 ... B,S3, the library gave no feedback. Wanted: a callback that is called with the new state when it changes, and `AT+CLASS=?` showing the state for Class B.
+
+### How the states are derived
+
+The library did not handle any Class B event of the modem before. `LoRaWANEngine` now follows (`updateClassBState()`, rules in `wisblockComputeClassBState()`):
+- S0: Class B is requested and the device is not joined, or joined but no uplink was sent since the join / since Class B was requested. Starts again at S0 after a join (new session), a lost join or a class change.
+- S1: joined and an uplink was sent (`SMTC_MODEM_EVENT_TXDONE`; the stack's Class B management adds the DeviceTimeReq / PingSlotInfoReq to the first uplink, see `lorawan_class_b_management.c`), no beacon lock yet.
+- S2: `SMTC_MODEM_EVENT_CLASS_B_STATUS` = READY (beacon locked, the Class B bit of the stack).
+- S3: the same event = NOT_READY (a lock was lost), or, while still searching, the beacon statistics of the stack (`lorawan_api_beacon_get_statistics()`) show a missed beacon. The stack raises CLASS_B_STATUS only when the Class B bit changes, so a first search that never locks would otherwise raise nothing. S3 returns to S2 on READY.
+
+### What was added
+
+- `WisBlockClassBState` enum, `LoRaWANEngine::onClassBState()` / `classBState()`, `WisBlockLoRaWAN::onClassBStateChanged(cb)` and `getClassBState(state)`. The callback is also called with S0 when Class B is requested (so the application sees the start), never while another class is active, and runs in the context of `handleEvents()` like the other LoRaWAN callbacks.
+- `AT+CLASS=?`: `AT+CLASS=B,S0` ... `AT+CLASS=B,S3` while Class B is the requested class, `A` / `C` unchanged. Separator and format follow the request ("B,Sx"); the old doc note had written `B:S0`, changed to match.
+- Example `LoRaWANClassB`, API doc (enum, callback, getter), AT command doc, CHANGELOG.
+
+### Checked (no hardware, no network)
+
+- The real `LoRaWANEngine` code (`setDeviceClass()`, `handleEvents()`) ran against a scripted fake modem (joined flag, event queue, beacon miss counter): 21 steps, 0 failures. Class B requested before the join, join, first uplink, search failing without any event, beacon found, lock lost, found again, join lost, re-join, switch to Class A and back, with the exact callback sequence S0, S1, S3, S2, S3, S2, S0, S1, S0, S1 and no repeated or spurious callbacks.
+- The real `WisBlockLoRaAT.cpp` (it compiles completely with FreeRTOS/TinyUSB stubs) ran the `AT+CLASS=?` command against that engine: `A`, `C`, `B,S0`, `B,S0`, `B,S1`, `B,S3`, `B,S2`, each with the `OK`.
+- Not checked: no real beacon, gateway or radio. The S3 rule for a failing first search relies on the stack's `last_beacon_lost_consecutively`, which was read in the code but not run against a real beacon search. `AT+CLASS=B` (the write) was not run in the harness, it was not changed. The RUI3 `+EVT` style event line for a state change was not added (the exact RUI3 text is not known here).

@@ -90,4 +90,20 @@
 #define MODEM_HAL_DBG_TRACE 0
 #endif
 
+// Semtech LR2021 (LR20xx) radio, RAK13702 module on a RAK3401: compiled in only when this is defined.
+// It is OFF by default, so builds for the SX1262 modules (and all other boards) are unchanged and do
+// not grow. Enable it by removing the // in front of the #define below, or by defining
+// WISBLOCK_ENABLE_LR2021 in the build flags. The radio that is used is still selected at runtime
+// by WisBlockLoRaHwConfig::chipType, so one build can run an SX1262 or an LR2021 board.
+// #define WISBLOCK_ENABLE_LR2021
+#if defined(WISBLOCK_ENABLE_LR2021) && !defined(ARDUINO_ARCH_NRF52) && !defined(NRF52840_XXAA)
+#error "WisBlockLoRaWAN: WISBLOCK_ENABLE_LR2021 is only supported for the nRF52840 (RAK3401) for now."
+#endif
+
+// The 2.4 GHz LoRaWAN region (WW2G4, WISBLOCK_REGION_WW2G4) is available together with the LR2021 and is
+// usable only on a board that has one. It is the only region that is not defined above.
+#if defined(WISBLOCK_ENABLE_LR2021) && !defined(REGION_WW_2G4)
+#define REGION_WW_2G4
+#endif
+
 #endif /* WB_LBM_CONFIG_H */

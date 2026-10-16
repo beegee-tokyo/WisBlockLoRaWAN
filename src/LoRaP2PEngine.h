@@ -301,6 +301,27 @@ private:
 	 * every send()/startReceive()/startCad().
 	 */
 	void reconfigureAfterColdSleep();
+
+	// LR2021 (LR20xx) twins of the radio methods above, defined in LoRaP2PEngineLR2021.cpp and only
+	// when WISBLOCK_ENABLE_LR2021 is set (wb_lbm_config.h). The SX126x methods call them first when the
+	// board has an LR2021. Declared always, they add no data members.
+	bool isLr2021() const;
+	void lrBegin();
+	void lrApplySettings(bool modulationChanged);
+	void lrApplyRadioParams();
+	void lrApplyFskParams();
+	void lrApplyPktParams(uint8_t payloadLen);
+	bool lrSend(const uint8_t *data, uint8_t length);
+	void lrStartRadioReceive(uint32_t mode);
+	void lrStartReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs);
+	void lrStopReceive();
+	void lrSleep();
+	void lrReconfigureAfterColdSleep();
+	bool lrGetInstantRssi(int16_t &rssiDbm);
+	bool lrGetRadioStatus(uint8_t &chipMode, uint8_t &cmdStatus, uint16_t &deviceErrors);
+	bool lrGetFskStats(uint16_t &received, uint16_t &crcErrors, uint16_t &lengthErrors);
+	void lrStartCad();
+	uint32_t lrHandleEvents();
 };
 
 #endif // LORA_P2P_ENGINE_H

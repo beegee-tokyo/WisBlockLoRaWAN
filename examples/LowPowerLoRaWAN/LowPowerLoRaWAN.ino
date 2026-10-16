@@ -427,7 +427,7 @@ void setup()
 
 #ifdef RAK3400
 	Serial.println("[Setup] RAK3401 lora.begin");
-	lora.begin(wisblockLoRaHwConfigRAK3401());
+	lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300());
 #else
 	Serial.println("[Setup] lora.begin");
 	lora.begin();

@@ -850,9 +850,17 @@ void WisBlockLoRaAT::atBand(AtOp op, const char *value)
 	}
 	else if (op == AtOp::Write)
 	{
-		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(atoi(value))))
+		const int bandIndex = atoi(value);
+		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(bandIndex)))
 		{
-			replyError("unsupported band index - LA915 not built into this LBM vendoring");
+			if (bandIndex == (int)WISBLOCK_RUI3_BAND_WW2G4)
+			{
+				replyError("band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021");
+			}
+			else
+			{
+				replyError("unsupported band index - LA915 not built into this LBM vendoring");
+			}
 			return;
 		}
 		replyOk();
@@ -1048,6 +1056,16 @@ void WisBlockLoRaAT::atClass(AtOp op, const char *value)
 	{
 		WisBlockDeviceClass dc = lora->getConfig().lorawan.deviceClass;
 		port->printf("AT+CLASS=");
+		// Class B: the state of the set-up follows the class letter, like RUI3: B,S0 ... B,S3 (see
+		// WisBlockClassBState). Class A and C are a single letter.
+		WisBlockClassBState classBState = WISBLOCK_CLASS_B_S0;
+		if (dc == WISBLOCK_CLASS_B && lora->getClassBState(classBState))
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "B,S%u", (unsigned)classBState);
+			reply(buf);
+			return;
+		}
 		// CLEANUP: this used to call reply() (which already prints "OK")
 		// and then replyOk() again right after, sending two "OK\r\n" lines
 		// back for a single query. reply() alone is correct.

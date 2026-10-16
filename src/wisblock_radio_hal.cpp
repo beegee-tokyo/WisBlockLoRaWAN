@@ -22,6 +22,10 @@
 
 #include "wisblock_radio_bsp_config.h"
 
+#if defined(WISBLOCK_ENABLE_LR2021)
+#include "lbm/smtc_modem_core/radio_drivers/lr20xx_driver/src/lr20xx_hal.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/lr20xx_driver/src/lr20xx_hal.h
+#endif
+
 namespace
 {
 // SX1262 datasheet timing:
@@ -273,6 +277,12 @@ void setActiveConfig(const WisBlockLoRaHwConfig &hwConfig)
 	// Native driver units are 15.625us steps (1/64 ms) - see
 	// ral_sx126x_bsp_get_xosc_cfg()'s doc comment in wisblock_ral_sx126x_bsp.c.
 	activeBspConfig.tcxoStartupTimeInTick = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 64ULL / 1000ULL);
+	// LR2021 (LR20xx): the TCXO start-up time is in steps of 31.25 ns, 1 us = 32 steps
+	activeBspConfig.isLr2021 = hwConfig.chipType == WISBLOCK_LORA_CHIP_LR2021;
+	activeBspConfig.tcxoStartupTimeIn32MHzStep = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 32ULL);
+	activeBspConfig.lrIrqDio = hwConfig.lrIrqDio;
+	activeBspConfig.lrRfSwitchDioLf = hwConfig.lrRfSwitchDioLf;
+	activeBspConfig.lrRfSwitchDioHf = hwConfig.lrRfSwitchDioHf;
 
 #if defined(ARDUINO_ARCH_RP2040)
 	if (hwConfig.spiInstance != nullptr)
@@ -306,7 +316,7 @@ void init(const WisBlockLoRaHwConfig &hwConfig)
 		// begin() if they don't already match its default pinout. A
 		// caller-supplied SPIClass instance is assumed to already be wired
 		// to the right pins via its own constructor (see
-		// wisblockLoRaHwConfigRAK3401() for a real example) and is left
+		// wisblockLoRaHwConfigRAK3401_RAK13300() for a real example) and is left
 		// alone here.
 		activeSpi->setPins(activeConfig.pinMiso, activeConfig.pinSck, activeConfig.pinMosi);
 	}
@@ -326,6 +336,13 @@ void init(const WisBlockLoRaHwConfig &hwConfig)
 	activeSpi->begin(); // NSS is driven manually, see the ESP32 branch above
 #endif
 
+#if defined(WISBLOCK_ENABLE_LR2021)
+	if (activeConfig.chipType == WISBLOCK_LORA_CHIP_LR2021)
+	{
+		lr20xx_hal_reset(nullptr); // same as below: the context argument is ignored
+		return;
+	}
+#endif
 	sx126x_hal_reset(nullptr); // see NOTE below: this port ignores the context arg entirely
 }
 
@@ -400,6 +417,11 @@ uint32_t antennaPowerSettleMs()
 const WisBlockLoRaRadioBspConfig *wisblock_radio_hal_get_bsp_config(void)
 {
 	return &activeBspConfig;
+}
+
+bool wisblock_radio_hal_is_lr2021(void)
+{
+	return activeBspConfig.isLr2021;
 }
 
 extern "C"
@@ -586,5 +608,188 @@ extern "C"
 		return SX126X_HAL_STATUS_OK;
 	}
 }
+
+#if defined(WISBLOCK_ENABLE_LR2021)
+// --- LR20xx (LR2021) transport -------------------------------------------------------------------------
+// Same idea as the sx126x_hal_* functions above: BUSY handling, wake-up from sleep, antenna switch power
+// and SPI power-down all go through the same helpers (checkDeviceReady(), radioMode, driveAntennaPower()).
+// What differs is the SPI protocol, see lr20xx_hal.h:
+//  - commands have a 16 bit opcode (command[0] << 8 | command[1])
+//  - lr20xx_hal_read() is a two-step read: the command, NSS released and asserted again, then one
+//    discarded status byte followed by the response. MOSI must carry zeros while reading.
+//  - lr20xx_hal_direct_read() reads without a command (only used to get the chip status)
+//  - lr20xx_hal_direct_read_fifo() is a one-step read: the command, then the response without a gap
+// SetSleepMode has the opcode 0x0127 (LR20XX_SYSTEM_SET_SLEEP_MODE_OC in lr20xx_system.c).
+namespace
+{
+constexpr uint8_t kLr20xxSetSleepOpcodeMsb = 0x01;
+constexpr uint8_t kLr20xxSetSleepOpcodeLsb = 0x27;
+
+/**
+ * @brief Write command bytes with NSS low, NSS stays low
+ */
+void lrWriteBytes(const uint8_t *bytes, uint16_t length)
+{
+	for (uint16_t i = 0; i < length; i++)
+	{
+		activeSpi->transfer(bytes[i]);
+	}
+}
+
+/**
+ * @brief Read bytes, only zeros (NOP) go out on MOSI
+ */
+void lrReadBytes(uint8_t *bytes, uint16_t length)
+{
+	for (uint16_t i = 0; i < length; i++)
+	{
+		bytes[i] = activeSpi->transfer(0x00);
+	}
+}
+} // namespace
+
+extern "C"
+{
+	lr20xx_hal_status_t lr20xx_hal_reset(const void *context)
+	{
+		(void)context; // see NOTE in sx126x_hal_reset(): the context is never used, one radio only
+
+		digitalWrite(activeConfig.pinReset, LOW);
+		delayMicroseconds(kResetPulseUs);
+		digitalWrite(activeConfig.pinReset, HIGH);
+		radioMode = RadioMode::Awake;
+
+		// The chip boots, BUSY stays high until it accepts commands
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_wakeup(const void *context)
+	{
+		(void)context;
+		checkDeviceReady();
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_write(const void *context, const uint8_t *command, const uint16_t command_length,
+										  const uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		lrWriteBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		// SetSleepMode: BUSY stays high while the chip sleeps, so do not wait for it. Remember that the
+		// chip sleeps, the next transaction runs the wake-up sequence in checkDeviceReady().
+		if (command_length >= 2 && command[0] == kLr20xxSetSleepOpcodeMsb && command[1] == kLr20xxSetSleepOpcodeLsb)
+		{
+			radioMode = RadioMode::Asleep;
+#ifdef WISBLOCK_RADIO_HAL_DEBUG
+			Serial.printf("[sleep] t=%lu ms\n", millis());
+#endif
+#ifndef WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON
+			driveAntennaPower(false);
+#endif
+#ifndef WISBLOCK_RADIO_HAL_KEEP_SPI_ALWAYS_ON
+			activeSpi->end();
+#endif
+			return LR20XX_HAL_STATUS_OK;
+		}
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_read(const void *context, const uint8_t *command, const uint16_t command_length,
+										 uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		// Step 1: the command
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		// The chip prepares the response, BUSY is high until it is ready
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+
+		// Step 2: one discarded status byte, then the response
+		uint8_t status = 0;
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrReadBytes(&status, 1);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_direct_read(const void *context, uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_direct_read_fifo(const void *context, const uint8_t *command,
+													 const uint16_t command_length, uint8_t *data,
+													 const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		// One step: the command, then the response with NSS kept low
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+}
+#endif // WISBLOCK_ENABLE_LR2021
 
 #endif // WISBLOCK_HAS_HW_CONFIG_INIT

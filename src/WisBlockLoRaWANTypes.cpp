@@ -11,7 +11,12 @@
  * WisBlockLoRaWAN::setRegion()/getRegion() (the C++ API, not just the AT layer) can share the
  * exact same conversion instead of the two ever risking drifting apart.
  */
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "WisBlockLoRaWANTypes.h"
+#if defined(WISBLOCK_ENABLE_LR2021)
+#include "wisblock_radio_bsp_config.h" // wisblock_radio_hal_is_lr2021()
+#endif
 
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
 {
@@ -53,6 +58,9 @@ bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
 	case WISBLOCK_RUI3_BAND_AS923_4:
 		outRegion = WISBLOCK_REGION_AS923_4;
 		return true;
+	case WISBLOCK_RUI3_BAND_WW2G4:
+		outRegion = WISBLOCK_REGION_WW2G4;
+		return true;
 	default: // WISBLOCK_RUI3_BAND_LA915 (12), WISBLOCK_RUI3_BAND_UNKNOWN, and anything else out
 			 // of range
 		return false;
@@ -87,8 +95,37 @@ WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region)
 		return WISBLOCK_RUI3_BAND_RU864;
 	case WISBLOCK_REGION_CN470:
 		return WISBLOCK_RUI3_BAND_CN470;
-	default: // WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4 - library-specific regions
-			 // beyond RUI3's set
+	case WISBLOCK_REGION_WW2G4:
+		return WISBLOCK_RUI3_BAND_WW2G4;
+	default: // WISBLOCK_REGION_CN470_RP_1_0 - a library-specific region beyond RUI3's set
 		return WISBLOCK_RUI3_BAND_UNKNOWN;
 	}
+}
+
+bool wisblockRegionUsable(WisBlockRegion region)
+{
+	if (region != WISBLOCK_REGION_WW2G4)
+	{
+		return true;
+	}
+#if defined(WISBLOCK_ENABLE_LR2021)
+	// 2.4 GHz: only with the LR2021, an SX1262 board cannot do it
+	return wisblock_radio_hal_is_lr2021();
+#else
+	return false;
+#endif
+}
+
+WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, bool uplinkSent, bool beaconLocked,
+											   bool beaconLost)
+{
+	if (!joined || !classApplied || !uplinkSent)
+	{
+		return WISBLOCK_CLASS_B_S0; // join not done, or nothing sent yet that carries the time / ping slot requests
+	}
+	if (beaconLocked)
+	{
+		return WISBLOCK_CLASS_B_S2;
+	}
+	return beaconLost ? WISBLOCK_CLASS_B_S3 : WISBLOCK_CLASS_B_S1;
 }

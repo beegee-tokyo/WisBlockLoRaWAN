@@ -123,15 +123,19 @@ smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 		return SMTC_MODEM_REGION_CN_470;
 	case WISBLOCK_REGION_CN470_RP_1_0:
 		return SMTC_MODEM_REGION_CN_470_RP_1_0;
+#if defined(WISBLOCK_ENABLE_LR2021)
 	case WISBLOCK_REGION_WW2G4:
+		// 2.4 GHz, only with the LR2021 (see wisblockRegionUsable()), otherwise
+		// applySettings() and join() refuse it before this table is ever used for it
+		return SMTC_MODEM_REGION_WW_2G4;
+#else
+	case WISBLOCK_REGION_WW2G4:
+#endif
 	default:
-		// WW2G4 (2.4GHz, LR11xx/SX128x only) isn't vendored in this build
-		// (see README "Patches made to vendored LBM source" -
-		// region_ww_2g4.c was removed as not applicable to SX1262) and
-		// isn't a valid smtc_modem_region_t target here. Falling through
-		// to EU868 as a safe default rather than casting garbage - if you
-		// select this value expect the join to fail, not a garbage
-		// frequency like the bug this table replaces.
+		// WW2G4 (2.4GHz) is only compiled in with WISBLOCK_ENABLE_LR2021 (wb_lbm_config.h) and
+		// needs an LR2021 radio. Without it, and for any value not in this table, fall back to
+		// EU868 rather than casting garbage. applySettings() and join() check
+		// wisblockRegionUsable() first and refuse WW2G4 instead of ever getting here with it.
 		return SMTC_MODEM_REGION_EU_868;
 	}
 }
@@ -249,6 +253,18 @@ bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
 		default:
 			return false;
 		}
+	case WISBLOCK_REGION_WW2G4:
+		// 2.4 GHz (RP002-1.0.4 WW2G4, region_ww_2g4_defs.h): DR0-DR7 are SF12-SF5, all at the
+		// "800 kHz" setting of the radio, which is 812.5 kHz. Only DR0-DR5 (SF12-SF7) here: the
+		// airtime formula below is only checked for SF7 and above (SF5/SF6 have a different
+		// preamble), so DR6/DR7 are left unimplemented like the other unverified entries.
+		if (dr > 5)
+		{
+			return false;
+		}
+		sf = (uint8_t)(12 - dr);
+		bwHz = 812500;
+		return true;
 	case WISBLOCK_REGION_US915:
 	case WISBLOCK_REGION_AU915:
 		// 125kHz uplink sub-band only (DR0-DR4) - the far more commonly
@@ -374,7 +390,16 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// reboot loads a saved config that happens to already be correct.
 	// Pushing them here too, every time settings are (re)applied, closes
 	// that gap regardless of call order.
-	smtc_modem_set_region(kStackId, toSmtcModemRegion(settings.region));
+	if (wisblockRegionUsable(settings.region))
+	{
+		smtc_modem_set_region(kStackId, toSmtcModemRegion(settings.region));
+	}
+	else
+	{
+		// WW2G4 without an LR2021: do not select another region instead, that would transmit on a
+		// band the application never asked for. join() refuses as well.
+		Serial.println("[LoRaWAN] region WW2G4 (2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021, region not set");
+	}
 	// FIX: must be pushed before join(), not after like setDeviceClass()/setADR() -
 	// this is exactly the point (see setChannelMask()'s doc comment): picking the
 	// sub-band the join request itself will use, not reconfiguring after the fact.
@@ -402,6 +427,12 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 
 void LoRaWANEngine::join()
 {
+	if (!wisblockRegionUsable(settings.region))
+	{
+		Serial.println("[LoRaWAN] join refused: region WW2G4 (2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021");
+		currentJoinState = WISBLOCK_JOIN_FAILED;
+		return;
+	}
 	currentJoinState = WISBLOCK_JOIN_IN_PROGRESS;
 	// FIX: see setMaxJoinAttempts()'s doc comment - a fresh join cycle (this call), whether
 	// application- or auto-triggered, always starts the attempt count over; only the internal
@@ -615,9 +646,28 @@ bool LoRaWANEngine::dispatchUplink(uint8_t port, const uint8_t *data, uint8_t le
 // still didn't land.
 bool LoRaWANEngine::setDeviceClass(WisBlockDeviceClass deviceClass)
 {
+	const bool wasClassB = classBTracking;
 	settings.deviceClass = deviceClass;
 	smtc_modem_return_code_t rc = smtc_modem_set_class(kStackId, (smtc_modem_class_t)deviceClass);
 	classProfileApplied = (rc == SMTC_MODEM_RC_OK);
+	// Class B state (S0 ... S3): a new Class B request starts again at S0 and reports it, even when the
+	// state value did not change, so the application sees the start. Another class ends the tracking.
+	classBTracking = (deviceClass == WISBLOCK_CLASS_B);
+	if (classBTracking && !wasClassB)
+	{
+		classBUplinkSent = false;
+		classBBeaconLocked = false;
+		classBBeaconLost = false;
+		currentClassBState = WISBLOCK_CLASS_B_S0;
+		if (classBStateCb)
+		{
+			classBStateCb(currentClassBState);
+		}
+	}
+	else if (classBTracking)
+	{
+		updateClassBState();
+	}
 	// Class B additionally requires a ping slot periodicity request; see
 	// smtc_modem_class_b_set_ping_slot_periodicity() in smtc_modem_api.h
 	// and the SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO mac request - not
@@ -959,6 +1009,10 @@ uint32_t LoRaWANEngine::handleEvents()
 		{
 		case SMTC_MODEM_EVENT_JOINED:
 			currentJoinState = WISBLOCK_JOIN_SUCCEEDED;
+			// A new session: the Class B set-up starts again (S0 until the first uplink is sent)
+			classBUplinkSent = false;
+			classBBeaconLocked = false;
+			classBBeaconLost = false;
 			// FIX: see setDeviceClass()'s doc comment - this is the actual
 			// moment the device becomes joined for the OTAA path, and thus
 			// the first point at which smtc_modem_set_class() can possibly
@@ -1016,6 +1070,7 @@ uint32_t LoRaWANEngine::handleEvents()
 			// LBM no longer holds a pending uplink for us either way -
 			// see send()'s doc comment / uplinkPending's declaration.
 			uplinkPending = false;
+			classBUplinkSent = true; // Class B: the uplink with the time / ping slot requests is on its way (S1)
 			WisBlockTxResult r;
 			r.success = (event.event_data.txdone.status != SMTC_MODEM_EVENT_TXDONE_NOT_SENT);
 			// FIX: see computeLoRaWANAirtimeMs()'s doc comment - this used
@@ -1198,6 +1253,13 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 		}
 
+		case SMTC_MODEM_EVENT_CLASS_B_STATUS:
+			// READY = beacon locked, the ping slots are open. NOT_READY comes when a lock is lost.
+			// The state itself is derived in updateClassBState() after all events are handled.
+			classBBeaconLocked = (event.event_data.class_b_status.status == SMTC_MODEM_EVENT_CLASS_B_READY);
+			classBBeaconLost = !classBBeaconLocked;
+			break;
+
 		case SMTC_MODEM_EVENT_LORAWAN_MAC_TIME:
 		{
 			WisBlockTimeAnswer r;
@@ -1223,6 +1285,8 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 		}
 	} while (pending > 0);
+
+	updateClassBState();
 
 	// FIX (the real root cause behind the whole FPending-drain saga -
 	// confirmed against multiple real device logs across both AS923 and
@@ -1287,4 +1351,46 @@ uint32_t LoRaWANEngine::handleEvents()
 	}
 
 	return sleep_time_ms;
+}
+
+void LoRaWANEngine::setClassBState(WisBlockClassBState state)
+{
+	if (state == currentClassBState)
+	{
+		return;
+	}
+	currentClassBState = state;
+	if (classBStateCb)
+	{
+		classBStateCb(state);
+	}
+}
+
+void LoRaWANEngine::updateClassBState()
+{
+	if (!classBTracking)
+	{
+		return;
+	}
+	// A beacon search that never locked raises no event in the stack (it only reports a change of the
+	// Class B bit), so the missed beacons are read from the beacon statistics while searching.
+	bool lost = classBBeaconLost;
+	const bool joined = isJoined();
+	if (joined && classBUplinkSent && !classBBeaconLocked && !lost)
+	{
+		smtc_beacon_statistics_t stats;
+		lorawan_api_beacon_get_statistics(&stats, kStackId);
+		lost = (stats.last_beacon_lost_consecutively > 0);
+	}
+	setClassBState(wisblockComputeClassBState(joined, classProfileApplied, classBUplinkSent, classBBeaconLocked, lost));
+}
+
+bool LoRaWANEngine::classBState(WisBlockClassBState &state) const
+{
+	if (!classBTracking)
+	{
+		return false;
+	}
+	state = currentClassBState;
+	return true;
 }
