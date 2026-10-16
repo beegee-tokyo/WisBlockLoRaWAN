@@ -3,12 +3,39 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
-No official release yet, include in PlatformIO using platformio.ini by adding these lines:
+Oct 16, 2026 V1.0.1
+- Add Class B status callback and status check with AT+CLASS=?. Class B still not tested, waiting for environment.
+
+Oct 13, 2026 V1.0.0
+- First release, still testing but confirmed so far:
+   - regions US915 AU915, AS923-3, EU868
+   - Class A and Class C, Class B not yet tested (I don't have the environment yet)
+   - uplinks
+   - multicast downlinks
+   - AT command
+   - multi downlink receive
+   - Supports RAK4630/RAK4631, RAK3112/RAK3312, RAK11300/RAK11310 (but limits regarding used platform) and RAK3400/RAk3401 with RAK13300/RAk13302 LoRa transceiver
+   - linkcheck request
+   - time request
+   - device status request
+
+To use library in PlatformIO, use platformio.ini lib_deps      
+For latest staging (might be buggy)    
 ```
 lib_deps =
    https://github.com/beegee-tokyo/WisBlockLoRaWAN
 ```
-For Arduino IDE, download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.
+For latest released
+```
+lib_deps =
+   beegee-tokyo/WisBlockLoRaWAN
+```
+
+For Arduino IDE
+For latest staging (might be buggy)  
+- download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.
+For latest released
+Install or update library with ArduinoIDE library manager
 
 ## Documentation
 

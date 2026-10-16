@@ -175,6 +175,40 @@ enum WisBlockDeviceClass : uint8_t
 	WISBLOCK_CLASS_C = 2,
 };
 
+/**
+ * @brief State of the Class B set-up, the S0 ... S3 of RUI3's AT+CLASS=? (B,S0 ... B,S3)
+ *
+ * Only meaningful while Class B is the requested class. A normal start is S0, S1, S2.
+ */
+enum WisBlockClassBState : uint8_t
+{
+	/** Class B is requested, the device is not joined yet (or the join was lost), or it is joined but
+	 * has not sent an uplink since the class was set. */
+	WISBLOCK_CLASS_B_S0 = 0,
+	/** Joined and the first uplink is sent (it carries the time and ping slot requests): the stack
+	 * waits for a beacon from the gateway. */
+	WISBLOCK_CLASS_B_S1 = 1,
+	/** Beacon locked: the ping slots are open, the device receives Class B downlinks. */
+	WISBLOCK_CLASS_B_S2 = 2,
+	/** The beacon lock failed (the beacon was missed) or was lost again. The stack keeps searching, the
+	 * state returns to S2 when a beacon is received. */
+	WISBLOCK_CLASS_B_S3 = 3,
+};
+
+/**
+ * @brief Compute the Class B state from what the stack reports (the rules behind WisBlockClassBState)
+ *
+ * Used by LoRaWANEngine, a separate function so the rules can be tested without a radio.
+ * @param joined The device is joined
+ * @param classApplied The class B request was accepted by the stack (needs a joined device)
+ * @param uplinkSent An uplink was sent since the join / since Class B was requested
+ * @param beaconLocked The stack reports Class B ready (beacon locked)
+ * @param beaconLost A lock was lost, or beacons were missed while searching
+ * @return The state S0 ... S3
+ */
+WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, bool uplinkSent, bool beaconLocked,
+											   bool beaconLost);
+
 enum WisBlockJoinMode : uint8_t
 {
 	WISBLOCK_JOIN_OTAA = 0,

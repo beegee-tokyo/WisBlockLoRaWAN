@@ -23,6 +23,7 @@ public:
 	using RxFinishedCb = void (*)(const WisBlockRxResult &);
 	using TimeRequestCb = void (*)(bool success, const WisBlockTimeAnswer &);
 	using LinkCheckCb = void (*)(bool success, const WisBlockLinkCheckResult &);
+	using ClassBStateCb = void (*)(WisBlockClassBState state);
 
 	/**
 	 * @brief Start the LoRaWAN engine
@@ -605,6 +606,25 @@ public:
 	 * @param cb Function called with the answer to requestLinkCheck()
 	 */
 	void onLinkCheckAnswer(LinkCheckCb cb) { linkCheckCb = cb; }
+	/**
+	 * @brief Register the Class B state callback
+	 *
+	 * Called when the Class B set-up state changes (S0 ... S3, see WisBlockClassBState), with the new
+	 * state. It is also called with S0 when Class B is requested with setDeviceClass(). Not called
+	 * while another class is active. The callback runs in the context of handleEvents() (the library
+	 * background task, or loop() if the background task is not used), like the other LoRaWAN
+	 * callbacks.
+	 *
+	 * @param cb Function called with the new state, nullptr removes it
+	 */
+	void onClassBState(ClassBStateCb cb) { classBStateCb = cb; }
+	/**
+	 * @brief Get the current Class B state
+	 *
+	 * @param state Receives the state S0 ... S3
+	 * @return false if Class B is not the requested class (state untouched), true otherwise
+	 */
+	bool classBState(WisBlockClassBState &state) const;
 
 private:
 	WisBlockLoRaWANSettings settings;
@@ -720,6 +740,16 @@ private:
 	RxFinishedCb rxFinishedCb = nullptr;
 	TimeRequestCb timeRequestCb = nullptr;
 	LinkCheckCb linkCheckCb = nullptr;
+
+	// Class B state tracking, see WisBlockClassBState and updateClassBState()
+	ClassBStateCb classBStateCb = nullptr;
+	bool classBTracking = false;	   // Class B is the requested class
+	WisBlockClassBState currentClassBState = WISBLOCK_CLASS_B_S0;
+	bool classBUplinkSent = false;	   // an uplink was sent since the join / since Class B was requested
+	bool classBBeaconLocked = false;   // last SMTC_MODEM_EVENT_CLASS_B_STATUS was READY
+	bool classBBeaconLost = false;	   // last SMTC_MODEM_EVENT_CLASS_B_STATUS was NOT_READY (a lock was lost)
+	void updateClassBState();
+	void setClassBState(WisBlockClassBState state);
 
 	/**
 	 * @brief Apply the ADR setting and the data rate to the modem

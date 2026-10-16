@@ -92,3 +92,17 @@ WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region)
 		return WISBLOCK_RUI3_BAND_UNKNOWN;
 	}
 }
+
+WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, bool uplinkSent, bool beaconLocked,
+											   bool beaconLost)
+{
+	if (!joined || !classApplied || !uplinkSent)
+	{
+		return WISBLOCK_CLASS_B_S0; // join not done, or nothing sent yet that carries the time / ping slot requests
+	}
+	if (beaconLocked)
+	{
+		return WISBLOCK_CLASS_B_S2;
+	}
+	return beaconLost ? WISBLOCK_CLASS_B_S3 : WISBLOCK_CLASS_B_S1;
+}

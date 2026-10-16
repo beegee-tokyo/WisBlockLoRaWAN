@@ -615,9 +615,28 @@ bool LoRaWANEngine::dispatchUplink(uint8_t port, const uint8_t *data, uint8_t le
 // still didn't land.
 bool LoRaWANEngine::setDeviceClass(WisBlockDeviceClass deviceClass)
 {
+	const bool wasClassB = classBTracking;
 	settings.deviceClass = deviceClass;
 	smtc_modem_return_code_t rc = smtc_modem_set_class(kStackId, (smtc_modem_class_t)deviceClass);
 	classProfileApplied = (rc == SMTC_MODEM_RC_OK);
+	// Class B state (S0 ... S3): a new Class B request starts again at S0 and reports it, even when the
+	// state value did not change, so the application sees the start. Another class ends the tracking.
+	classBTracking = (deviceClass == WISBLOCK_CLASS_B);
+	if (classBTracking && !wasClassB)
+	{
+		classBUplinkSent = false;
+		classBBeaconLocked = false;
+		classBBeaconLost = false;
+		currentClassBState = WISBLOCK_CLASS_B_S0;
+		if (classBStateCb)
+		{
+			classBStateCb(currentClassBState);
+		}
+	}
+	else if (classBTracking)
+	{
+		updateClassBState();
+	}
 	// Class B additionally requires a ping slot periodicity request; see
 	// smtc_modem_class_b_set_ping_slot_periodicity() in smtc_modem_api.h
 	// and the SMTC_MODEM_LORAWAN_MAC_REQ_PING_SLOT_INFO mac request - not
@@ -959,6 +978,10 @@ uint32_t LoRaWANEngine::handleEvents()
 		{
 		case SMTC_MODEM_EVENT_JOINED:
 			currentJoinState = WISBLOCK_JOIN_SUCCEEDED;
+			// A new session: the Class B set-up starts again (S0 until the first uplink is sent)
+			classBUplinkSent = false;
+			classBBeaconLocked = false;
+			classBBeaconLost = false;
 			// FIX: see setDeviceClass()'s doc comment - this is the actual
 			// moment the device becomes joined for the OTAA path, and thus
 			// the first point at which smtc_modem_set_class() can possibly
@@ -1016,6 +1039,7 @@ uint32_t LoRaWANEngine::handleEvents()
 			// LBM no longer holds a pending uplink for us either way -
 			// see send()'s doc comment / uplinkPending's declaration.
 			uplinkPending = false;
+			classBUplinkSent = true; // Class B: the uplink with the time / ping slot requests is on its way (S1)
 			WisBlockTxResult r;
 			r.success = (event.event_data.txdone.status != SMTC_MODEM_EVENT_TXDONE_NOT_SENT);
 			// FIX: see computeLoRaWANAirtimeMs()'s doc comment - this used
@@ -1198,6 +1222,13 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 		}
 
+		case SMTC_MODEM_EVENT_CLASS_B_STATUS:
+			// READY = beacon locked, the ping slots are open. NOT_READY comes when a lock is lost.
+			// The state itself is derived in updateClassBState() after all events are handled.
+			classBBeaconLocked = (event.event_data.class_b_status.status == SMTC_MODEM_EVENT_CLASS_B_READY);
+			classBBeaconLost = !classBBeaconLocked;
+			break;
+
 		case SMTC_MODEM_EVENT_LORAWAN_MAC_TIME:
 		{
 			WisBlockTimeAnswer r;
@@ -1223,6 +1254,8 @@ uint32_t LoRaWANEngine::handleEvents()
 			break;
 		}
 	} while (pending > 0);
+
+	updateClassBState();
 
 	// FIX (the real root cause behind the whole FPending-drain saga -
 	// confirmed against multiple real device logs across both AS923 and
@@ -1287,4 +1320,46 @@ uint32_t LoRaWANEngine::handleEvents()
 	}
 
 	return sleep_time_ms;
+}
+
+void LoRaWANEngine::setClassBState(WisBlockClassBState state)
+{
+	if (state == currentClassBState)
+	{
+		return;
+	}
+	currentClassBState = state;
+	if (classBStateCb)
+	{
+		classBStateCb(state);
+	}
+}
+
+void LoRaWANEngine::updateClassBState()
+{
+	if (!classBTracking)
+	{
+		return;
+	}
+	// A beacon search that never locked raises no event in the stack (it only reports a change of the
+	// Class B bit), so the missed beacons are read from the beacon statistics while searching.
+	bool lost = classBBeaconLost;
+	const bool joined = isJoined();
+	if (joined && classBUplinkSent && !classBBeaconLocked && !lost)
+	{
+		smtc_beacon_statistics_t stats;
+		lorawan_api_beacon_get_statistics(&stats, kStackId);
+		lost = (stats.last_beacon_lost_consecutively > 0);
+	}
+	setClassBState(wisblockComputeClassBState(joined, classProfileApplied, classBUplinkSent, classBBeaconLocked, lost));
+}
+
+bool LoRaWANEngine::classBState(WisBlockClassBState &state) const
+{
+	if (!classBTracking)
+	{
+		return false;
+	}
+	state = currentClassBState;
+	return true;
 }
