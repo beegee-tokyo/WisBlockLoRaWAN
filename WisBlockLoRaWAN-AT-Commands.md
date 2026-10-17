@@ -946,7 +946,7 @@ This command is used to access the LoRaWAN class.
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+CLASS=?` | - | `AT+CLASS=<A, B or C>` | OK |
+| `AT+CLASS=?` | - | `AT+CLASS=<A, B:S0 - B:S3 or C>` | OK |
 | `AT+CLASS=<Input>` | A, B or C | - | OK |
 
 **Example:**
@@ -958,13 +958,20 @@ OK
 AT+CLASS=?
 AT+CLASS=C
 OK
+
+AT+CLASS=B
+OK
+
+AT+CLASS=?
+AT+CLASS=B,S2
+OK
 ```
 
 ## _💡 NOTE_
 ----
 _The class can only change on a joined device. A request before the join is stored and applied automatically after the join, `OK` is returned in both cases._
 
-_The query returns the **requested** class. RUI3's Class B state suffix (`B:S0` ... `B:S3`) does not exist._
+_The query returns the **requested** class._
 
 _Only the first character is evaluated, `b` and `B` are equal. Any other character selects Class A, `AT_PARAM_ERROR` is **not** returned._
 
@@ -1188,6 +1195,8 @@ OK
 _The default value is 0. **Periodicity** = 0 means a ping slot about every second, **Periodicity** = 7 every 128 seconds._
 
 _Values above 7 are clamped to 7, `AT_PARAM_ERROR` is not returned._
+
+_The device opens one ping slot per period, at a random time inside every 128 s beacon period: with 7 a Class B downlink can wait up to about two minutes, with 3 up to 8 s, with 0 about 1 s, at the price of battery. The stack only accepts the value from a joined device: set before the join, it is applied right after the join (before Class B is enabled)._
 
 ----
 

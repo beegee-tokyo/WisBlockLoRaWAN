@@ -11,6 +11,8 @@
  * WisBlockLoRaWAN::setRegion()/getRegion() (the C++ API, not just the AT layer) can share the
  * exact same conversion instead of the two ever risking drifting apart.
  */
+/* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
+#include "wb_lbm_config.h"
 #include "WisBlockLoRaWANTypes.h"
 
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
@@ -98,7 +100,7 @@ WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, b
 {
 	if (!joined || !classApplied || !uplinkSent)
 	{
-		return WISBLOCK_CLASS_B_S0; // join not done, or nothing sent yet that carries the time / ping slot requests
+		return WISBLOCK_CLASS_B_S0; // join not done, or no uplink sent and no beacon search started yet
 	}
 	if (beaconLocked)
 	{

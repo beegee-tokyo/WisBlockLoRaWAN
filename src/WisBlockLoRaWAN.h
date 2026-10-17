@@ -937,10 +937,10 @@ public:
 	 * @brief Register the Class B state callback
 	 *
 	 * Class B needs several steps before downlinks arrive: Class B is requested (setDeviceClass()), the
-	 * device joins, an uplink is sent (it carries the time and ping slot requests), the stack waits for
+	 * device joins, the stack asks the network for the time and the ping slot answer (a request uplink of its own, no application packet is needed for that), the stack waits for
 	 * the beacon of the gateway and locks to it. The callback reports every step with the same states
 	 * as RUI3's AT+CLASS=? (B,S0 ... B,S3), see WisBlockClassBState:
-	 * S0 Class B requested, not joined (or nothing sent yet), S1 uplink sent, waiting for the beacon,
+	 * S0 Class B requested, not joined (or still asking the network for the time and ping slot answer), S1 uplink sent or beacon search started, waiting for the beacon,
 	 * S2 beacon locked (ping slots open), S3 beacon lock failed or lost, still searching.
 	 * It is also called with S0 when Class B is requested, and never while another class is active.
 	 * Runs in the context of handleEvents() like the other LoRaWAN callbacks.

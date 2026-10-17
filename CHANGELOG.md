@@ -3,6 +3,9 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
+Oct 17, 2026 V1.0.2
+- Fix Class B timing and add Class B AT commands and API calls to documentation
+
 Oct 16, 2026 V1.0.1
 - Add Class B status callback and status check with AT+CLASS=?. Class B still not tested, waiting for environment.
 
@@ -33,9 +36,16 @@ lib_deps =
 
 For Arduino IDE
 For latest staging (might be buggy)  
-- download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.
+- download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.    
+
 For latest released
-Install or update library with ArduinoIDE library manager
+- Install or update library with ArduinoIDE library manager
+
+## Class B state
+
+- New `WisBlockClassBState` (S0 ... S3, the states of RUI3's `AT+CLASS=?`), callback `onClassBStateChanged()` that is called with the new state on every change, and `getClassBState()`. The library did not report anything about the Class B set-up before.
+- `AT+CLASS=?` shows the state for Class B: `AT+CLASS=B,S2`. Class A and C are unchanged.
+- Fix: the ping slot periodicity (`setPingSlotPeriodicity()`, `AT+PGSLOT`, `WisBlockLoRaWANSettings::pingSlotPeriodicity`) set before the join never reached the stack, the stack refuses it from a device that is not joined and the result was not checked. The device stayed at the stack default of 7 (one ping slot per 128 s beacon period, up to about two minutes of delay for a Class B downlink). The value is now applied right after the join, before Class B is enabled.
 
 ## Documentation
 
