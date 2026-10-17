@@ -3,24 +3,49 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
-No official release yet, include in PlatformIO using platformio.ini by adding these lines:
+Oct 17, 2026 V1.0.2
+- Fix Class B timing and add Class B AT commands and API calls to documentation
+
+Oct 16, 2026 V1.0.1
+- Add Class B status callback and status check with AT+CLASS=?. Class B still not tested, waiting for environment.
+
+Oct 13, 2026 V1.0.0
+- First release, still testing but confirmed so far:
+   - regions US915 AU915, AS923-3, EU868
+   - Class A and Class C, Class B not yet tested (I don't have the environment yet)
+   - uplinks
+   - multicast downlinks
+   - AT command
+   - multi downlink receive
+   - Supports RAK4630/RAK4631, RAK3112/RAK3312, RAK11300/RAK11310 (but limits regarding used platform) and RAK3400/RAk3401 with RAK13300/RAk13302 LoRa transceiver
+   - linkcheck request
+   - time request
+   - device status request
+
+To use library in PlatformIO, use platformio.ini lib_deps      
+For latest staging (might be buggy)    
 ```
 lib_deps =
    https://github.com/beegee-tokyo/WisBlockLoRaWAN
 ```
-For Arduino IDE, download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.
+For latest released
+```
+lib_deps =
+   beegee-tokyo/WisBlockLoRaWAN
+```
 
-## LR2021 (RAK13702) on RAK3401
+For Arduino IDE
+For latest staging (might be buggy)  
+- download the repository as ZIP file and add it to Arduino IDE library folder using the "Add from ZIP file" function.    
 
-- New optional support for the Semtech LR2021 (RAK13702 module) on a RAK3401, LoRaWAN and LoRa/FSK P2P. Off by default, enable with `WISBLOCK_ENABLE_LR2021` (`src/wb_lbm_config.h` or the build flags). The existing SX1262 behavior is unchanged: the SPI traffic of the SX1262 LoRa P2P engine is byte-identical with and without the option. Not tested on hardware yet.
-- `wisblockLoRaHwConfigRAK3401()` was renamed to `wisblockLoRaHwConfigRAK3401_RAK13300()`; the old name still works. New `wisblockLoRaHwConfigRAK3401_RAK13702()`, `WISBLOCK_LORA_CHIP_LR2021`, and the `lr*` fields of `WisBlockLoRaHwConfig`.
-- New example `RAK3401_RAK13702`.
-- 2.4 GHz LoRaWAN region `WISBLOCK_REGION_WW2G4` for the LR2021 (compiled in together with `WISBLOCK_ENABLE_LR2021`): `region_ww_2g4.[ch]` and `region_ww_2g4_defs.h` vendored again, new `WisBlockLoRaWAN::setRegion(WisBlockRegion)` and `wisblockRegionUsable()`. It is also band number 13, `WISBLOCK_RUI3_BAND_WW2G4` (a library addition after LA915 = 12, RUI3 has no 2.4 GHz region), for `setRegion()`, `getRegion()` and `AT+BAND=13`. On a board that cannot do 2.4 GHz the region is refused and `join()` does not run, where `WISBLOCK_REGION_WW2G4` used to silently map to EU868.
+For latest released
+- Install or update library with ArduinoIDE library manager
 
 ## Class B state
 
 - New `WisBlockClassBState` (S0 ... S3, the states of RUI3's `AT+CLASS=?`), callback `onClassBStateChanged()` that is called with the new state on every change, and `getClassBState()`. The library did not report anything about the Class B set-up before.
 - `AT+CLASS=?` shows the state for Class B: `AT+CLASS=B,S2`. Class A and C are unchanged.
+- Fix: the ping slot periodicity (`setPingSlotPeriodicity()`, `AT+PGSLOT`, `WisBlockLoRaWANSettings::pingSlotPeriodicity`) set before the join never reached the stack, the stack refuses it from a device that is not joined and the result was not checked. The device stayed at the stack default of 7 (one ping slot per 128 s beacon period, up to about two minutes of delay for a Class B downlink). The value is now applied right after the join, before Class B is enabled.
 
 ## Documentation
 

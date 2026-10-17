@@ -147,8 +147,8 @@ The state of the Class B set-up, the same S0 ... S3 that RUI3 shows with `AT+CLA
 
 | Enumerator | Value | Description |
 | --- | --- | --- |
-| `WISBLOCK_CLASS_B_S0` | 0 | Class B is requested, the device is not joined yet (or the join was lost), or it is joined but has not sent an uplink since |
-| `WISBLOCK_CLASS_B_S1` | 1 | Joined and the first uplink is sent (it carries the time and ping slot requests): the stack waits for the beacon of the gateway |
+| `WISBLOCK_CLASS_B_S0` | 0 | Class B is requested, the device is not joined yet (or the join was lost), or it is joined but no uplink was sent and the beacon search has not started (the stack is still asking the network for the time and the ping slot answer) |
+| `WISBLOCK_CLASS_B_S1` | 1 | Joined, and an uplink was sent by the application or the stack has started its beacon search (it has the network time and the ping slot answer): the stack waits for the beacon of the gateway |
 | `WISBLOCK_CLASS_B_S2` | 2 | Beacon locked, the ping slots are open, Class B downlinks are received |
 | `WISBLOCK_CLASS_B_S3` | 3 | The beacon lock failed (beacons were missed while searching) or was lost again. The stack keeps searching, the state returns to S2 when a beacon is received |
 
@@ -1042,9 +1042,9 @@ lora.onClassBStateChanged(callback);
 ## 💡 NOTE
 
 ----
-_Class B needs several steps before downlinks arrive: Class B is requested with `setDeviceClass(WISBLOCK_CLASS_B)`, the device joins, an uplink is sent (it carries the time and ping slot requests), the stack waits for the beacon of the gateway and locks to it. The callback reports these steps:_
+_Class B needs several steps before downlinks arrive: Class B is requested with `setDeviceClass(WISBLOCK_CLASS_B)`, the device joins, the stack asks the network for the time and the ping slot answer (a request uplink of its own, no application packet is needed), the stack waits for the beacon of the gateway and locks to it. The callback reports these steps:_
 
-_S0 Class B requested, not joined yet (or nothing sent since the join) - S1 uplink sent, waiting for the beacon - S2 beacon locked, the ping slots are open - S3 beacon lock failed or lost, still searching._
+_S0 Class B requested, not joined yet (or the stack is still asking for the time / ping slot answer) - S1 uplink sent or beacon search started, waiting for the beacon - S2 beacon locked, the ping slots are open - S3 beacon lock failed or lost, still searching._
 
 _It is also called with S0 when Class B is requested, and not while another class is active. A lost join, a new join or a class change starts again at S0. S3 is reported when a beacon search has missed a beacon, or after a lock was lost. The callback runs in the context of `handleEvents()` (the library background task, or `loop()` if it is not used), like the other LoRaWAN callbacks: keep it short._
 
@@ -2148,6 +2148,12 @@ lora.setPingSlotPeriodicity(3);
 ## _💡 NOTE_
 ----
 _`uint8_t getPingSlotPeriodicity() const` returns the value._
+
+_The periodicity decides how often a Class B downlink can be received: the device opens one ping slot per period, at a pseudo-random time inside every 128 s beacon period. With `7` that is one ping slot per beacon period, so a downlink can wait up to about two minutes (and queued downlinks arrive one per beacon period). With `3` it is a ping slot every 8 s, with `0` every second. The price is energy: every ping slot is a receive window, so a small value costs much more battery. The default is 0._
+
+_The stack only accepts the value from a **joined** device. If you set it before the join, the library keeps it and applies it right after the join, before Class B is enabled, so the first `PingSlotInfoReq` carries it. Versions of the library before this fix never applied a value set before the join, the stack stayed at its default of 7 (128 s)._
+
+_The network schedules the ping slots from the value that the device reports with the `PingSlotInfoReq`. A ping slot periodicity configured in the network server (for example the device profile of ChirpStack) does not change what the device uses._
 
 ----
 

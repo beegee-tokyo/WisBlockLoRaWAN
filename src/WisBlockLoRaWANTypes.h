@@ -200,10 +200,11 @@ enum WisBlockDeviceClass : uint8_t
 enum WisBlockClassBState : uint8_t
 {
 	/** Class B is requested, the device is not joined yet (or the join was lost), or it is joined but
-	 * has not sent an uplink since the class was set. */
+	 * no uplink was sent and the stack has not started its beacon search (it is still asking the network
+	 * for the time and the ping slot answer). */
 	WISBLOCK_CLASS_B_S0 = 0,
-	/** Joined and the first uplink is sent (it carries the time and ping slot requests): the stack
-	 * waits for a beacon from the gateway. */
+	/** Joined and an uplink was sent by the application, or the stack has the network time and the ping
+	 * slot answer and started its beacon search: the stack waits for a beacon from the gateway. */
 	WISBLOCK_CLASS_B_S1 = 1,
 	/** Beacon locked: the ping slots are open, the device receives Class B downlinks. */
 	WISBLOCK_CLASS_B_S2 = 2,
@@ -218,7 +219,8 @@ enum WisBlockClassBState : uint8_t
  * Used by LoRaWANEngine, a separate function so the rules can be tested without a radio.
  * @param joined The device is joined
  * @param classApplied The class B request was accepted by the stack (needs a joined device)
- * @param uplinkSent An uplink was sent since the join / since Class B was requested
+ * @param uplinkSent An application uplink was sent since the join / since Class B was requested, or the
+ * beacon search of the stack has started
  * @param beaconLocked The stack reports Class B ready (beacon locked)
  * @param beaconLost A lock was lost, or beacons were missed while searching
  * @return The state S0 ... S3
@@ -298,9 +300,10 @@ struct WisBlockLoRaWANSettings
 	 * 0 = no restriction (all channels enabled), matching AT+MASK's own ALL=0000 convention. */
 	uint16_t channelMask = 0;
 	/** RUI3-compatible AT+PGSLOT (Class B unicast ping slot periodicity, 0-7) - see
-	 * LoRaWANEngine::setPingSlotPeriodicity()'s doc comment. Pushed to LBM every time settings
-	 * are (re)applied, same as channelMask above - harmless for Class A/C, and lets it be
-	 * pre-configured before ever switching to Class B. */
+	 * LoRaWANEngine::setPingSlotPeriodicity()'s doc comment. The stack only accepts it from a joined
+	 * device, so it is pushed when the settings are applied (works for an already joined device) and
+	 * again right after every successful join, before Class B is enabled - harmless for Class A/C, and
+	 * lets it be pre-configured before the join. */
 	uint8_t pingSlotPeriodicity = 0;
 	/** FIX (Class A pending-downlink bug): when a downlink's FPending bit is set, the network
 	 * has more downlinks queued, but a Class A device can only receive them in response to an

@@ -121,7 +121,7 @@ WisBlockClassBState wisblockComputeClassBState(bool joined, bool classApplied, b
 {
 	if (!joined || !classApplied || !uplinkSent)
 	{
-		return WISBLOCK_CLASS_B_S0; // join not done, or nothing sent yet that carries the time / ping slot requests
+		return WISBLOCK_CLASS_B_S0; // join not done, or no uplink sent and no beacon search started yet
 	}
 	if (beaconLocked)
 	{

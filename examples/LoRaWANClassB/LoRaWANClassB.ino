@@ -6,16 +6,18 @@
  * S0 ... S3 that RUI3 shows with AT+CLASS=? (B,S0 ... B,S3):
  *
  *   S0  Class B requested, not joined yet (or nothing sent since the join)
- *   S1  uplink sent, the stack waits for the beacon of the gateway
+ *   S1  uplink sent or beacon search started, the stack waits for the beacon of the gateway
  *   S2  beacon locked, the ping slots are open (Class B downlinks are received)
  *   S3  beacon lock failed or lost, the stack keeps searching
  *
  * The state is reported by the callback onClassBStateChanged() and can be read with getClassBState().
  * The AT command interface shows it too: AT+CLASS=? returns for example AT+CLASS=B,S2.
  *
- * The gateway has to send beacons (the network server must support Class B). The first uplink after
- * the join carries the time and ping slot requests, so the sketch sends one right after the join, and
- * then every 5 minutes. Replace the OTAA credentials and the region with your own.
+ * The gateway has to send beacons (the network server must support Class B and must answer the time
+ * and ping slot requests). After the join the stack sends its own request uplink for the network time
+ * (DeviceTimeReq) and the ping slot answer (PingSlotInfoReq), then it starts the beacon search; the
+ * sketch also sends an application uplink right after the join, and then every 5 minutes. Replace
+ * the OTAA credentials and the region with your own.
  */
 #include <WisBlockLoRaAT.h>
 #include <WisBlockLoRaWAN.h>
@@ -48,7 +50,7 @@ void onClassBState(WisBlockClassBState state)
 		Serial.println("[Class B] S0: requested, waiting for the join / first uplink");
 		break;
 	case WISBLOCK_CLASS_B_S1:
-		Serial.println("[Class B] S1: uplink sent, waiting for the beacon");
+		Serial.println("[Class B] S1: uplink sent or beacon search started, waiting for the beacon");
 		break;
 	case WISBLOCK_CLASS_B_S2:
 		Serial.println("[Class B] S2: beacon locked, ping slots open");
@@ -62,7 +64,7 @@ void onClassBState(WisBlockClassBState state)
 void onJoined()
 {
 	Serial.println("[LoRaWAN] Join succeeded");
-	firstUplinkSent = false; // send the first uplink right away, it carries the Class B requests
+	firstUplinkSent = false; // send the first uplink right away
 }
 
 void onJoinFailed()
@@ -105,7 +107,7 @@ void loop()
 	at_serial.handleSerial();
 	lora.handleEvents();
 
-	// The first uplink after the join carries the time and ping slot requests, then one every 5 minutes
+	// An uplink right after the join, then one every 5 minutes
 	if (lora.isJoined() && (!firstUplinkSent || millis() - lastUplinkMs > UPLINK_INTERVAL_MS))
 	{
 		firstUplinkSent = true;

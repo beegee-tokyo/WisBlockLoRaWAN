@@ -406,8 +406,10 @@ void LoRaWANEngine::applySettings(const WisBlockLoRaWANSettings &newSettings)
 	// lorawan_api_set_channel_mask() itself is a no-op on regions that don't need
 	// this (EU868, AS923, ...), so it's safe to always call unconditionally here.
 	lorawan_api_set_channel_mask(kStackId, settings.channelMask);
-	// See WisBlockLoRaWANSettings::pingSlotPeriodicity's doc comment - harmless for Class A/C,
-	// and this way it's already correct the moment an application does switch to Class B.
+	// See WisBlockLoRaWANSettings::pingSlotPeriodicity's doc comment. The stack refuses this while the
+	// device is not joined (this call then fails and does nothing, the result is not used), the value is
+	// applied again when the join succeeds (SMTC_MODEM_EVENT_JOINED) and for ABP/an already joined device
+	// this call is the one that works.
 	smtc_modem_class_b_set_ping_slot_periodicity(
 		kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)settings.pingSlotPeriodicity);
 	if (settings.joinMode == WISBLOCK_JOIN_OTAA)
@@ -1009,7 +1011,7 @@ uint32_t LoRaWANEngine::handleEvents()
 		{
 		case SMTC_MODEM_EVENT_JOINED:
 			currentJoinState = WISBLOCK_JOIN_SUCCEEDED;
-			// A new session: the Class B set-up starts again (S0 until the first uplink is sent)
+			// A new session: the Class B set-up starts again (S0 until an uplink is sent or the beacon search starts)
 			classBUplinkSent = false;
 			classBBeaconLocked = false;
 			classBBeaconLost = false;
@@ -1019,6 +1021,15 @@ uint32_t LoRaWANEngine::handleEvents()
 			// succeed. The applySettings()-time call from begin() was
 			// guaranteed to fail (device wasn't joined yet); this retry is
 			// what actually gets Class B/C to take effect.
+			//
+			// FIX: same for the ping slot periodicity. smtc_modem_class_b_set_ping_slot_periodicity() also
+			// fails for a device that is not joined, so the call in applySettings() never took effect and the
+			// stack stayed at its default of 7 (one ping slot per 128 s beacon period, up to 2 minutes
+			// between a downlink being queued and being received). Apply the configured value now, before
+			// Class B is enabled below: the PingSlotInfoReq that Class B sends carries the value that is set
+			// at that moment, and the network schedules the ping slots from it.
+			smtc_modem_class_b_set_ping_slot_periodicity(
+				kStackId, (smtc_modem_class_b_ping_slot_periodicity_t)settings.pingSlotPeriodicity);
 			if (!classProfileApplied)
 			{
 				setDeviceClass(settings.deviceClass);
@@ -1070,7 +1081,7 @@ uint32_t LoRaWANEngine::handleEvents()
 			// LBM no longer holds a pending uplink for us either way -
 			// see send()'s doc comment / uplinkPending's declaration.
 			uplinkPending = false;
-			classBUplinkSent = true; // Class B: the uplink with the time / ping slot requests is on its way (S1)
+			classBUplinkSent = true; // Class B: an application uplink was sent (S1); the stack's own request uplink raises no TXDONE
 			WisBlockTxResult r;
 			r.success = (event.event_data.txdone.status != SMTC_MODEM_EVENT_TXDONE_NOT_SENT);
 			// FIX: see computeLoRaWANAirtimeMs()'s doc comment - this used
@@ -1376,13 +1387,23 @@ void LoRaWANEngine::updateClassBState()
 	// Class B bit), so the missed beacons are read from the beacon statistics while searching.
 	bool lost = classBBeaconLost;
 	const bool joined = isJoined();
-	if (joined && classBUplinkSent && !classBBeaconLocked && !lost)
+	// The stack asks the network for the time and the ping slot answer with a MAC request uplink of its
+	// own, which raises no TXDONE event (that event is only for the application's uplinks). The beacon
+	// search starts when both answers are in, so a running search also means "waiting for the beacon" (S1),
+	// whether the application sent a packet or not.
+	bool searching = false;
+	if (joined && classProfileApplied && !classBUplinkSent)
+	{
+		searching = lorawan_api_class_b_enabled_get(kStackId);
+	}
+	const bool sentOrSearching = classBUplinkSent || searching;
+	if (joined && sentOrSearching && !classBBeaconLocked && !lost)
 	{
 		smtc_beacon_statistics_t stats;
 		lorawan_api_beacon_get_statistics(&stats, kStackId);
 		lost = (stats.last_beacon_lost_consecutively > 0);
 	}
-	setClassBState(wisblockComputeClassBState(joined, classProfileApplied, classBUplinkSent, classBBeaconLocked, lost));
+	setClassBState(wisblockComputeClassBState(joined, classProfileApplied, sentOrSearching, classBBeaconLocked, lost));
 }
 
 bool LoRaWANEngine::classBState(WisBlockClassBState &state) const

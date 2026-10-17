@@ -946,7 +946,7 @@ This command is used to access the LoRaWAN class.
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+CLASS=?` | - | `AT+CLASS=<A, B,S0 - B,S3 or C>` | OK |
+| `AT+CLASS=?` | - | `AT+CLASS=<A, B:S0 - B:S3 or C>` | OK |
 | `AT+CLASS=<Input>` | A, B or C | - | OK |
 
 **Example:**
@@ -971,7 +971,7 @@ OK
 ----
 _The class can only change on a joined device. A request before the join is stored and applied automatically after the join, `OK` is returned in both cases._
 
-_The query returns the **requested** class. For Class B the state of the Class B set-up follows the letter, like RUI3: `B,S0` ... `B,S3`. `S0`: Class B requested, not joined yet (or nothing sent since the join). `S1`: joined, the first uplink is sent, the stack waits for the beacon of the gateway. `S2`: beacon locked, the ping slots are open. `S3`: the beacon lock failed or was lost, the stack keeps searching, back to `S2` when a beacon is received. The same states are reported by `onClassBStateChanged()` and `getClassBState()`. There is no event line on the serial port for a state change._
+_The query returns the **requested** class. For Class B the state of the Class B set-up follows the letter, like RUI3: `B:S0` ... `B:S3`. `S0`: Class B requested, not joined yet (or nothing sent since the join). `S1`: joined, the first uplink is sent, the stack waits for the beacon of the gateway. `S2`: beacon locked, the ping slots are open. `S3`: the beacon lock failed or was lost, the stack keeps searching, back to `S2` when a beacon is received. The same states are reported by `onClassBStateChanged()` and `getClassBState()`. There is no event line on the serial port for a state change._
 
 _Only the first character is evaluated, `b` and `B` are equal. Any other character selects Class A, `AT_PARAM_ERROR` is **not** returned._
 
@@ -1195,6 +1195,8 @@ OK
 _The default value is 0. **Periodicity** = 0 means a ping slot about every second, **Periodicity** = 7 every 128 seconds._
 
 _Values above 7 are clamped to 7, `AT_PARAM_ERROR` is not returned._
+
+_The device opens one ping slot per period, at a random time inside every 128 s beacon period: with 7 a Class B downlink can wait up to about two minutes, with 3 up to 8 s, with 0 about 1 s, at the price of battery. The stack only accepts the value from a joined device: set before the join, it is applied right after the join (before Class B is enabled)._
 
 ----
 

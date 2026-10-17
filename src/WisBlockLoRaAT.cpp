@@ -1062,7 +1062,7 @@ void WisBlockLoRaAT::atClass(AtOp op, const char *value)
 		if (dc == WISBLOCK_CLASS_B && lora->getClassBState(classBState))
 		{
 			char buf[8];
-			snprintf(buf, sizeof(buf), "B,S%u", (unsigned)classBState);
+			snprintf(buf, sizeof(buf), "B:S%u", (unsigned)classBState);
 			reply(buf);
 			return;
 		}
