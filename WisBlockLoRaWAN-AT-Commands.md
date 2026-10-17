@@ -971,7 +971,7 @@ OK
 ----
 _The class can only change on a joined device. A request before the join is stored and applied automatically after the join, `OK` is returned in both cases._
 
-_The query returns the **requested** class._
+_The query returns the **requested** class. For Class B the state of the Class B set-up follows the letter, like RUI3: `B:S0` ... `B:S3`. `S0`: Class B requested, not joined yet (or nothing sent since the join). `S1`: joined, the first uplink is sent, the stack waits for the beacon of the gateway. `S2`: beacon locked, the ping slots are open. `S3`: the beacon lock failed or was lost, the stack keeps searching, back to `S2` when a beacon is received. The same states are reported by `onClassBStateChanged()` and `getClassBState()`. There is no event line on the serial port for a state change._
 
 _Only the first character is evaluated, `b` and `B` are equal. Any other character selects Class A, `AT_PARAM_ERROR` is **not** returned._
 
