@@ -19,6 +19,7 @@
  * sketch also sends an application uplink right after the join, and then every 5 minutes. Replace
  * the OTAA credentials and the region with your own.
  */
+#include <Arduino.h>
 #include <WisBlockLoRaAT.h>
 #include <WisBlockLoRaWAN.h>
 
@@ -34,6 +35,13 @@ const uint32_t UPLINK_INTERVAL_MS = 300000;
 uint32_t lastUplinkMs = 0;
 bool firstUplinkSent = false;
 
+volatile bool class_changed = false;
+volatile bool has_joined = false;
+volatile bool has_joined_fail = false;
+volatile bool has_tx_finished = false;
+volatile bool has_rx = false;
+WisBlockRxResult rx_buffered;
+
 /**
  * @brief Class B state callback
  *
@@ -44,38 +52,39 @@ bool firstUplinkSent = false;
  */
 void onClassBState(WisBlockClassBState state)
 {
-	switch (state)
-	{
-	case WISBLOCK_CLASS_B_S0:
-		Serial.println("[Class B] S0: requested, waiting for the join / first uplink");
-		break;
-	case WISBLOCK_CLASS_B_S1:
-		Serial.println("[Class B] S1: uplink sent or beacon search started, waiting for the beacon");
-		break;
-	case WISBLOCK_CLASS_B_S2:
-		Serial.println("[Class B] S2: beacon locked, ping slots open");
-		break;
-	case WISBLOCK_CLASS_B_S3:
-		Serial.println("[Class B] S3: beacon lock failed or lost, still searching");
-		break;
-	}
+	class_changed = true;
 }
 
 void onJoined()
 {
-	Serial.println("[LoRaWAN] Join succeeded");
-	firstUplinkSent = false; // send the first uplink right away
+	has_joined = true;
 }
 
 void onJoinFailed()
 {
-	Serial.println("[LoRaWAN] Join failed, retrying...");
-	lora.join();
+	has_joined_fail = true;
 }
 
 void onRxDone(const WisBlockRxResult &result)
 {
-	Serial.printf("[LoRaWAN] RX %u bytes on port %u, RSSI %d SNR %d\n", result.length, result.port, result.rssi, result.snr);
+	has_rx = true;
+	rx_buffered.port = result.port;
+	rx_buffered.length = result.length;
+	rx_buffered.rssi = result.rssi;
+	rx_buffered.snr = result.snr;
+	for (int idx = 0; idx < result.length; idx++)
+	{
+		rx_buffered.data[idx] = result.data[idx];
+	}
+	rx_buffered.fpending = result.fpending;
+	rx_buffered.isMulticast = result.isMulticast;
+	rx_buffered.multicastGroupId = result.multicastGroupId;
+}
+
+void onTxDone(const WisBlockTxResult &result)
+{
+	has_tx_finished = true;
+	// Serial.println("TX finished");
 }
 
 void setup()
@@ -89,9 +98,26 @@ void setup()
 	lora.setRegion(WISBLOCK_RUI3_BAND_EU868); // change to match your region - see WisBlockRUI3Band
 	lora.setADR(true);
 
+	if (lora.enableBackgroundTask())
+	{
+		Serial.println("[Setup] Background task active");
+	}
+	else
+	{
+		Serial.println("[Setup] FreeRTOS unavailable");
+	}
+
+	// Start AT command interface.
+	at_serial.begin(lora, Serial);
+	if (!at_serial.enableBackgroundRx())
+	{
+		Serial.println("[Setup] AT command USB RX hook failed");
+	}
+
 	lora.onJoinSuccess(onJoined);
 	lora.onJoinFailed(onJoinFailed);
 	lora.onLoRaWANRxFinished(onRxDone);
+	lora.onLoRaWANTxFinished(onTxDone);
 	lora.onClassBStateChanged(onClassBState);
 
 	// Class B can only be set on a joined device: the request is stored and applied after the join.
@@ -102,17 +128,77 @@ void setup()
 	lora.join();
 }
 
+WisBlockClassBState state = WISBLOCK_CLASS_B_S0;
+
 void loop()
 {
-	at_serial.handleSerial();
-	lora.handleEvents();
-
-	// An uplink right after the join, then one every 5 minutes
-	if (lora.isJoined() && (!firstUplinkSent || millis() - lastUplinkMs > UPLINK_INTERVAL_MS))
+	// at_serial.handleSerial();
+	// lora.handleEvents();
+	WisBlockClassBState state;
+	if (state != WISBLOCK_CLASS_B_S2)
 	{
-		firstUplinkSent = true;
-		lastUplinkMs = millis();
-		uint8_t payload[2] = {0xB0, 0x01};
-		lora.sendLoRaWAN(1, payload, sizeof(payload));
+		lora.getClassBState(state);
+	}
+
+	if (has_joined)
+	{
+		has_joined = false;
+		Serial.println("[LoRaWAN] Join succeeded");
+		firstUplinkSent = false; // send the first uplink right away
+	}
+	if (has_joined_fail)
+	{
+		has_joined_fail = false;
+		Serial.println("[LoRaWAN] Join failed, retrying...");
+		lora.join();
+	}
+	if (has_rx)
+	{
+		has_rx = false;
+		Serial.printf("[LoRaWAN] RX %u bytes on port %u, RSSI %d SNR %d\n", rx_buffered.length, rx_buffered.port, rx_buffered.rssi, rx_buffered.snr);
+		if (rx_buffered.length > 0)
+		{
+			for (int idx = 0; idx < rx_buffered.length; idx++)
+			{
+				Serial.printf("0x%X ", rx_buffered.data[idx]);
+			}
+			Serial.println("");
+		}
+	}
+	if (has_tx_finished)
+	{
+		has_tx_finished = false;
+		Serial.println("TX finished");
+	}
+	if (class_changed)
+	{
+		class_changed = false;
+		switch (state)
+		{
+		case WISBLOCK_CLASS_B_S0:
+			Serial.println("[Class B] S0: requested, waiting for the join / first uplink");
+			break;
+		case WISBLOCK_CLASS_B_S1:
+			Serial.println("[Class B] S1: uplink sent or beacon search started, waiting for the beacon");
+			break;
+		case WISBLOCK_CLASS_B_S2:
+			Serial.println("[Class B] S2: beacon locked, ping slots open");
+			break;
+		case WISBLOCK_CLASS_B_S3:
+			Serial.println("[Class B] S3: beacon lock failed or lost, still searching");
+			break;
+		}
+	}
+
+	if (state != WISBLOCK_CLASS_B_S2)
+	{
+		// An uplink right after the join, then one every 5 minutes
+		if (lora.isJoined() && (!firstUplinkSent || millis() - lastUplinkMs > UPLINK_INTERVAL_MS))
+		{
+			firstUplinkSent = true;
+			lastUplinkMs = millis();
+			uint8_t payload[2] = {0xB0, 0x01};
+			lora.sendLoRaWAN(1, payload, sizeof(payload));
+		}
 	}
 }

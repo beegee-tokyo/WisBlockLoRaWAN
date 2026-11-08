@@ -3,6 +3,9 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
+Oct 19, 2026 V1.0.3
+- Fix Class B problem on ESP32-S3 RAk3112/RAK3312
+
 Oct 17, 2026 V1.0.2
 - Fix Class B timing and add Class B AT commands and API calls to documentation
 

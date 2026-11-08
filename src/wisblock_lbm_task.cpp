@@ -40,6 +40,8 @@ constexpr uint32_t kStackSize = 4096; // matches SX126x-Arduino's own start_lora
 #ifndef WB_LBM_TASK_PRIORITY
 #if defined(ARDUINO_ARCH_RP2040)
 #define WB_LBM_TASK_PRIORITY ((configMAX_PRIORITIES / 2) + 1)
+#elif defined (ARDUINO_ARCH_ESP32) 
+#define WB_LBM_TASK_PRIORITY 3 // higher than loop task to avoid blocking
 #else
 #define WB_LBM_TASK_PRIORITY 1 // matches SX126x-Arduino's TASK_PRIO_NORMAL
 #endif
