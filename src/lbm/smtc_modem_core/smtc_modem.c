@@ -88,7 +88,13 @@
 #elif defined( SX127X )
 #include "ralf_sx127x.h"
 #elif defined( LR20XX )
-#include "ralf_lr20xx.h"
+#include "smtc_ralf/src/ralf_lr20xx.h"
+#endif
+
+#if defined( WISBLOCK_ENABLE_LR2021 )
+/* WisBlockLoRaWAN: the radio is chosen at run time, an SX126x (default) or an LR2021 */
+#include "smtc_ralf/src/ralf_lr20xx.h"
+#include "../../wisblock_radio_bsp_config.h"
 #endif
 
 #if defined( ADD_SMTC_STREAM )
@@ -247,6 +253,16 @@ static void modem_load_appkey_context( void );
 void smtc_modem_init( void ( *callback_event )( void ) )
 {
     SMTC_MODEM_HAL_TRACE_INFO( "Modem Initialization\n" );
+
+#if defined( WISBLOCK_ENABLE_LR2021 )
+    /* WisBlockLoRaWAN: modem_radio is instantiated for the SX126x above, switch it to the LR2021 when the
+     * board has one (WisBlockLoRaHwConfig::chipType). Nothing changes for an SX126x board. */
+    if( wisblock_radio_hal_is_lr2021( ) )
+    {
+        const ralf_t lr2021_radio = RALF_LR20XX_INSTANTIATE( NULL );
+        modem_radio               = lr2021_radio;
+    }
+#endif
 
     // init radio and put it in sleep mode
     SMTC_MODEM_HAL_PANIC_ON_FAILURE( ral_reset( &( modem_radio.ral ) ) == RAL_STATUS_OK );

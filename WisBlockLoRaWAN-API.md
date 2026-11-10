@@ -29,7 +29,7 @@ enum WisBlockWorkMode : uint8_t
 
 ### WisBlockRUI3Band
 
-The regions of LoRaWAN, using the **RUI3 `AT+BAND` numbering**. This is the enumeration used by `setRegion()`, `getRegion()` and `AT+BAND`.
+The regions of LoRaWAN, using the **RUI3 `AT+BAND` numbering**. This is the enumeration used by `setRegion()`, `getRegion()` and `AT+BAND`. RUI3 has no 2.4 GHz region, so `WISBLOCK_RUI3_BAND_WW2G4` (13) is a library addition after the last RUI3 number.
 
 | Enumerator | Value | Description |
 | --- | --- | --- |
@@ -46,7 +46,8 @@ The regions of LoRaWAN, using the **RUI3 `AT+BAND` numbering**. This is the enum
 | `WISBLOCK_RUI3_BAND_AS923_3` | 10 | AS923-3 |
 | `WISBLOCK_RUI3_BAND_AS923_4` | 11 | AS923-4 |
 | `WISBLOCK_RUI3_BAND_LA915` | 12 | LA915 - **not supported**, `setRegion()` returns `false` |
-| `WISBLOCK_RUI3_BAND_UNKNOWN` | 0xFF | Returned by `getRegion()` if the active region has no RUI3 band number (`CN470_RP_1_0`, `WW2G4`). Never valid for `setRegion()`. |
+| `WISBLOCK_RUI3_BAND_WW2G4` | 13 | 2.4 GHz worldwide (LR2021 only). Library addition, not a RUI3 band. `setRegion()` returns `false` unless the library is built with `WISBLOCK_ENABLE_LR2021` and `begin()` got the LR2021 configuration |
+| `WISBLOCK_RUI3_BAND_UNKNOWN` | 0xFF | Returned by `getRegion()` if the active region has no RUI3 band number (`CN470_RP_1_0`). Never valid for `setRegion()`. |
 
 ```cpp
 enum WisBlockRUI3Band : uint8_t
@@ -64,6 +65,7 @@ enum WisBlockRUI3Band : uint8_t
   WISBLOCK_RUI3_BAND_AS923_3 = 10,
   WISBLOCK_RUI3_BAND_AS923_4 = 11,
   WISBLOCK_RUI3_BAND_LA915   = 12,
+  WISBLOCK_RUI3_BAND_WW2G4   = 13,
   WISBLOCK_RUI3_BAND_UNKNOWN = 0xFF,
 };
 ```
@@ -92,7 +94,7 @@ The internal LoRaWAN region numbering (LoRa Basics Modem / SWL2001 order). Only 
 | `WISBLOCK_REGION_RU864` | 9 | RU864 ~ 870 |
 | `WISBLOCK_REGION_CN470` | 10 | CN470 ~ 510 |
 | `WISBLOCK_REGION_CN470_RP_1_0` | 11 | CN470 RP1.0 (no RUI3 band number) |
-| `WISBLOCK_REGION_WW2G4` | 12 | 2.4 GHz worldwide (no RUI3 band number, not applicable to the SX1262) |
+| `WISBLOCK_REGION_WW2G4` | 12 | 2.4 GHz worldwide. Needs the LR2021 (RAK13702) and the library built with `WISBLOCK_ENABLE_LR2021`. RUI3 band number: `WISBLOCK_RUI3_BAND_WW2G4` (13, library addition) |
 | `WISBLOCK_REGION_EU433` | 13 | EU433, re-added by this library (see below) |
 
 ```cpp
@@ -1478,7 +1480,7 @@ lora.setRegion(WISBLOCK_RUI3_BAND_EU868);
 | **Function** | `bool setRegion(WisBlockRUI3Band band)` |
 | **Parameters** | **band** - the region, see [WisBlockRUI3Band](#wisblockrui3band) |
 | **Returns** | bool |
-| **Return Values** | **TRUE** region set<br/>**FALSE** the band is not supported (`WISBLOCK_RUI3_BAND_LA915`, `WISBLOCK_RUI3_BAND_UNKNOWN`, any value out of range), nothing changed |
+| **Return Values** | **TRUE** region set<br/>**FALSE** the band is not supported (`WISBLOCK_RUI3_BAND_LA915`, `WISBLOCK_RUI3_BAND_UNKNOWN`, any value out of range), or it is `WISBLOCK_RUI3_BAND_WW2G4` (2.4 GHz) and the radio is not an LR2021 / the library is built without `WISBLOCK_ENABLE_LR2021`; nothing changed |
 
 ## ⚠️ WARNING
 
@@ -1512,6 +1514,30 @@ void setup()
 
 </details>
 
+### setRegion() with a WisBlockRegion
+
+Sets the LoRaWAN region with the library's own [WisBlockRegion](#wisblockregion) enumeration. This is the only way to select the one region that has no RUI3 band number: `WISBLOCK_REGION_CN470_RP_1_0`. Every other region works as well; the 2.4 GHz region can also be selected as `setRegion(WISBLOCK_RUI3_BAND_WW2G4)`.
+
+```cpp
+lora.begin(wisblockLoRaHwConfigRAK3401_RAK13702());
+lora.setRegion(WISBLOCK_REGION_WW2G4);        // 2.4 GHz LoRaWAN
+// the same: lora.setRegion(WISBLOCK_RUI3_BAND_WW2G4);
+```
+
+| | |
+| --- | --- |
+| **Function** | `bool setRegion(WisBlockRegion region)` |
+| **Parameters** | **region** - the region |
+| **Returns** | bool |
+| **Return Values** | **TRUE** region set<br/>**FALSE** the region cannot be used with this radio, nothing changed. `WISBLOCK_REGION_WW2G4` is refused unless the library is built with `WISBLOCK_ENABLE_LR2021` **and** `begin()` got the LR2021 configuration (`wisblockLoRaHwConfigRAK3401_RAK13702()`), see `wisblockRegionUsable()` |
+
+## ⚠️ WARNING
+
+----
+_Call it **after** `begin()`, the radio of the board is not known before. As for the other `setRegion()`, the region can only be changed **before the device joins**: switching between sub-GHz and 2.4 GHz means selecting the other region and joining again. The radio path (sub-GHz or 2.4 GHz) follows the frequencies of the region, there is no separate setting. WW2G4 uses DR0-DR7 (SF12-SF5, 812.5 kHz bandwidth), +10 dBm EIRP maximum. If a configuration with WW2G4 is restored from flash on a board that cannot do it, the region is not set and `join()` is refused with a message on `Serial`, instead of joining on another band._
+
+----
+
 ### getRegion()
 
 Returns the active region in the **RUI3 band numbering**.
@@ -1524,7 +1550,7 @@ WisBlockRUI3Band band = lora.getRegion();
 | --- | --- |
 | **Function** | `WisBlockRUI3Band getRegion() const` |
 | **Returns** | the region as [WisBlockRUI3Band](#wisblockrui3band) |
-| **Return Values** | **WISBLOCK_RUI3_BAND_UNKNOWN (0xFF)** the active region has no RUI3 band number (`CN470_RP_1_0`, `WW2G4`). Read `getConfig().lorawan.region` in that case. |
+| **Return Values** | **WISBLOCK_RUI3_BAND_UNKNOWN (0xFF)** the active region has no RUI3 band number (`CN470_RP_1_0`). Read `getConfig().lorawan.region` in that case. 2.4 GHz is reported as `WISBLOCK_RUI3_BAND_WW2G4` (13). |
 
 <details>
 <summary><b>Click to view the code</b></summary>
@@ -3011,7 +3037,7 @@ bool ok = wisblockRUI3BandToRegion(WISBLOCK_RUI3_BAND_EU433, r);
 | **Function** | `bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)` |
 | **Parameters** | **band** - RUI3 band<br/>**outRegion** - receives the region |
 | **Returns** | bool |
-| **Return Values** | **TRUE** converted<br/>**FALSE** no equivalent (`LA915`, `UNKNOWN`, out of range), `outRegion` untouched |
+| **Return Values** | **TRUE** converted<br/>**FALSE** no equivalent (`LA915`, `UNKNOWN`, out of range), `outRegion` untouched. `WW2G4` converts whatever the radio is, see `wisblockRegionUsable()` |
 
 ### wisblockRegionToRUI3Band()
 
@@ -3045,7 +3071,7 @@ _**Differences to RUI3 that matter when porting code**_
 | RUI3 | WisBlockLoRaWAN | Comment |
 | --- | --- | --- |
 | `api.lorawan.xxx.get()` / `.set()` | `lora.setXxx()` and `lora.getConfig().lorawan.xxx` | One object (`WisBlockLoRaWAN lora;`), setters are methods. Most settings have no dedicated getter, read them from `lora.getConfig()`. |
-| `api.lorawan.band.set(x)` | `lora.setRegion(WISBLOCK_RUI3_BAND_xxx)` | Uses the **RUI3 band numbering** (`0` = EU433 ... `12` = LA915). The internal LoRa Basics Modem numbering is hidden. |
+| `api.lorawan.band.set(x)` | `lora.setRegion(WISBLOCK_RUI3_BAND_xxx)` | Uses the **RUI3 band numbering** (`0` = EU433 ... `12` = LA915, plus `13` = WW2G4 2.4 GHz, a library addition). The internal LoRa Basics Modem numbering is hidden. |
 | `api.lorawan.join()` | `lora.join()` | Asynchronous, result is reported through callbacks. |
 | `api.lorawan.registerXxxCallback()` | `lora.onXxx()` | Callback signatures differ, see [LoRaWAN Callbacks](#lorawan-callbacks). |
 | `api.lorawan.rx1dl`, `rx2dl`, `jn1dl`, `jn2dl`, `rx2dr`, `rx2fq`, `pnm`, `dcs` | *not available* | The receive window timing and the public network flag are handled by LoRa Basics Modem and are not exposed. |
@@ -3240,10 +3266,10 @@ Collected from the library's Creation Log (`Creation-Log-From-Claude-AI.md`) for
 - **`setADR()`, `setDataRate()`, `setDeviceClass()`** can return `FALSE` before the join although the request is stored and applied automatically later.
 - **`sendLoRaWAN()`** returning `TRUE` only means *queued*. One pending uplink plus one deferred uplink is the maximum.
 - **`join()`** must not be called from `onJoinFailed()`.
-- **Region** can only be changed before joining. LA915 is not supported. EU433 is provided by the library itself (RP002-1.0.4).
+- **Region** can only be changed before joining. LA915 is not supported. EU433 is provided by the library itself (RP002-1.0.4). The 2.4 GHz region WW2G4 is band number 13 (library addition, LR2021 only).
 - **OTAA/ABP keys** (`appKey`, session keys) cannot be read back from the stack. Multicast keys can.
 - **Multicast groups** live in RAM only and are lost at reboot. Remote Multicast Setup (over-the-air provisioning) and FUOTA are not enabled.
-- **Not vendored:** FUOTA, clock sync, cloud services, store-and-forward, geolocation, relay (removed on 2026-09-14) and the 2.4 GHz region.
+- **Not vendored:** FUOTA, clock sync, cloud services, store-and-forward, geolocation, relay (removed on 2026-09-14). The 2.4 GHz region (`WISBLOCK_REGION_WW2G4`) is vendored and compiled in only with `WISBLOCK_ENABLE_LR2021`.
 - **Background task** (`enableBackgroundTask()`) and **background AT RX** (`enableBackgroundRx()`, task mode or loop mode with a wake callback) are the recommended low power setup on RAK4631 and RAK3312. RAK11310 needs a FreeRTOS port and has no background AT RX, `handleSerial()` in `loop()` is the only option there.
 - **P2P sleep** uses cold-start sleep. The idle current improvement is reasoned, not yet measured on hardware.
 - **P2P RX duty cycle** timing usually needs more margin than the datasheet formula, verify on your own link.

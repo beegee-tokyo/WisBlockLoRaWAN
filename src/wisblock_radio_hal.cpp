@@ -22,384 +22,406 @@
 
 #include "wisblock_radio_bsp_config.h"
 
+#if defined(WISBLOCK_ENABLE_LR2021)
+#include "lbm/smtc_modem_core/radio_drivers/lr20xx_driver/src/lr20xx_hal.h" // vendored: src/lbm/smtc_modem_core/radio_drivers/lr20xx_driver/src/lr20xx_hal.h
+#endif
+
 namespace
 {
-// SX1262 datasheet timing:
-//  - NRESET low pulse: >= 100 us (we use 1 ms for margin on top of Arduino's
-//    delay() granularity).
-//  - After NRESET release, BUSY goes high almost immediately then low again
-//    once the chip has booted (typically < 3.5 ms, cold start can be longer
-//    after a fresh flash/POR - 1000 ms timeout below is generous, not tight).
-constexpr uint32_t kResetPulseUs = 1000;
-constexpr uint32_t kBusyTimeoutMs = 1000;
+	// SX1262 datasheet timing:
+	//  - NRESET low pulse: >= 100 us (we use 1 ms for margin on top of Arduino's
+	//    delay() granularity).
+	//  - After NRESET release, BUSY goes high almost immediately then low again
+	//    once the chip has booted (typically < 3.5 ms, cold start can be longer
+	//    after a fresh flash/POR - 1000 ms timeout below is generous, not tight).
+	constexpr uint32_t kResetPulseUs = 1000;
+	constexpr uint32_t kBusyTimeoutMs = 1000;
 
-// RF-switch/antenna-power settle time: how long to wait after driving the
-// antenna-power pin(s) high before trusting the SPI bus / BUSY line again.
-// 1 ms is a conservative default for a simple GPIO-driven load switch or LDO
-// enable pin; TODO: verify against your specific module - tighten with a
-// scope on the antenna-power pin vs. the first successful post-wake SPI
-// transaction if you need faster wake latency than this costs you.
-constexpr uint32_t kAntPwrSettleUs = 1000;
+	// RF-switch/antenna-power settle time: how long to wait after driving the
+	// antenna-power pin(s) high before trusting the SPI bus / BUSY line again.
+	// 1 ms is a conservative default for a simple GPIO-driven load switch or LDO
+	// enable pin; TODO: verify against your specific module - tighten with a
+	// scope on the antenna-power pin vs. the first successful post-wake SPI
+	// transaction if you need faster wake latency than this costs you.
+	constexpr uint32_t kAntPwrSettleUs = 1000;
 
-WisBlockLoRaHwConfig activeConfig;
-WisBlockLoRaRadioBspConfig activeBspConfig;
-WisBlockLoRaSpiClass *activeSpi = nullptr;
-/**
- * @brief SPI settings of the radio: 8 MHz, MSB first, mode 0
- */
-SPISettings spiSettings(8000000UL, MSBFIRST, SPI_MODE0);
+	WisBlockLoRaHwConfig activeConfig;
+	WisBlockLoRaRadioBspConfig activeBspConfig;
+	WisBlockLoRaSpiClass *activeSpi = nullptr;
+	/**
+	 * @brief SPI settings of the radio: 8 MHz, MSB first, mode 0
+	 */
+	SPISettings spiSettings(8000000UL, MSBFIRST, SPI_MODE0);
 
-// --- Sleep-state tracking -------------------------------------------------
-// CRITICAL, per Semtech's own reference sx126x_hal.c (lbm_applications/
-// 2_porting_nrf_52840/radio_hal/sx126x_hal.c in the upstream SWL2001 repo):
-// "Busy is HIGH in sleep mode" - while the chip is genuinely asleep, BUSY
-// does NOT read low the way it does during normal idle/standby. It only
-// clears once you pull NSS low to initiate wake, and that wake pulse is a
-// *different* sequence from a normal transaction's busy-wait.
-//
-// A plain sx126x_hal_write()/read() that just waits for BUSY to go low
-// before starting (as if the chip were merely idle, not asleep) will
-// deadlock waiting for a transition that can only happen after an NSS pulse
-// it never sends - exactly the bug this replaces. This library never
-// explicitly puts the radio to sleep itself, but LBM's own radio_planner
-// does (ral_set_sleep(), see src/lbm/smtc_modem_core/radio_planner/src/
-// radio_planner.c), autonomously, between scheduled tasks - so this HAL
-// must track that state regardless of what higher-level code in this
-// library does or doesn't do.
-enum class RadioMode
-{
-	Awake,
-	Asleep,
-};
-RadioMode radioMode = RadioMode::Awake;
-
-// --- RF-switch power tracking ---------------------------------------------
-// Antenna-switch power is tied to the same Awake/Asleep tracking this file
-// already has to do for BUSY's sleep-mode behavior, so every caller that
-// reaches SLEEP - LBM's radio_planner in LoRaWAN mode, or
-// LoRaP2PEngine::sleep() in P2P mode - gets the antenna-power savings
-// automatically, with no call-site changes needed anywhere else in the
-// library. See WisBlockLoRaHwConfig.h's doc comment for the field
-// combinations this covers (useRxenAntPwr and/or useDio3AntSwitch).
-// ---------------------------------------------------------------------------
-
-/**
- * @brief Drive the pin that powers the antenna switch
- *
- * @param on true to power the antenna switch
- */
-void driveAntennaPower(bool on)
-{
-	if (activeConfig.useRxenAntPwr && activeConfig.radioRxEn >= 0)
+	// --- Sleep-state tracking -------------------------------------------------
+	// CRITICAL, per Semtech's own reference sx126x_hal.c (lbm_applications/
+	// 2_porting_nrf_52840/radio_hal/sx126x_hal.c in the upstream SWL2001 repo):
+	// "Busy is HIGH in sleep mode" - while the chip is genuinely asleep, BUSY
+	// does NOT read low the way it does during normal idle/standby. It only
+	// clears once you pull NSS low to initiate wake, and that wake pulse is a
+	// *different* sequence from a normal transaction's busy-wait.
+	//
+	// A plain sx126x_hal_write()/read() that just waits for BUSY to go low
+	// before starting (as if the chip were merely idle, not asleep) will
+	// deadlock waiting for a transition that can only happen after an NSS pulse
+	// it never sends - exactly the bug this replaces. This library never
+	// explicitly puts the radio to sleep itself, but LBM's own radio_planner
+	// does (ral_set_sleep(), see src/lbm/smtc_modem_core/radio_planner/src/
+	// radio_planner.c), autonomously, between scheduled tasks - so this HAL
+	// must track that state regardless of what higher-level code in this
+	// library does or doesn't do.
+	enum class RadioMode
 	{
-		digitalWrite(activeConfig.radioRxEn, on ? HIGH : LOW);
-	}
-	// DIO3-as-antenna-switch is a radio-internal function (sx126x_set_dio3_as_ant_switch()
-	// equivalent), not a GPIO this HAL drives directly - the driver/BSP layer
-	// programs it once at init and the chip's own DIO3 pin then follows the
-	// chip's own idle/active state automatically, so there's nothing to
-	// toggle here for that case.
-}
+		Awake,
+		Asleep,
+	};
+	RadioMode radioMode = RadioMode::Awake;
 
-/**
- * @brief Check if the board needs the TX and RX enable pins of the RF switch to be driven by the host
- *
- * If both radioTxEn and radioRxEn are wired as direct RF-switch steering
- * lines (not just one of them as antenna-switch *power* - see
- * WisBlockLoRaHwConfig.h's doc comment), the driver has to flip them itself
- * before every RX or TX, matching SX126x-Arduino's SX126xRXena()/SX126xTXena().
- * None of this library's own WisBlock presets need this (they all use
- * useRxenAntPwr instead, with DIO2 doing the actual TX/RX steering), but a
- * custom eByte E22-style board might.
- *
- * @return true if the host switches between TX and RX
- */
-bool usesManualTxRxSteering()
-{
-	return !activeConfig.useRxenAntPwr && activeConfig.radioTxEn >= 0 && activeConfig.radioRxEn >= 0;
-}
+	// --- RF-switch power tracking ---------------------------------------------
+	// Antenna-switch power is tied to the same Awake/Asleep tracking this file
+	// already has to do for BUSY's sleep-mode behavior, so every caller that
+	// reaches SLEEP - LBM's radio_planner in LoRaWAN mode, or
+	// LoRaP2PEngine::sleep() in P2P mode - gets the antenna-power savings
+	// automatically, with no call-site changes needed anywhere else in the
+	// library. See WisBlockLoRaHwConfig.h's doc comment for the field
+	// combinations this covers (useRxenAntPwr and/or useDio3AntSwitch).
+	// ---------------------------------------------------------------------------
 
-/**
- * @brief Set the RF switch pins for receiving
- */
-void steerForRx()
-{
-	if (usesManualTxRxSteering())
+	/**
+	 * @brief Drive the pin that powers the antenna switch
+	 *
+	 * @param on true to power the antenna switch
+	 */
+	void driveAntennaPower(bool on)
 	{
-		digitalWrite(activeConfig.radioRxEn, HIGH);
-		digitalWrite(activeConfig.radioTxEn, LOW);
+		if (activeConfig.useRxenAntPwr && activeConfig.radioRxEn >= 0)
+		{
+			digitalWrite(activeConfig.radioRxEn, on ? HIGH : LOW);
+		}
+		// DIO3-as-antenna-switch is a radio-internal function (sx126x_set_dio3_as_ant_switch()
+		// equivalent), not a GPIO this HAL drives directly - the driver/BSP layer
+		// programs it once at init and the chip's own DIO3 pin then follows the
+		// chip's own idle/active state automatically, so there's nothing to
+		// toggle here for that case.
 	}
-}
 
-/**
- * @brief Set the RF switch pins for transmitting
- */
-void steerForTx()
-{
-	if (usesManualTxRxSteering())
+	/**
+	 * @brief Check if the board needs the TX and RX enable pins of the RF switch to be driven by the host
+	 *
+	 * If both radioTxEn and radioRxEn are wired as direct RF-switch steering
+	 * lines (not just one of them as antenna-switch *power* - see
+	 * WisBlockLoRaHwConfig.h's doc comment), the driver has to flip them itself
+	 * before every RX or TX, matching SX126x-Arduino's SX126xRXena()/SX126xTXena().
+	 * None of this library's own WisBlock presets need this (they all use
+	 * useRxenAntPwr instead, with DIO2 doing the actual TX/RX steering), but a
+	 * custom eByte E22-style board might.
+	 *
+	 * @return true if the host switches between TX and RX
+	 */
+	bool usesManualTxRxSteering()
 	{
-		digitalWrite(activeConfig.radioRxEn, LOW);
-		digitalWrite(activeConfig.radioTxEn, HIGH);
+		return !activeConfig.useRxenAntPwr && activeConfig.radioTxEn >= 0 && activeConfig.radioRxEn >= 0;
 	}
-}
 
-/**
- * @brief Wait until the radio can accept a command, and wake it up if it sleeps
- *
- * Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
- * for BUSY (assumed already low or clearing quickly); asleep case restores
- * antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
- * the special NSS-pulse wake sequence.
- */
-void checkDeviceReady()
-{
-	if (radioMode != RadioMode::Asleep)
+	/**
+	 * @brief Set the RF switch pins for receiving
+	 */
+	void steerForRx()
 	{
-		WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs);
-		return;
+		if (usesManualTxRxSteering())
+		{
+			digitalWrite(activeConfig.radioRxEn, HIGH);
+			digitalWrite(activeConfig.radioTxEn, LOW);
+		}
 	}
+
+	/**
+	 * @brief Set the RF switch pins for transmitting
+	 */
+	void steerForTx()
+	{
+		if (usesManualTxRxSteering())
+		{
+			digitalWrite(activeConfig.radioRxEn, LOW);
+			digitalWrite(activeConfig.radioTxEn, HIGH);
+		}
+	}
+
+	/**
+	 * @brief Wait until the radio can accept a command, and wake it up if it sleeps
+	 *
+	 * Matches Semtech's sx126x_hal_check_device_ready(): normal case just waits
+	 * for BUSY (assumed already low or clearing quickly); asleep case restores
+	 * antenna power (and gives it kAntPwrSettleUs to stabilize) before issuing
+	 * the special NSS-pulse wake sequence.
+	 */
+	void checkDeviceReady()
+	{
+		if (radioMode != RadioMode::Asleep)
+		{
+			WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs);
+			return;
+		}
 
 #ifdef WISBLOCK_RADIO_HAL_DEBUG
-	// Opt-in trace (define WISBLOCK_RADIO_HAL_DEBUG before including any
-	// library header, e.g. at the top of main.h) for correlating exactly
-	// when a sleep->wake transition happens against LBM's own
-	// MODEM_HAL_DBG_TRACE output (radio_planner's "Open Rx1/Rx2" lines) -
-	// useful for narrowing down a missed RX1/RX2 window: does the wake
-	// happen before radio_planner's target time, or after?
+		// Opt-in trace (define WISBLOCK_RADIO_HAL_DEBUG before including any
+		// library header, e.g. at the top of main.h) for correlating exactly
+		// when a sleep->wake transition happens against LBM's own
+		// MODEM_HAL_DBG_TRACE output (radio_planner's "Open Rx1/Rx2" lines) -
+		// useful for narrowing down a missed RX1/RX2 window: does the wake
+		// happen before radio_planner's target time, or after?
 #ifdef WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON
-	// Bisection toggle: define this (alongside WISBLOCK_RADIO_HAL_DEBUG or
-	// alone) to leave the antenna-power pin(s) permanently high and skip
-	// the settle delay entirely, isolating whether the antenna-power rail
-	// is actually the dominant factor in whatever residual current or
-	// timing issue you're chasing. Revert once you're done - this defeats
-	// the RF-switch power savings documented earlier in this file.
-	Serial.printf("[wake] t=%lu ms (ant pwr forced always-on, settle skipped)\n", millis());
+		// Bisection toggle: define this (alongside WISBLOCK_RADIO_HAL_DEBUG or
+		// alone) to leave the antenna-power pin(s) permanently high and skip
+		// the settle delay entirely, isolating whether the antenna-power rail
+		// is actually the dominant factor in whatever residual current or
+		// timing issue you're chasing. Revert once you're done - this defeats
+		// the RF-switch power savings documented earlier in this file.
+		Serial.printf("[wake] t=%lu ms (ant pwr forced always-on, settle skipped)\n", millis());
 #else
-	driveAntennaPower(true);
-	delayMicroseconds(kAntPwrSettleUs);
-	Serial.printf("[wake] t=%lu ms (ant pwr restored, %lu us settle)\n", millis(), (unsigned long)kAntPwrSettleUs);
+		driveAntennaPower(true);
+		delayMicroseconds(kAntPwrSettleUs);
+		Serial.printf("[wake] t=%lu ms (ant pwr restored, %lu us settle)\n", millis(), (unsigned long)kAntPwrSettleUs);
 #endif
 #else
 #ifdef WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON
-	// See the WISBLOCK_RADIO_HAL_DEBUG branch above for what this does.
+		// See the WISBLOCK_RADIO_HAL_DEBUG branch above for what this does.
 #else
-	driveAntennaPower(true);
-	delayMicroseconds(kAntPwrSettleUs);
+		driveAntennaPower(true);
+		delayMicroseconds(kAntPwrSettleUs);
 #endif
 #endif
 
 #ifndef WISBLOCK_RADIO_HAL_KEEP_SPI_ALWAYS_ON
-	// Re-enable the SPI peripheral disabled in the SetSleep branch below.
+		// Re-enable the SPI peripheral disabled in the SetSleep branch below.
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
-	if (activeConfig.spiInstance == nullptr)
-	{
-		// Only remap pins on the global SPI object - a caller-supplied
-		// SPIClass instance (e.g. RAK3401's second SPIM peripheral) already
-		// fixes its pins in its own constructor.
-		activeSpi->setPins(activeConfig.pinMiso, activeConfig.pinSck, activeConfig.pinMosi);
-	}
-	activeSpi->begin();
+		if (activeConfig.spiInstance == nullptr)
+		{
+			// Only remap pins on the global SPI object - a caller-supplied
+			// SPIClass instance (e.g. RAK3401's second SPIM peripheral) already
+			// fixes its pins in its own constructor.
+			activeSpi->setPins(activeConfig.pinMiso, activeConfig.pinSck, activeConfig.pinMosi);
+		}
+		activeSpi->begin();
 #elif defined(ARDUINO_ARCH_ESP32)
-	activeSpi->begin(activeConfig.pinSck, activeConfig.pinMiso, activeConfig.pinMosi, activeConfig.pinNss);
+		activeSpi->begin(activeConfig.pinSck, activeConfig.pinMiso, activeConfig.pinMosi, activeConfig.pinNss);
 #elif defined(ARDUINO_ARCH_RP2040)
-	// end() leaves the pin assignment of the SPI object untouched, begin() re-enables it.
-	// NSS is driven manually (hwCS = false).
-	activeSpi->begin();
+		// end() leaves the pin assignment of the SPI object untouched, begin() re-enables it.
+		// NSS is driven manually (hwCS = false).
+		activeSpi->begin();
 #endif
 #endif
 
-	activeSpi->beginTransaction(spiSettings);
-	digitalWrite(activeConfig.pinNss, LOW);
-	WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs);
-	digitalWrite(activeConfig.pinNss, HIGH);
-	activeSpi->endTransaction();
-	radioMode = RadioMode::Awake;
-}
-
-/**
- * @brief Configure all radio pins of the active board
- */
-void configurePins()
-{
-	pinMode(activeConfig.pinNss, OUTPUT);
-	digitalWrite(activeConfig.pinNss, HIGH);
-
-	pinMode(activeConfig.pinReset, OUTPUT);
-	digitalWrite(activeConfig.pinReset, HIGH);
-
-	pinMode(activeConfig.pinBusy, INPUT);
-	// DIO1 pinMode/attachInterrupt is handled in wisblock_lbm_port.cpp,
-	// since it's shared wake/IRQ infrastructure rather than pure SPI glue.
-
-	// Pin setup mirrors SX126x-Arduino's SX126xIoInit() for the same three
-	// RADIO_TXEN/RADIO_RXEN combinations - see WisBlockLoRaHwConfig.h's doc
-	// comment.
-	if (activeConfig.radioTxEn < 0 && activeConfig.radioRxEn >= 0)
-	{
-		// Single pin: antenna-switch power (useRxenAntPwr). Powered on here
-		// for the initial reset/probe that follows in init(); from then on
-		// it's tracked automatically alongside RadioMode (see "RF-switch
-		// power tracking" below) - off while the radio is asleep, on
-		// otherwise, matching radioMode's own Awake starting state.
-		pinMode(activeConfig.radioRxEn, OUTPUT);
-		digitalWrite(activeConfig.radioRxEn, HIGH);
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+		radioMode = RadioMode::Awake;
 	}
-	else if (activeConfig.radioTxEn >= 0 && activeConfig.radioRxEn >= 0)
-	{
-		// Both pins: direct RF-switch steering (usesManualTxRxSteering()).
-		// Start in RX direction, matching steerForRx()'s idle state.
-		pinMode(activeConfig.radioTxEn, OUTPUT);
-		pinMode(activeConfig.radioRxEn, OUTPUT);
-		digitalWrite(activeConfig.radioTxEn, LOW);
-		digitalWrite(activeConfig.radioRxEn, HIGH);
-	}
-	// radioTxEn >= 0 && radioRxEn < 0 (TX-only enable, no RX enable at all)
-	// isn't a combination any known SX1262 module uses and is left
-	// unconfigured, matching the reference implementation.
-}
 
-/**
- * @brief Store the board description and derive the BSP configuration from it
- *
- * @param hwConfig Radio wiring of the board
- */
-void setActiveConfig(const WisBlockLoRaHwConfig &hwConfig)
-{
-	activeConfig = hwConfig;
-	activeBspConfig.useLdo = hwConfig.useLdo;
-	activeBspConfig.dio2AntSwitch = hwConfig.useDio2AntSwitch;
-	activeBspConfig.dio3Tcxo = hwConfig.useDio3Tcxo;
-	activeBspConfig.tcxoVoltage = hwConfig.tcxoCtrlVoltage;
-	// Native driver units are 15.625us steps (1/64 ms) - see
-	// ral_sx126x_bsp_get_xosc_cfg()'s doc comment in wisblock_ral_sx126x_bsp.c.
-	activeBspConfig.tcxoStartupTimeInTick = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 64ULL / 1000ULL);
+	/**
+	 * @brief Configure all radio pins of the active board
+	 */
+	void configurePins()
+	{
+		pinMode(activeConfig.pinNss, OUTPUT);
+		digitalWrite(activeConfig.pinNss, HIGH);
+
+		pinMode(activeConfig.pinReset, OUTPUT);
+		digitalWrite(activeConfig.pinReset, HIGH);
+
+		pinMode(activeConfig.pinBusy, INPUT);
+		// DIO1 pinMode/attachInterrupt is handled in wisblock_lbm_port.cpp,
+		// since it's shared wake/IRQ infrastructure rather than pure SPI glue.
+
+		// Pin setup mirrors SX126x-Arduino's SX126xIoInit() for the same three
+		// RADIO_TXEN/RADIO_RXEN combinations - see WisBlockLoRaHwConfig.h's doc
+		// comment.
+		if (activeConfig.radioTxEn < 0 && activeConfig.radioRxEn >= 0)
+		{
+			// Single pin: antenna-switch power (useRxenAntPwr). Powered on here
+			// for the initial reset/probe that follows in init(); from then on
+			// it's tracked automatically alongside RadioMode (see "RF-switch
+			// power tracking" below) - off while the radio is asleep, on
+			// otherwise, matching radioMode's own Awake starting state.
+			pinMode(activeConfig.radioRxEn, OUTPUT);
+			digitalWrite(activeConfig.radioRxEn, HIGH);
+		}
+		else if (activeConfig.radioTxEn >= 0 && activeConfig.radioRxEn >= 0)
+		{
+			// Both pins: direct RF-switch steering (usesManualTxRxSteering()).
+			// Start in RX direction, matching steerForRx()'s idle state.
+			pinMode(activeConfig.radioTxEn, OUTPUT);
+			pinMode(activeConfig.radioRxEn, OUTPUT);
+			digitalWrite(activeConfig.radioTxEn, LOW);
+			digitalWrite(activeConfig.radioRxEn, HIGH);
+		}
+		// radioTxEn >= 0 && radioRxEn < 0 (TX-only enable, no RX enable at all)
+		// isn't a combination any known SX1262 module uses and is left
+		// unconfigured, matching the reference implementation.
+	}
+
+	/**
+	 * @brief Store the board description and derive the BSP configuration from it
+	 *
+	 * @param hwConfig Radio wiring of the board
+	 */
+	void setActiveConfig(const WisBlockLoRaHwConfig &hwConfig)
+	{
+		activeConfig = hwConfig;
+		activeBspConfig.useLdo = hwConfig.useLdo;
+		activeBspConfig.dio2AntSwitch = hwConfig.useDio2AntSwitch;
+		activeBspConfig.dio3Tcxo = hwConfig.useDio3Tcxo;
+		activeBspConfig.tcxoVoltage = hwConfig.tcxoCtrlVoltage;
+		// Native driver units are 15.625us steps (1/64 ms) - see
+		// ral_sx126x_bsp_get_xosc_cfg()'s doc comment in wisblock_ral_sx126x_bsp.c.
+		activeBspConfig.tcxoStartupTimeInTick = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 64ULL / 1000ULL);
+		// LR2021 (LR20xx): the TCXO start-up time is in steps of 31.25 ns, 1 us = 32 steps
+		activeBspConfig.isLr2021 = hwConfig.chipType == WISBLOCK_LORA_CHIP_LR2021;
+		activeBspConfig.tcxoStartupTimeIn32MHzStep = (uint32_t)((uint64_t)hwConfig.tcxoStartupTimeUs * 32ULL);
+		activeBspConfig.lrIrqDio = hwConfig.lrIrqDio;
+		activeBspConfig.lrRfSwitchDioLf = hwConfig.lrRfSwitchDioLf;
+		activeBspConfig.lrRfSwitchDioHf = hwConfig.lrRfSwitchDioHf;
 
 #if defined(ARDUINO_ARCH_RP2040)
-	if (hwConfig.spiInstance != nullptr)
-	{
-		activeSpi = hwConfig.spiInstance;
-	}
-	else
-	{
-		// Pick the SPI peripheral the SCK pin belongs to: SPI0 = 2/6/18/22, SPI1 = 10/14/26
-		int sck = hwConfig.pinSck;
-		activeSpi = (sck == 10 || sck == 14 || sck == 26) ? &SPI1 : &SPI;
-	}
+		if (hwConfig.spiInstance != nullptr)
+		{
+			activeSpi = hwConfig.spiInstance;
+		}
+		else
+		{
+			// Pick the SPI peripheral the SCK pin belongs to: SPI0 = 2/6/18/22, SPI1 = 10/14/26
+			int sck = hwConfig.pinSck;
+			activeSpi = (sck == 10 || sck == 14 || sck == 26) ? &SPI1 : &SPI;
+		}
 #elif defined(WISBLOCK_HAS_HW_CONFIG_INIT)
-	activeSpi = hwConfig.spiInstance != nullptr ? hwConfig.spiInstance : &SPI;
+		activeSpi = hwConfig.spiInstance != nullptr ? hwConfig.spiInstance : &SPI;
 #endif
-	spiSettings = SPISettings(hwConfig.spiHz, MSBFIRST, SPI_MODE0);
-}
+		spiSettings = SPISettings(hwConfig.spiHz, MSBFIRST, SPI_MODE0);
+	}
 } // namespace
 
 namespace WisBlockRadioHal
 {
-void init(const WisBlockLoRaHwConfig &hwConfig)
-{
-	setActiveConfig(hwConfig);
-	configurePins();
+	void init(const WisBlockLoRaHwConfig &hwConfig)
+	{
+		setActiveConfig(hwConfig);
+		configurePins();
 
 #if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
-	if (activeConfig.spiInstance == nullptr)
-	{
-		// Adafruit nRF52 core: remap the global SPI object's pins before
-		// begin() if they don't already match its default pinout. A
-		// caller-supplied SPIClass instance is assumed to already be wired
-		// to the right pins via its own constructor (see
-		// wisblockLoRaHwConfigRAK3401() for a real example) and is left
-		// alone here.
-		activeSpi->setPins(activeConfig.pinMiso, activeConfig.pinSck, activeConfig.pinMosi);
-	}
-	activeSpi->begin();
-#elif defined(ARDUINO_ARCH_ESP32)
-	activeSpi->begin(activeConfig.pinSck, activeConfig.pinMiso, activeConfig.pinMosi, activeConfig.pinNss);
-	// NSS is driven manually around each transaction below rather than left
-	// to SPI's automatic CS, since the SX126x needs NSS held low across
-	// multi-byte command+data phases that a single SPI.transfer() call
-	// doesn't span.
-	pinMode(activeConfig.pinNss, OUTPUT);
-	digitalWrite(activeConfig.pinNss, HIGH);
-#elif defined(ARDUINO_ARCH_RP2040)
-	activeSpi->setRX(activeConfig.pinMiso);
-	activeSpi->setTX(activeConfig.pinMosi);
-	activeSpi->setSCK(activeConfig.pinSck);
-	activeSpi->begin(); // NSS is driven manually, see the ESP32 branch above
-#endif
-
-	sx126x_hal_reset(nullptr); // see NOTE below: this port ignores the context arg entirely
-}
-
-void init()
-{
-#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
-	init(wisblockLoRaHwConfigRAK4631());
-#elif defined(ARDUINO_ARCH_ESP32)
-	init(wisblockLoRaHwConfigRAK3312());
-#elif defined(ARDUINO_ARCH_RP2040)
-	init(wisblockLoRaHwConfigRAK11310());
-#endif
-}
-
-const void *context()
-{
-	return &activeConfig;
-}
-
-int8_t dio1Pin()
-{
-	return activeConfig.pinDio1;
-}
-
-bool isBusy()
-{
-	return digitalRead(activeConfig.pinBusy) == HIGH;
-}
-
-bool waitOnBusy(uint32_t timeoutMs)
-{
-	uint32_t start = millis();
-	while (digitalRead(activeConfig.pinBusy) == HIGH)
-	{
-		if (millis() - start > timeoutMs)
+		if (activeConfig.spiInstance == nullptr)
 		{
-			return false;
+			// Adafruit nRF52 core: remap the global SPI object's pins before
+			// begin() if they don't already match its default pinout. A
+			// caller-supplied SPIClass instance is assumed to already be wired
+			// to the right pins via its own constructor (see
+			// wisblockLoRaHwConfigRAK3401_RAK13300() for a real example) and is left
+			// alone here.
+			activeSpi->setPins(activeConfig.pinMiso, activeConfig.pinSck, activeConfig.pinMosi);
 		}
-#if defined(ARDUINO_ARCH_ESP32)
-		// yield() lets the ESP32 core service WiFi/BT/RTOS housekeeping
-		// during longer waits (e.g. the post-reset boot wait) instead of
-		// starving the idle task and tripping the task watchdog.
-		yield();
+		activeSpi->begin();
+#elif defined(ARDUINO_ARCH_ESP32)
+		activeSpi->begin(activeConfig.pinSck, activeConfig.pinMiso, activeConfig.pinMosi, activeConfig.pinNss);
+		// NSS is driven manually around each transaction below rather than left
+		// to SPI's automatic CS, since the SX126x needs NSS held low across
+		// multi-byte command+data phases that a single SPI.transfer() call
+		// doesn't span.
+		pinMode(activeConfig.pinNss, OUTPUT);
+		digitalWrite(activeConfig.pinNss, HIGH);
+#elif defined(ARDUINO_ARCH_RP2040)
+		activeSpi->setRX(activeConfig.pinMiso);
+		activeSpi->setTX(activeConfig.pinMosi);
+		activeSpi->setSCK(activeConfig.pinSck);
+		activeSpi->begin(); // NSS is driven manually, see the ESP32 branch above
+#endif
+
+#if defined(WISBLOCK_ENABLE_LR2021)
+		if (activeConfig.chipType == WISBLOCK_LORA_CHIP_LR2021)
+		{
+			lr20xx_hal_reset(nullptr); // same as below: the context argument is ignored
+			return;
+		}
+#endif
+		sx126x_hal_reset(nullptr); // see NOTE below: this port ignores the context arg entirely
+	}
+
+	void init()
+	{
+#if defined(ARDUINO_ARCH_NRF52) || defined(NRF52840_XXAA)
+		init(wisblockLoRaHwConfigRAK4631());
+#elif defined(ARDUINO_ARCH_ESP32)
+		init(wisblockLoRaHwConfigRAK3312());
+#elif defined(ARDUINO_ARCH_RP2040)
+		init(wisblockLoRaHwConfigRAK11310());
 #endif
 	}
-	return true;
-}
 
-void setAntennaPower(bool on)
-{
-	driveAntennaPower(on);
-	if (on)
+	const void *context()
 	{
-		delayMicroseconds(kAntPwrSettleUs);
+		return &activeConfig;
 	}
-}
 
-bool isAsleep()
-{
-	return radioMode == RadioMode::Asleep;
-}
+	int8_t dio1Pin()
+	{
+		return activeConfig.pinDio1;
+	}
 
-uint32_t antennaPowerSettleMs()
-{
-	// Round up: reporting less than the real delay is what caused the
-	// RX1/RX2 miss this function exists to fix; reporting a little more
-	// than necessary just costs a touch of extra wake-ahead margin.
-	return (kAntPwrSettleUs + 999) / 1000;
-}
+	bool isBusy()
+	{
+		return digitalRead(activeConfig.pinBusy) == HIGH;
+	}
+
+	bool waitOnBusy(uint32_t timeoutMs)
+	{
+		uint32_t start = millis();
+		while (digitalRead(activeConfig.pinBusy) == HIGH)
+		{
+			if (millis() - start > timeoutMs)
+			{
+				return false;
+			}
+#if defined(ARDUINO_ARCH_ESP32)
+			// yield() lets the ESP32 core service WiFi/BT/RTOS housekeeping
+			// during longer waits (e.g. the post-reset boot wait) instead of
+			// starving the idle task and tripping the task watchdog.
+			yield();
+#endif
+		}
+		return true;
+	}
+
+	void setAntennaPower(bool on)
+	{
+		driveAntennaPower(on);
+		if (on)
+		{
+			delayMicroseconds(kAntPwrSettleUs);
+		}
+	}
+
+	bool isAsleep()
+	{
+		return radioMode == RadioMode::Asleep;
+	}
+
+	uint32_t antennaPowerSettleMs()
+	{
+		// Round up: reporting less than the real delay is what caused the
+		// RX1/RX2 miss this function exists to fix; reporting a little more
+		// than necessary just costs a touch of extra wake-ahead margin.
+		return (kAntPwrSettleUs + 999) / 1000;
+	}
 } // namespace WisBlockRadioHal
 
 const WisBlockLoRaRadioBspConfig *wisblock_radio_hal_get_bsp_config(void)
 {
 	return &activeBspConfig;
+}
+
+bool wisblock_radio_hal_is_lr2021(void)
+{
+	return activeBspConfig.isLr2021;
 }
 
 extern "C"
@@ -436,8 +458,8 @@ extern "C"
 	}
 
 	sx126x_hal_status_t sx126x_hal_write(const void *context, const uint8_t *command,
-										  const uint16_t command_length, const uint8_t *data,
-										  const uint16_t data_length)
+										 const uint16_t command_length, const uint8_t *data,
+										 const uint16_t data_length)
 	{
 		(void)context; // see NOTE in sx126x_hal_reset() above
 
@@ -540,8 +562,8 @@ extern "C"
 	}
 
 	sx126x_hal_status_t sx126x_hal_read(const void *context, const uint8_t *command,
-										 const uint16_t command_length, uint8_t *data,
-										 const uint16_t data_length)
+										const uint16_t command_length, uint8_t *data,
+										const uint16_t data_length)
 	{
 		(void)context; // see NOTE in sx126x_hal_reset() above
 
@@ -586,5 +608,191 @@ extern "C"
 		return SX126X_HAL_STATUS_OK;
 	}
 }
+
+#if defined(WISBLOCK_ENABLE_LR2021)
+// --- LR20xx (LR2021) transport -------------------------------------------------------------------------
+// Same idea as the sx126x_hal_* functions above: BUSY handling, wake-up from sleep, antenna switch power
+// and SPI power-down all go through the same helpers (checkDeviceReady(), radioMode, driveAntennaPower()).
+// What differs is the SPI protocol, see lr20xx_hal.h:
+//  - commands have a 16 bit opcode (command[0] << 8 | command[1])
+//  - lr20xx_hal_read() is a two-step read: the command, NSS released and asserted again, then one
+//    two discarded status bytes (Stat1, Stat2) followed by the response. MOSI must carry zeros while reading.
+//  - lr20xx_hal_direct_read() reads without a command (only used to get the chip status)
+//  - lr20xx_hal_direct_read_fifo() is a one-step read: the command, then the response without a gap
+// SetSleepMode has the opcode 0x0127 (LR20XX_SYSTEM_SET_SLEEP_MODE_OC in lr20xx_system.c).
+namespace
+{
+	constexpr uint8_t kLr20xxSetSleepOpcodeMsb = 0x01;
+	constexpr uint8_t kLr20xxSetSleepOpcodeLsb = 0x27;
+
+	/**
+	 * @brief Write command bytes with NSS low, NSS stays low
+	 */
+	void lrWriteBytes(const uint8_t *bytes, uint16_t length)
+	{
+		for (uint16_t i = 0; i < length; i++)
+		{
+			activeSpi->transfer(bytes[i]);
+		}
+	}
+
+	/**
+	 * @brief Read bytes, only zeros (NOP) go out on MOSI
+	 */
+	void lrReadBytes(uint8_t *bytes, uint16_t length)
+	{
+		for (uint16_t i = 0; i < length; i++)
+		{
+			bytes[i] = activeSpi->transfer(0x00);
+		}
+	}
+} // namespace
+
+extern "C"
+{
+	lr20xx_hal_status_t lr20xx_hal_reset(const void *context)
+	{
+		(void)context; // see NOTE in sx126x_hal_reset(): the context is never used, one radio only
+
+		digitalWrite(activeConfig.pinReset, LOW);
+		delayMicroseconds(kResetPulseUs);
+		digitalWrite(activeConfig.pinReset, HIGH);
+		radioMode = RadioMode::Awake;
+
+		// The chip boots, BUSY stays high until it accepts commands
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_wakeup(const void *context)
+	{
+		(void)context;
+		checkDeviceReady();
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_write(const void *context, const uint8_t *command, const uint16_t command_length,
+										 const uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		lrWriteBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		// SetSleepMode: BUSY stays high while the chip sleeps, so do not wait for it. Remember that the
+		// chip sleeps, the next transaction runs the wake-up sequence in checkDeviceReady().
+		if (command_length >= 2 && command[0] == kLr20xxSetSleepOpcodeMsb && command[1] == kLr20xxSetSleepOpcodeLsb)
+		{
+			radioMode = RadioMode::Asleep;
+#ifdef WISBLOCK_RADIO_HAL_DEBUG
+			Serial.printf("[sleep] t=%lu ms\n", millis());
+#endif
+#ifndef WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON
+			driveAntennaPower(false);
+#endif
+#ifndef WISBLOCK_RADIO_HAL_KEEP_SPI_ALWAYS_ON
+			activeSpi->end();
+#endif
+			return LR20XX_HAL_STATUS_OK;
+		}
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_read(const void *context, const uint8_t *command, const uint16_t command_length,
+										uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		// Step 1: the command
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		// The chip prepares the response, BUSY is high until it is ready
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+
+		// Step 2: TWO status bytes (Stat1, Stat2), then the response. FIX: only one byte was discarded here
+		// before, which shifted every response by one byte: the first byte of the data was Stat2 (reset
+		// status | chip mode, e.g. 0x24 in RX), so GetAndClearIrqStatus lost its top byte and the RX timeout
+		// flag (bit 21) was never seen, get_errors/get_version returned Stat2 as their first byte, and so on.
+		uint8_t status[2] = {0, 0};
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrReadBytes(status, 2);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_direct_read(const void *context, uint8_t *data, const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+
+	lr20xx_hal_status_t lr20xx_hal_direct_read_fifo(const void *context, const uint8_t *command,
+													const uint16_t command_length, uint8_t *data,
+													const uint16_t data_length)
+	{
+		(void)context;
+
+		checkDeviceReady();
+
+		// One step: the command, then the response with NSS kept low
+		activeSpi->beginTransaction(spiSettings);
+		digitalWrite(activeConfig.pinNss, LOW);
+		lrWriteBytes(command, command_length);
+		lrReadBytes(data, data_length);
+		digitalWrite(activeConfig.pinNss, HIGH);
+		activeSpi->endTransaction();
+
+		if (!WisBlockRadioHal::waitOnBusy(kBusyTimeoutMs))
+		{
+			return LR20XX_HAL_STATUS_ERROR;
+		}
+		return LR20XX_HAL_STATUS_OK;
+	}
+}
+#endif // WISBLOCK_ENABLE_LR2021
 
 #endif // WISBLOCK_HAS_HW_CONFIG_INIT

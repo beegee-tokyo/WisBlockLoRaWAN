@@ -47,6 +47,7 @@ for d, _, files in os.walk(src):
 inc_re = re.compile(r'^(\s*#\s*include\s*)"([^"/\\]+)"(.*)$')
 LBM_USERS = ("LoRaWANEngine.cpp", "LoRaP2PEngine.cpp", "wisblock_ral_sx126x_bsp.c",
              "wisblock_lbm_port.cpp", "wisblock_lbm_task.cpp", "wisblock_radio_hal.cpp",
+             "wisblock_ral_lr20xx_bsp.c", "LoRaP2PEngineLR2021.cpp",
              "wisblock_radio_hal_rak11310.cpp", "WisBlockLoRaWAN.cpp", "WisBlockLoRaHwConfig.cpp")
 
 def rel(from_file, target):

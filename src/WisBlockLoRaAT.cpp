@@ -1,6 +1,7 @@
 
 #include <Arduino.h>
 #include "WisBlockLoRaAT.h"
+#include "wisblock_radio_bsp_config.h" // wisblock_radio_hal_is_lr2021()
 #include "WisBlockLoRaWAN_all.h" // WISBLOCK_LORAWAN_VERSION_STRING, used by the AT+VER handler
 #include <ctype.h>
 #include <stdio.h>
@@ -86,15 +87,17 @@ namespace
 	 *   AT+PBW:  0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83,
 	 *            7=31.25, 8=41.67, 9=62.5 kHz   (WisBlockP2PBandwidth lists
 	 *            the narrow bands in the opposite order: 3=62.5 ... 9=7.81)
+	 *            10=203, 11=406, 12=812.5, 13=1000 kHz, a library addition for the 2.4 GHz band, LR2021
+	 *            only (the same numbers as WISBLOCK_BW_203 ... WISBLOCK_BW_1000)
 	 *   AT+PCR:  0=4/5, 1=4/6, 2=4/7, 3=4/8     (WisBlockP2PCodingRate is 1..4)
-	 * For the bandwidth the mapping is its own inverse: 0..2 stay, 3..9 -> 12-x.
+	 * For the bandwidth the mapping is its own inverse: 0..2 stay, 3..9 -> 12-x, 10..13 stay.
 	 *
 	 * @param v Bandwidth index
 	 * @return Bandwidth index in the other numbering
 	 */
 	inline uint8_t p2pBwToggle(uint8_t v)
 	{
-		return v >= 3 ? (uint8_t)(12 - v) : v;
+		return (v >= 3 && v <= 9) ? (uint8_t)(12 - v) : v;
 	}
 
 	/**
@@ -133,11 +136,56 @@ namespace
 	}
 
 	// RUI3 P2P limits (AT+PFREQ/PSF/PBW/PCR/PPL/PTP)
+	// Two frequency windows: the sub-GHz window of the SX1262 and the LR2021, and the 2.4 GHz window that only
+	// exists on the LR2021 (WISBLOCK_ENABLE_LR2021, RAK13702).
 	const uint32_t kP2pFreqMin = 150000000UL;
 	const uint32_t kP2pFreqMax = 960000000UL;
+	const uint32_t kP2pFreq2g4Min = 2400000000UL;
+	const uint32_t kP2pFreq2g4Max = 2483000000UL;
+
+	/**
+	 * @brief Check a P2P frequency against the windows of the transceiver on the board
+	 *
+	 * 150 - 960 MHz for the SX1262 and the LR2021, 2400 - 2483 MHz for the LR2021 only.
+	 *
+	 * @param hz Frequency in Hz
+	 * @return true if the frequency is accepted
+	 */
+	bool isP2pFrequencyValid(uint32_t hz)
+	{
+		if (hz >= kP2pFreqMin && hz <= kP2pFreqMax)
+		{
+			return true;
+		}
+		return wisblock_radio_hal_is_lr2021() && hz >= kP2pFreq2g4Min && hz <= kP2pFreq2g4Max;
+	}
 	const uint32_t kP2pSfMin = 6;
 	const uint32_t kP2pSfMax = 12;
-	const uint32_t kP2pBwMax = 9;
+	const uint32_t kP2pBwMax = 9;		// RUI3 bandwidth indexes 0 - 9
+	const uint32_t kP2pBwWideMax = 13; // 10 - 13: 203 / 406 / 812.5 / 1000 kHz, LR2021 only
+
+	/**
+	 * @brief Check a P2P bandwidth index (AT+PBW numbering) against the radio on the board
+	 *
+	 * 0 - 9 for the SX1262 and the LR2021, 10 - 13 (203 / 406 / 812.5 / 1000 kHz) for the LR2021 only. The
+	 * SX126x engine does not know the wide bandwidths and would fall back to 7.81 kHz.
+	 *
+	 * @param index Bandwidth index
+	 * @return true if the index is accepted
+	 */
+	bool isP2pBwIndexValid(long index)
+	{
+		if (index < 0)
+		{
+			return false;
+		}
+		if (index <= (long)kP2pBwMax)
+		{
+			return true;
+		}
+		return wisblock_radio_hal_is_lr2021() && index <= (long)kP2pBwWideMax;
+	}
+
 	const uint32_t kP2pCrMax = 3;
 	const uint32_t kP2pPreambleMin = 5;
 	const uint32_t kP2pPreambleMax = 65535;
@@ -850,9 +898,17 @@ void WisBlockLoRaAT::atBand(AtOp op, const char *value)
 	}
 	else if (op == AtOp::Write)
 	{
-		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(atoi(value))))
+		const int bandIndex = atoi(value);
+		if (!lora->setRegion(static_cast<WisBlockRUI3Band>(bandIndex)))
 		{
-			replyError("unsupported band index - LA915 not built into this LBM vendoring");
+			if (bandIndex == (int)WISBLOCK_RUI3_BAND_WW2G4)
+			{
+				replyError("band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021");
+			}
+			else
+			{
+				replyError("unsupported band index - LA915 not built into this LBM vendoring");
+			}
 			return;
 		}
 		replyOk();
@@ -1401,7 +1457,7 @@ void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 				tok = strtok(nullptr, ":");
 			}
 			int txp = tok ? atoi(tok) : s.txPowerDbm;
-			if (n < 5 || f[0] < kP2pFreqMin || f[0] > kP2pFreqMax || f[1] < WISBLOCK_FSK_BITRATE_MIN || f[1] > WISBLOCK_FSK_BITRATE_MAX ||
+			if (n < 5 || !isP2pFrequencyValid(f[0]) || f[1] < WISBLOCK_FSK_BITRATE_MIN || f[1] > WISBLOCK_FSK_BITRATE_MAX ||
 				f[2] < WISBLOCK_FSK_FDEV_MIN || f[2] > WISBLOCK_FSK_FDEV_MAX || f[3] < WISBLOCK_FSK_BW_MIN || f[3] > WISBLOCK_FSK_BW_MAX ||
 				f[4] < 1 || f[4] > 8191 || txp < (int)kP2pTxPowerMin || txp > (int)kP2pTxPowerMax)
 			{
@@ -1459,9 +1515,9 @@ void WisBlockLoRaAT::atP2p(AtOp op, const char *value)
 		tok = strtok(nullptr, ":");
 		int8_t txp = tok ? (int8_t)atoi(tok) : 14;
 
-		if (freq == 0 || bwIndex < 0 || bwIndex > (int)kP2pBwMax)
+		if (!isP2pFrequencyValid(freq) || !isP2pBwIndexValid(bwIndex))
 		{
-			replyError("AT_PARAM_ERROR"); // bad frequency or bandwidth index
+			replyError("AT_PARAM_ERROR"); // frequency outside the windows of the radio, or bad bandwidth index
 			return;
 		}
 		lora->setP2PFrequency(freq);
@@ -1493,7 +1549,7 @@ void WisBlockLoRaAT::atPFreq(AtOp op, const char *value)
 	else if (op == AtOp::Write)
 	{
 		uint32_t v;
-		if (!parseUintStrict(value, kP2pFreqMin, kP2pFreqMax, v))
+		if (!parseUintStrict(value, kP2pFreqMin, kP2pFreq2g4Max, v) || !isP2pFrequencyValid(v))
 		{
 			replyError("AT_PARAM_ERROR");
 			return;
@@ -1536,7 +1592,8 @@ void WisBlockLoRaAT::atPBw(AtOp op, const char *value)
 {
 	if (op == AtOp::Query)
 	{
-		// 0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83, 7=31.25, 8=41.67, 9=62.5 kHz
+		// 0=125, 1=250, 2=500, 3=7.8, 4=10.4, 5=15.63, 6=20.83, 7=31.25, 8=41.67, 9=62.5 kHz,
+		// LR2021 only: 10=203, 11=406, 12=812.5, 13=1000 kHz
 		// FSK mode: the RX bandwidth in Hz (4800..467000)
 		port->printf("AT+PBW=");
 		if (lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P)
@@ -1563,7 +1620,7 @@ void WisBlockLoRaAT::atPBw(AtOp op, const char *value)
 			replyOk();
 			return;
 		}
-		if (!parseUintStrict(value, 0, kP2pBwMax, v))
+		if (!parseUintStrict(value, 0, kP2pBwWideMax, v) || !isP2pBwIndexValid((long)v))
 		{
 			replyError("AT_PARAM_ERROR");
 			return;

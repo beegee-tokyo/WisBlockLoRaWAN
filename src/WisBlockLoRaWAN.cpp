@@ -75,6 +75,16 @@ void WisBlockLoRaWAN::begin()
 #if defined(WISBLOCK_HAS_HW_CONFIG_INIT)
 void WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig &hwConfig)
 {
+	// The LR2021 (RAK13702) radio is only compiled in when WISBLOCK_ENABLE_LR2021 is defined, see
+	// wb_lbm_config.h. Without it, running the SX126x code on that chip would only produce garbage, so
+	// refuse it. `began` stays false, so ensureLoRaWANEngineStarted() never starts the LoRaWAN engine.
+#if !defined(WISBLOCK_ENABLE_LR2021)
+	if (hwConfig.chipType == WISBLOCK_LORA_CHIP_LR2021)
+	{
+		Serial.println("[WisBlockLoRaWAN] LR2021: define WISBLOCK_ENABLE_LR2021 in wb_lbm_config.h (or the build flags)");
+		return;
+	}
+#endif
 	// Identical to plain begin() (see its comments above), except the radio
 	// is configured from an explicit hw_config instead of the compile-time
 	// RAKwireless board preset - see WisBlockLoRaHwConfig.h and
@@ -253,7 +263,18 @@ void WisBlockLoRaWAN::setJoinMode(WisBlockJoinMode mode)
 bool WisBlockLoRaWAN::setRegion(WisBlockRUI3Band band)
 {
 	WisBlockRegion region;
-	if (!wisblockRUI3BandToRegion(band, region))
+	if (!wisblockRUI3BandToRegion(band, region) || !wisblockRegionUsable(region))
+	{
+		return false;
+	}
+	config.lorawan.region = region;
+	applyLoRaWANSettings();
+	return true;
+}
+
+bool WisBlockLoRaWAN::setRegion(WisBlockRegion region)
+{
+	if (!wisblockRegionUsable(region))
 	{
 		return false;
 	}

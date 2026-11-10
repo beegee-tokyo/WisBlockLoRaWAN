@@ -1302,8 +1302,8 @@ This command sets numbers corresponding to active regions. It uses the **same nu
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+BAND=?` | - | `AT+BAND=<0 - 11>` | OK<br/>`AT_ERROR` |
-| `AT+BAND=<Input>` | 0,1,2,3,4,5,6,7,8,9,10,11 | - | OK<br/>`AT_ERROR` |
+| `AT+BAND=?` | - | `AT+BAND=<0 - 11>`, or `AT+BAND=13` for 2.4 GHz | OK<br/>`AT_ERROR` |
+| `AT+BAND=<Input>` | 0,1,2,3,4,5,6,7,8,9,10,11, 13 (2.4 GHz, LR2021 only) | - | OK<br/>`AT_ERROR` |
 
 **Example:**
 
@@ -1318,13 +1318,15 @@ OK
 
 ## _💡 NOTE_
 ----
-_0: EU433, 1: CN470, 2: RU864, 3: IN865, 4: EU868, 5: US915, 6: AU915, 7: KR920, 8: AS923-1, 9: AS923-2, 10: AS923-3, 11: AS923-4, 12: LA915._
+_0: EU433, 1: CN470, 2: RU864, 3: IN865, 4: EU868, 5: US915, 6: AU915, 7: KR920, 8: AS923-1, 9: AS923-2, 10: AS923-3, 11: AS923-4, 12: LA915, 13: WW2G4 (2.4 GHz, library addition, not a RUI3 band)._
 
 _The default value is **4** (EU868)._
 
-_`12` (LA915) is **not supported**. `AT_ERROR` is returned, preceded by the text `unsupported band index - LA915 not built into this LBM vendoring`. The same happens for values above 12. It is **not** `AT_PARAM_ERROR`._
+_`12` (LA915) is **not supported**. `AT_ERROR` is returned, preceded by the text `unsupported band index - LA915 not built into this LBM vendoring`. The same happens for values above 13. It is **not** `AT_PARAM_ERROR`._
 
-_If the active region has no RUI3 number (`CN470_RP_1_0`, 2.4 GHz), the query returns `AT_ERROR` with the text `current region has no RUI3 band index`._
+_`13` (WW2G4, 2.4 GHz) needs an LR2021 radio (`wisblockLoRaHwConfigRAK3401_RAK13702()`) and the library built with `WISBLOCK_ENABLE_LR2021`. Otherwise `AT_ERROR` is returned, preceded by the text `band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021`. Like every region, it can only be changed before joining._
+
+_If the active region has no RUI3 number (`CN470_RP_1_0`), the query returns `AT_ERROR` with the text `current region has no RUI3 band index`._
 
 _**EU433** is provided by the library itself (RP002-1.0.4 defaults: channels 433.175 / 433.375 / 433.575 MHz, RX2 434.665 MHz DR0, DR0 - DR7, 1 % duty cycle). Semtech's LoRa Basics Modem does not contain it anymore._
 
@@ -1488,7 +1490,7 @@ AT+PFREQ=868100000
 OK
 ```
 
-_`AT_PARAM_ERROR` is returned for a value that is not a decimal number from `150000000` to `960000000`. The default is 916000000. The value must be inside the frequency range your radio hardware supports._
+_`AT_PARAM_ERROR` is returned for a value that is not a decimal number inside one of the two frequency windows: `150000000` to `960000000` (SX1262 and LR2021) or `2400000000` to `2483000000` (LR2021 only, for example `AT+PFREQ=2425000000`). The default is 916000000. The value must also be inside the frequency range your radio hardware supports._
 
 [Back](#content)
 
@@ -1518,9 +1520,9 @@ Description: P2P mode bandwidth
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+PBW=?` | - | `AT+PBW=<0 - 9>` | OK |
-| `AT+PBW=<Input>` | `0` - `9` | - | OK<br/>`AT_PARAM_ERROR` |
-|  | *Input* = bandwidth **index** (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz |  |  |
+| `AT+PBW=?` | - | `AT+PBW=<0 - 9>` (`<0 - 13>` on an LR2021) | OK |
+| `AT+PBW=<Input>` | `0` - `9`, `10` - `13` on an LR2021 only | - | OK<br/>`AT_PARAM_ERROR` |
+|  | *Input* = bandwidth **index** (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz. LR2021 only, for the 2.4 GHz band: 10 = 203 kHz, 11 = 406 kHz, 12 = 812.5 kHz (the bandwidth of the WW2G4 LoRaWAN region), 13 = 1000 kHz |  |  |
 
 **Example:**
 
@@ -1528,6 +1530,17 @@ Description: P2P mode bandwidth
 AT+PBW=1
 OK
 ```
+
+On an LR2021 for 2.4 GHz:
+
+```text
+AT+PFREQ=2425000000
+OK
+AT+PBW=12
+OK
+```
+
+_The indexes 10 - 13 are rejected with `AT_PARAM_ERROR` on an SX1262, which does not have these bandwidths. They are not tied to a frequency: the radio is not asked if it accepts them in the sub-GHz band._
 
 _The default is 0 (125 kHz)._
 
@@ -1610,9 +1623,9 @@ This command sets or gets the main P2P radio parameters with one command. The sa
 | ------- | --------------- | ------------ | ----------- |
 | `AT+P2P=?` | - | `AT+P2P=<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | OK |
 | `AT+P2P=<Input>` | `<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | - | OK<br/>`AT_PARAM_ERROR` |
-|  | *freq* = frequency in Hz |  |  |
+|  | *freq* = frequency in Hz: 150000000 - 960000000, or 2400000000 - 2483000000 on an LR2021 only |  |  |
 |  | *sf* = spreading factor 7 - 12 |  |  |
-|  | *bw* = bandwidth **index**, same as [AT+PBW](#atpbw) (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz |  |  |
+|  | *bw* = bandwidth **index**, same as [AT+PBW](#atpbw) (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz, LR2021 only: 10 = 203 kHz, 11 = 406 kHz, 12 = 812.5 kHz, 13 = 1000 kHz |  |  |
 |  | *cr* = coding rate **index**: 1 = 4/5, 2 = 4/6, 3 = 4/7, 4 = 4/8 |  |  |
 |  | *preamble* = preamble length in symbols |  |  |
 |  | *txpower* = TX power in dBm |  |  |
@@ -1630,7 +1643,7 @@ OK
 
 ## _⚠️ WARNING_
 ----
-_**The bandwidth and coding rate are indexes, not kHz values.** RUI3 uses `125` / `250` / `500` for the bandwidth and `0` - `3` for the coding rate in `AT+P2P`. Here `AT+P2P=868000000:7:125:1:8:14` is rejected with `AT_PARAM_ERROR` because the bandwidth index is above 9. The bandwidth index is the same as in `AT+PBW`. **The coding rate is not**: `<cr>` counts from 1 (1 = 4/5 ... 4 = 4/8), `AT+PCR` counts from 0._
+_**The bandwidth and coding rate are indexes, not kHz values.** RUI3 uses `125` / `250` / `500` for the bandwidth and `0` - `3` for the coding rate in `AT+P2P`. Here `AT+P2P=868000000:7:125:1:8:14` is rejected with `AT_PARAM_ERROR` because the bandwidth index is above 9 (above 13 on an LR2021). The bandwidth index is the same as in `AT+PBW`. **The coding rate is not**: `<cr>` counts from 1 (1 = 4/5 ... 4 = 4/8), `AT+PCR` counts from 0._
 
 ----
 

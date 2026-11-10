@@ -9,7 +9,7 @@
  * The flow is the same as in BasicLoRaWAN.ino, without the AT command interface and without the
  * network time and link check callbacks. The only hardware specific line is in setup():
  *
- *     lora.begin(wisblockLoRaHwConfigRAK3401());   // instead of plain lora.begin()
+ *     lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300());   // instead of plain lora.begin()
  *
  * It selects the radio wiring. Every other API call, the AT command layer if you add it and the
  * other examples work the same regardless of which begin() you call.
@@ -96,7 +96,7 @@ void setup()
 	// second SPI peripheral, see WisBlockLoRaHwConfig.cpp) instead of the
 	// compile-time RAK4631 default plain lora.begin() would otherwise pick
 	// for an nRF52840 target.
-	lora.begin(wisblockLoRaHwConfigRAK3401());
+	lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300());
 
 	lora.setWorkMode(WISBLOCK_MODE_LORAWAN);
 	lora.setOTAAKeys(devEui, joinEui, appKey);

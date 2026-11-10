@@ -85,6 +85,7 @@ include_dirs = [
     "src/lbm/smtc_modem_core/modem_supervisor",
     "src/lbm/smtc_modem_core/modem_utilities",
     "src/lbm/smtc_modem_core/radio_drivers/sx126x_driver/src",
+    "src/lbm/smtc_modem_core/radio_drivers/lr20xx_driver/src",  # LR2021, only compiled with WISBLOCK_ENABLE_LR2021
     "src/lbm/smtc_modem_core/radio_planner/src",
     "src/lbm/smtc_modem_core/smtc_modem_crypto",
     "src/lbm/smtc_modem_core/smtc_modem_crypto/smtc_secure_element",

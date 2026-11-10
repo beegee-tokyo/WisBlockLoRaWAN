@@ -164,17 +164,34 @@ public:
 	 * WisBlockRUI3Band's for why these two numberings exist.
 	 * @param band Region in RUI3 AT+BAND numbering
 	 * @return false (no change made) for WISBLOCK_RUI3_BAND_LA915, or any other band with no
-	 * WisBlockRegion equivalent in this vendored LBM build.
+	 * WisBlockRegion equivalent in this vendored LBM build, and for WISBLOCK_RUI3_BAND_WW2G4 (2.4 GHz)
+	 * unless the radio is an LR2021 and the library is built with WISBLOCK_ENABLE_LR2021, see
+	 * wisblockRegionUsable(). Call it after begin() for that band.
 	 */
 	bool setRegion(WisBlockRUI3Band band);
+	/**
+	 * @brief Set the LoRaWAN region with the library's own region enumeration
+	 *
+	 * Needed for the one region that has no RUI3 AT+BAND number and so cannot be selected with
+	 * setRegion(WisBlockRUI3Band): WISBLOCK_REGION_CN470_RP_1_0. Every other WisBlockRegion works as well,
+	 * WISBLOCK_REGION_WW2G4 (2.4 GHz) is also WISBLOCK_RUI3_BAND_WW2G4 (13).
+	 *
+	 * WISBLOCK_REGION_WW2G4 needs the LR2021 radio: the library built with WISBLOCK_ENABLE_LR2021
+	 * (wb_lbm_config.h) and begin(wisblockLoRaHwConfigRAK3401_RAK13702()). Call it after begin().
+	 * One region is active at a time and it is set before the join, so switching between sub-GHz
+	 * and 2.4 GHz means selecting the other region and joining again.
+	 * @param region Region
+	 * @return false (no change made) if the region cannot be used with this radio, see wisblockRegionUsable()
+	 */
+	bool setRegion(WisBlockRegion region);
 	/**
 	 * @brief Get the LoRaWAN region
 	 *
 	 * Inverse of setRegion() - returns the currently configured region using RUI3's AT+BAND
 	 * numbering (WisBlockRUI3Band), via wisblockRegionToRUI3Band().
 	 * @return WISBLOCK_RUI3_BAND_UNKNOWN if the current region (getConfig().lorawan.region) has
-	 * no RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0, WISBLOCK_REGION_WW2G4) - read
-	 * getConfig().lorawan.region directly for those.
+	 * no RUI3 band index at all (WISBLOCK_REGION_CN470_RP_1_0) - read
+	 * getConfig().lorawan.region directly for that one, and select it with setRegion(WisBlockRegion).
 	 */
 	WisBlockRUI3Band getRegion() const;
 	/**

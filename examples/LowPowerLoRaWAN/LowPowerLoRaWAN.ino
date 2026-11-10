@@ -427,7 +427,7 @@ void setup()
 
 #ifdef RAK3400
 	Serial.println("[Setup] RAK3401 lora.begin");
-	lora.begin(wisblockLoRaHwConfigRAK3401());
+	lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300());
 #else
 	Serial.println("[Setup] lora.begin");
 	lora.begin();
@@ -583,7 +583,7 @@ void loop()
 
 			if (!lora.setADR(false))
 			{
-				Serial.println("[JOIN] Failed to disable ADR");
+				Serial.println("[JOIN] ADR change queued, the stack applies it after the join");
 			}
 			if (!lora.setDataRate(3))
 			{

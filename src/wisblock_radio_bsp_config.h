@@ -33,6 +33,14 @@ extern "C"
 		bool dio3Tcxo;			 ///< SX1262 DIO3 controls the TCXO supply voltage
 		sx126x_tcxo_ctrl_voltages_t tcxoVoltage;
 		uint32_t tcxoStartupTimeInTick; ///< in the driver's native 15.625us steps, see ral_sx126x_bsp_get_xosc_cfg()
+
+		// LR2021 (LR20xx) only, see wisblock_ral_lr20xx_bsp.c. Always present so the layout does not depend on
+		// WISBLOCK_ENABLE_LR2021.
+		bool isLr2021;						   ///< the board has an LR2021 instead of an SX126x
+		uint32_t tcxoStartupTimeIn32MHzStep;   ///< LR20xx TCXO start-up time, steps of 31.25 ns (1 us = 32 steps)
+		int8_t lrIrqDio;					   ///< LR2021 DIO of the IRQ line, -1 = none
+		int8_t lrRfSwitchDioLf;				   ///< LR2021 DIO of the sub-GHz antenna switch, -1 = none
+		int8_t lrRfSwitchDioHf;				   ///< LR2021 DIO of the 2.4 GHz antenna switch, -1 = none
 	};
 
 	/**
@@ -47,6 +55,13 @@ extern "C"
 	 * @return Pointer to the configuration
 	 */
 	const struct WisBlockLoRaRadioBspConfig *wisblock_radio_hal_get_bsp_config( void );
+
+	/**
+	 * @brief Check if the active board has an LR2021 radio (WisBlockLoRaHwConfig::chipType)
+	 *
+	 * @return true for an LR2021, false for an SX126x
+	 */
+	bool wisblock_radio_hal_is_lr2021( void );
 
 #ifdef __cplusplus
 }
