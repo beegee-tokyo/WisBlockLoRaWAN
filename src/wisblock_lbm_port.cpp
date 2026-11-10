@@ -4,6 +4,7 @@
 #include "WisBlockLoRaFlash.h"
 #include "wisblock_lbm_task.h"
 #include "wisblock_radio_hal.h"
+#include "wisblock_radio_bsp_config.h" // wisblock_radio_hal_is_lr2021()
 #include <Arduino.h>
 #include <stdarg.h>
 #include <string.h>
@@ -509,7 +510,26 @@ extern "C"
 		// original wrong 5ms - not a measured value; if RX1/RX2 are still
 		// marginal after this, that's the number to tune first.
 		constexpr uint32_t kBaseTcxoStartupMs = 40;
-		return kBaseTcxoStartupMs + WisBlockRadioHal::antennaPowerSettleMs();
+		uint32_t delayMs = kBaseTcxoStartupMs + WisBlockRadioHal::antennaPowerSettleMs();
+#ifdef WISBLOCK_ENABLE_LR2021
+		// The LR2021 needs about 60 ms longer than the SX1262 from the TX / RX command to the radio being on
+		// air. Measured in the join logs of the RAK13702 against the same code on an SX1262: command to TX done
+		// = 238 ms for a 114 ms packet (124 ms overhead) against 174 ms (60 ms overhead) on the SX1262, and an
+		// RX window without a downlink ended about 130 ms (SF8) / 160 ms (SF10) after the RX command. With only
+		// the 41 ms above the RX1 and RX2 windows open too late and miss the 25 ms preamble of the join accept
+		// (the LNS sent it with the right frequency, SF and timing). The extra value makes the lateness the same
+		// as on the SX1262, where the join works. It was derived from those logs, not measured on the chip: if
+		// the join accept is still missed, sweep it with -DWISBLOCK_LR2021_RX_STARTUP_EXTRA_MS=<ms> in steps of
+		// 10 ms, the window tolerates only about +/-15 ms.
+#ifndef WISBLOCK_LR2021_RX_STARTUP_EXTRA_MS
+#define WISBLOCK_LR2021_RX_STARTUP_EXTRA_MS 64
+#endif
+		if (wisblock_radio_hal_is_lr2021())
+		{
+			delayMs += WISBLOCK_LR2021_RX_STARTUP_EXTRA_MS;
+		}
+#endif
+		return delayMs;
 	}
 
 	/**

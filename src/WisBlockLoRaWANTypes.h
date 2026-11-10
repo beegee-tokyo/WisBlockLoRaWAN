@@ -259,6 +259,12 @@ enum WisBlockP2PBandwidth : uint8_t
 	WISBLOCK_BW_015 = 7, // 15.63 kHz
 	WISBLOCK_BW_010 = 8, // 10.42 kHz
 	WISBLOCK_BW_007 = 9, // 7.81 kHz
+	// Wide bandwidths for the 2.4 GHz band. LR2021 only (RAK13702), not available with the SX1262: the
+	// SX126x engine does not know them and falls back to 7.81 kHz. They are not part of the AT+PBW numbering.
+	WISBLOCK_BW_203 = 10,  // 203.125 kHz
+	WISBLOCK_BW_406 = 11,  // 406.25 kHz
+	WISBLOCK_BW_812 = 12,  // 812.5 kHz, the bandwidth of the LoRaWAN WW2G4 region
+	WISBLOCK_BW_1000 = 13, // 1000 kHz
 };
 
 enum WisBlockP2PCodingRate : uint8_t

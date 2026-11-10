@@ -4025,3 +4025,163 @@ Report: Class B works now (the gateway beacon period was 0, see above). A log sh
 - Fix: on `SMTC_MODEM_EVENT_JOINED` the configured periodicity is applied before the class is set (so the PingSlotInfoReq of the Class B start carries it). The call in `applySettings()` stays, it works for an already joined device and for ABP.
 - Reproduced and checked with the real engine against the scripted fake modem (which, like the real function, fails when not joined): before the fix, set 3 and Class B before the join gave `set_ping_slot_periodicity(3) FAILED(not joined)`, `set_class(B) FAILED(not joined)`, and after JOINED only `set_class(B)`. After the fix, after JOINED: `set_ping_slot_periodicity(3)`, then `set_class(B)`. The Class B state tests (25 checks, an earlier entry said 28, that was a miscount) and the `AT+CLASS=?` test still pass. Not run on hardware.
 - Effect to note: with the fix the stored value is used. The library default is 0 (a ping slot about every second, the most battery hungry). Use `setPingSlotPeriodicity(n)` / `AT+PGSLOT=n` for a different value. A periodicity in the network server (ChirpStack device profile) does not change what the device uses, the network follows the PingSlotInfoReq of the device.
+
+## 2026-11-08 - Example LoRaP2PPingPong2G4 (LR2021, 2.4 GHz) and wide P2P bandwidths
+
+Request: add an example to the library for PingPong with the LR2021 transceiver on the 2.4 GHz frequency.
+
+### Findings
+
+- The P2P engine of the LR2021 (`LoRaP2PEngineLR2021.cpp`) already handles 2.4 GHz: `lrApplyRadioParams()` sets the frequency from `settings.frequencyHz` and `ral_set_tx_cfg()` / the BSP choose the HF path (RX path, PA, DIO9 antenna switch) for 1.5 GHz and above, the TX power is limited to -19 .. +12 dBm there. `setP2PFrequency()` takes any `uint32_t`, so 2.4 GHz needs no code for the frequency itself.
+- The P2P bandwidth enum stopped at 500 kHz (README: "the wider 2.4 GHz bandwidths are not offered by the P2P API yet"). The 2.4 GHz LoRaWAN region uses 812.5 kHz (`datarates_to_bandwidths_ww_2g4` = BW800), so a 2.4 GHz example on 125/250/500 kHz would not match the band the rest of the library uses for 2.4 GHz.
+- `AT+PFREQ` and `AT+P2P` accept 150 - 960 MHz only (`kP2pFreqMin/Max` in `WisBlockLoRaAT.cpp`) and the AT bandwidth numbering ends at 9. Not changed: the 2.4 GHz settings are made with API calls in the example, as the other examples do for their settings.
+
+### What was added
+
+- `examples/LoRaP2PPingPong2G4/LoRaP2PPingPong2G4.ino`: the PingPong state machine of `LoRaP2PPingPong.ino` (same Master/Slave logic, semaphore wake-up, background task and AT interface) on a RAK3401 + RAK13702: `lora.begin(wisblockLoRaHwConfigRAK3401_RAK13702())`, 2425 MHz, SF7, 812.5 kHz, CR 4/5, 8 symbol preamble, +10 dBm (WW2G4 EIRP limit), sync word 0x1424 (0x12 on the LR2021). Left out compared to the sub-GHz example: the RP2040 / ESP32 branches (the LR2021 is nRF52840 only), the RX boosted gain call (no effect on the LR2021). Needs `WISBLOCK_ENABLE_LR2021`.
+- New `WisBlockP2PBandwidth` values `WISBLOCK_BW_203` (10), `WISBLOCK_BW_406` (11), `WISBLOCK_BW_812` (12), `WISBLOCK_BW_1000` (13): `WisBlockLoRaWANTypes.h`, `bandwidthToHz()` in `LoRaP2PEngine.cpp` (203125 / 406250 / 812500 / 1000000 Hz, used for airtime and the low data rate optimization) and `toRalBandwidth()` in `LoRaP2PEngineLR2021.cpp` (RAL 200 / 400 / 800 / 1000 kHz, which `ral_lr20xx.c` converts to the driver's 203 / 406 / 812 / 1000). The values are appended, existing values and the persisted config are unchanged. The SX126x engine does not know them and falls back to 7.81 kHz (documented at the enum), they are not reachable from the AT commands.
+- README (example list, 2.4 GHz note of the LR2021 section) and CHANGELOG.
+
+### Checked (no hardware, no network)
+
+- `LoRaP2PEngine.cpp` (with and without `WISBLOCK_ENABLE_LR2021`) and `LoRaP2PEngineLR2021.cpp` compile with g++ (`-fsyntax-only`, only an SPI/Arduino stub for `SPI.h`).
+- The real `bandwidthToHz()`, `computeLdro()` and `toSx126xBandwidth()` ran for the old and new values: old values unchanged (125000 / 500000 / 7810 Hz), new values 203125 / 406250 / 812500 / 1000000 Hz, wide values fall back to 7.81 kHz on the SX126x. The real `toRalBandwidth()` and `toShortSyncWord()` ran: 203/406/812/1000 -> RAL 200/400/800/1000 kHz, 0x1424 -> 0x12. 0 failures. (Included the .cpp files into a test program, unresolved radio symbols ignored because the test never calls them.)
+- The new sketch compiles with g++ (`-fsyntax-only`, nRF52 defines, `WISBLOCK_ENABLE_LR2021`) against the real library headers, with stubs for Arduino, Stream, SPI and the FreeRTOS semaphore calls.
+- Not checked: no build with the Adafruit nRF52 core or PlatformIO, no radio. The 2.4 GHz TX power and the antenna switch truth table of the RAK13702 are still the assumptions listed in `wisblock_ral_lr20xx_bsp.c`, the real output power can differ from +10 dBm. Whether the LR2021 at SF7 / 812.5 kHz reaches a second node over a distance was not measured.
+
+## 2026-11-08 - Bad RSSI and missed LoRaWAN join accepts on the RAK13702: review of the antenna switch control
+
+Report: with the fixed library version (HAL status read of 2 bytes, internal 32 kHz RC) LoRa P2P works, but RSSI is very bad in both bands (sub-GHz and 2.4 GHz). With LoRaWAN the uplinks reach the server, the join accepts never arrive at the node, although the gateway sends them. Request: check that the antenna switches are controlled properly with DIO7 and DIO9 and powered with IO3.
+
+### What the code does (reviewed, nothing found broken)
+
+- IO3 (MCU pin 21) is driven high at init, off only while the radio is marked asleep and back on (1 ms settle) at wake-up (`driveAntennaPower()` in `wisblock_radio_hal.cpp`). P2P with a running receive keeps it on. So the enable is not the problem in the P2P tests.
+- `ral_lr20xx_init()` sets DIO7 and DIO9 to the RF switch function (`ral_lr20xx_bsp_get_dio_function()`) and programs each DIO's mask with `lr20xx_system_set_dio_rf_switch_cfg()` for every DIO listed. DIO8 is the IRQ, DIO10/DIO11 stay unused. The sleep drive of DIO7/DIO9 is pull-down.
+- The mask that was programmed: DIO7 high only in TX_LF, DIO9 high only in TX_HF, everything else low (standby, RX). Verified by running the callback (DIO7 = 0x04, DIO9 = 0x10).
+
+### What is still an assumption
+
+- The RAK13702 truth table. "High only while transmitting, low in receive" was copied from the SX1262 DIO2 behavior (see the top of `wisblock_ral_lr20xx_bsp.c`) and never checked against the schematic. TX arriving at the gateway while RX is weak fits a switch that needs the DIO high in RX as well, but it fits other causes too. Other LR2021 modules (LilyGO T-LR2021 tables found in public issues) drive the band DIO high in RX and TX. Not confirmed for the RAK13702.
+- The TCXO voltage. The RAK13702 preset took 3.3 V from the RAK13300 (SX1262) preset. The Meshtastic RAK3401 + LR2021 variant (RAK13700 / RAK13702 on the IO slot, conducted TX measured in both bands, github.com/meshtastic/firmware pull request 11819) uses 1.6 V. The TCXO is shared by both bands, as is the poor RSSI. No device error is reported for a wrong voltage, so the debug output cannot show it.
+- The same pull request lists a board specific table for the low frequency PA (22 dBm configured, 21.3 dBm measured). `kLfPa[]` in the BSP is still the placeholder (duty cycle 6, slices 7), so sub-GHz TX power is not known. It does not explain a bad RX, and the 2.4 GHz PA uses the default duty cycle like Meshtastic does.
+
+### Changes
+
+- `WisBlockLoRaHwConfig.cpp`: RAK13702 preset TCXO voltage 1.6 V by default, `-DWISBLOCK_LR2021_TCXO_VOLTAGE=SX126X_TCXO_CTRL_x_xV` selects another value (`..._3_3V` is the old behavior).
+- `wisblock_ral_lr20xx_bsp.c`: option `-DWISBLOCK_LR2021_RFSW_RX_HIGH` (high in RX and TX). REPLACED, see the correction below: it cannot be right for the 2.4 GHz switch.
+- CHANGELOG.
+
+### Checked (no hardware, no network for the compiler)
+
+- Both files compile with gcc/g++ (`-fsyntax-only`), with and without the new options.
+- The real `wisblockLoRaHwConfigRAK3401_RAK13702()` returns 1.6 V by default and 3.3 V with the override macro. The real RF switch callback returns the masks listed above for both variants.
+- Not checked: the effect on RSSI, the RAK13702 schematic or datasheet (not available here), whether the join accept is received.
+
+### Correction (same day): the RF switch options
+
+The 2.4 GHz antenna switch of the RAK13702 was checked on the board: RF1 = RFO_HF (TX output), RF2 = RFI_HF (RX input), RFC = antenna. TX and RX therefore use different ports of the switch and its control DIO must have opposite levels in TX and in RX. `RFSW_RX_HIGH` (high in both) is wrong for that and was removed. What is not known is the polarity: which control level connects RF1 and which RF2.
+
+- Default, unchanged: DIO high while transmitting (DIO7 TX_LF, DIO9 TX_HF), low in RX and standby.
+- `-DWISBLOCK_LR2021_RFSW_LF_INVERT` (DIO7) and `-DWISBLOCK_LR2021_RFSW_HF_INVERT` (DIO9): DIO high while receiving (RX_LF / RX_HF), low in TX and standby. If the polarity of the switch part is the opposite of the default, TX goes into the RX port and RX into the TX port, which would give weak RSSI both ways.
+- The sub-GHz switch (DIO7) was not part of this check, it is assumed to have the same topology.
+- Checked by running the real callback for the four combinations (masks DIO7 = 0x04 or 0x02, DIO9 = 0x10 or 0x08). Not checked on hardware.
+
+### Antenna switch logic of the RAK13702 (from the board, complete table)
+
+Both bands have an SPDT switch (RFC = antenna), enable/supply pin VDD = ANT_SW1_EN (2.4 GHz) / ANT_SW2_EN (sub-GHz) = IO3, control pin CTRL. Logic as reported: CTRL high = RFC to RF1, CTRL low = RFC to RF2 (reported for VDD = LOW, see the open point).
+
+- 2.4 GHz, CTRL = DIO9: RF1 = RFO_HF (TX), RF2 = RFI_HF (RX). DIO9 high in TX, low in RX. This is what the library already did.
+- sub-GHz, CTRL = DIO7: RF1 = RX input (reported as "RFI_HF subGHz input", taken as RFI_LF), RF2 = RFO_LF (TX). DIO7 high in RX, low in TX. The library had it the other way round: TX went into the RX port and RX into the TX port of the sub-GHz switch. Changed: `RX_LF` is now the mask of DIO7. `-DWISBLOCK_LR2021_RFSW_LF_INVERT` restores the old behavior, `-DWISBLOCK_LR2021_RFSW_HF_INVERT` swaps the 2.4 GHz switch.
+- Checked by running the real callback: DIO7 = 0x02 (RX_LF) and DIO9 = 0x10 (TX_HF) by default, DIO7 = 0x04 with LF_INVERT, DIO9 = 0x08 with HF_INVERT. Not checked on hardware.
+
+Open point: the reported table lists VDD = LOW, the library drives IO3 HIGH while the radio is awake and LOW only while it sleeps. If the switch only routes with VDD LOW, IO3 would be wrong in all modes and both bands would be affected. Against that: the Meshtastic RAK3401 + LR2021 variant also drives IO3 high at init and measured conducted TX in both bands. Left unchanged until the VDD = HIGH rows of the table are known. The 2.4 GHz RSSI problem is not explained by the polarity (that was already correct), so the TCXO voltage and the IO3 level remain the suspects there.
+
+### Antenna switch: the VDD / IO3 level is resolved (PE4259 datasheet)
+
+The switch is a PE4259 with two control modes. Single-pin mode (table 5): pin 6 (VDD) is the +3 V supply, CTRL high = RFC to RF1, CTRL low = RFC to RF2. Complementary-pin mode (table 6): pin 6 is the inverted control, pin 6 low + CTRL high = RFC to RF1, pin 6 high + CTRL low = RFC to RF2. The "VDD = LOW" rows reported before are the complementary table and do not apply: IO3 is wired to pin 6 as a static enable/supply and is driven high while the radio is awake, which is the single-pin mode. With IO3 high the logic is exactly the one implemented (2.4 GHz: DIO9 high = TX, sub-GHz: DIO7 high = RX). Nothing to change for IO3. With IO3 low (radio asleep) the switch is in the complementary mode with a defined state only for CTRL high, which does no harm while the radio sleeps.
+
+So the sub-GHz polarity fix stands. The polarity does not explain the 2.4 GHz RSSI, that band was right before. Remaining suspects for 2.4 GHz: the TCXO voltage (1.6 V now, `-DWISBLOCK_LR2021_TCXO_VOLTAGE` to try others), the antenna / cable, and the front-end calibration and RX path setup. A test that separates the switch from the chip: read the instantaneous RSSI in RX with `lora.getP2PInstantRssi()` (if exposed) with no transmitter nearby: the noise floor should be around -100 dBm or lower for 125 kHz bandwidth, a value near -60 means the front end is not connected properly.
+
+## 2026-11-09 - LR2021 LoRaWAN join accept missed: RX windows open too late
+
+Report: sub-GHz join with the LR2021 never completes although the LNS sends the join accept. An SX1262 node with the same library, LNS, gateway, region and device profile joins fine (join accept in RX1 at -46 dBm, SNR 11). Tests without effect: IO3 kept on during sleep, WISBLOCK_RADIO_HAL_DEBUG. Later LNS logs of one attempt: join request SF8 / 916.8 MHz received by three gateways (-45, -41, -21 dBm), join accept SF8 / 916.8 MHz / 5 s / inverted IQ / 16 dBm, i.e. exactly what the node listens for.
+
+### Correction of the earlier analysis
+
+The earlier LNS join accept (SF10) and the matching gateway log were taken as the answer to the SF8 uplink. They most probably belong to another attempt (the node rotates SF8, SF8, SF9, ... for joins), so the "RX1 data rate mismatch / LNS configuration" conclusion was wrong and is withdrawn. The SF, frequency, IQ and timing of the join accept match the node.
+
+### What the logs show
+
+- Command to TX done, for the same 114 ms packet (SF8, 23 bytes): SX1262 174 ms, LR2021 238 ms (SF9, 206 ms packet: 331 ms). The overhead before the radio is on air is about 60 ms on the SX1262 and 124 ms on the LR2021, about 60 ms more.
+- An RX window without a downlink ends about 130 ms (SF8) and 160 ms (SF10) after the RX command on the LR2021 (8 symbol preamble timeout = 16 ms / 65 ms): the radio only starts listening about 100 ms after the command.
+- On the SX1262 the downlink preamble starts about 44 ms after the RX command (RX done at +137 ms for a 93 ms packet). The stack assumes `smtc_modem_hal_get_radio_tcxo_startup_delay_ms()` = 40 ms + 1 ms antenna settle = 41 ms for both chips (the same function was raised from 5 ms to 40 ms for the SX1262, see the comment there).
+- Result: on the LR2021 the window opens roughly 60-70 ms after the preamble of the join accept started (SF8 preamble about 25 ms), so nothing is detected. TX and P2P (continuous RX) are not affected, which fits what was seen.
+
+### Change
+
+- `wisblock_lbm_port.cpp`: for an LR2021 (`wisblock_radio_hal_is_lr2021()`) the reported delay gets `WISBLOCK_LR2021_RX_STARTUP_EXTRA_MS` added, default 64 ms. That gives the same lateness (about 14 ms) as the SX1262 where the join works. Include of `wisblock_radio_bsp_config.h` added for the declaration.
+- CHANGELOG.
+
+### Checked / not checked
+
+- The file compiles (g++ -fsyntax-only, stubs for Arduino) with and without `WISBLOCK_ENABLE_LR2021` and with the override macro. The first compile caught a missing declaration, fixed by the include.
+- The 64 ms is derived from timestamps of the serial logs (resolution about 10 ms), not measured on the chip. The RX window tolerates only about +/-15 ms. If the join accept is still missed, sweep the macro in steps of 10 ms (for example 54, 74, 84). Not verified on hardware.
+- Why the LR2021 needs about 60 ms more (TCXO start with the 1.6 V supply, wake-up, front end) was not found.
+
+## 2026-11-09 - AT commands: two P2P frequency windows, clean-up after the hardware tests
+
+Request: depending on the transceiver allow two frequency windows in the AT commands: 150 - 960 MHz for the SX1262 and the LR2021, 2400 - 2483 MHz for the LR2021 only. Then clean up. Hardware results since the last entry: LR2021 joins on sub-GHz AS923-3 with ChirpStack, TTN and Actility; LR2021 <-> SX1262 P2P PingPong works; "[JOIN] Failed to disable ADR" also shows on the SX1262 (the stack only has the change queued, applied after the join); 2.4 GHz LoRaWAN gateway still to be set up.
+
+### AT commands
+
+- `WisBlockLoRaAT.cpp`: new helper `isP2pFrequencyValid()` with the windows `kP2pFreqMin/Max` (150 - 960 MHz) and `kP2pFreq2g4Min/Max` (2400 - 2483 MHz, only if `wisblock_radio_hal_is_lr2021()`). Used by `AT+PFREQ`, the LoRa form of `AT+P2P` and the FSK form of `AT+P2P`. `AT+PFREQ` parses the number against the union of both windows first, then applies the helper (a 10 digit number fits `uint32_t`, 2483000000 < 4294967295).
+- Correction of an earlier statement: the LoRa form of `AT+P2P` did not enforce 150 - 960 MHz before (it only rejected 0), only `AT+PFREQ` and the FSK form did. It now checks both windows, so an SX1262 board rejects 2.4 GHz and out of range frequencies there too. Frequencies between the windows (for example 1 GHz) are rejected on every radio.
+- Not changed: the AT bandwidth index stops at 500 kHz (`kP2pBwMax` = 9), so the wide 2.4 GHz bandwidths (203 / 406 / 812 / 1000 kHz) are still API only; the AT TX power range of 5 - 22 dBm (the LR2021 limits it to +12 dBm at 2.4 GHz by itself).
+- Reference `WisBlockLoRaWAN-AT-Commands.md` (`AT+PFREQ`, `AT+P2P`), README and CHANGELOG updated.
+
+### Clean-up
+
+- Statements that the LR2021 support was not tested on hardware replaced by what was tested (LoRa P2P in both bands, LoRa P2P to an SX1262, sub-GHz LoRaWAN joins and uplinks with three LNS) and what was not (PA output power, `kLfPa[]` is still a placeholder; 2.4 GHz LoRaWAN; FSK P2P on the LR2021): `wisblock_ral_lr20xx_bsp.c`, `WisBlockLoRaHwConfig.h`, `LoRaP2PEngineLR2021.cpp`, examples `RAK3401_RAK13702` and `LoRaP2PPingPong2G4`, README, CHANGELOG.
+- The board data in the header of `wisblock_ral_lr20xx_bsp.c` and in `WisBlockLoRaHwConfig.h` said TCXO 3.3 V and a 32.768 kHz crystal; now TCXO 1.6 V (`WISBLOCK_LR2021_TCXO_VOLTAGE`) and no crystal (RAK13702 schematic: "32.768K/NC", internal RC).
+- README: list of the optional LR2021 build options (`WISBLOCK_LR2021_TCXO_VOLTAGE`, `_RX_STARTUP_EXTRA_MS`, `_RFSW_LF_INVERT`, `_RFSW_HF_INVERT`, `_LFCLK_XTAL`, `_DEBUG`). The test flags `WISBLOCK_RADIO_HAL_DEBUG` and `WISBLOCK_RADIO_HAL_KEEP_ANT_PWR_ALWAYS_ON` are debugging aids and are not needed for normal use.
+- `LowPowerLoRaWAN.ino`: the message after `lora.setADR(false)` now says that the change is queued and applied after the join. `setADR()` and `setDataRate()` return true only if the setting is active on the radio now (documented in `WisBlockLoRaWAN.h`); the message for `setDataRate(3)` was not changed.
+
+### Checked / not checked
+
+- The helper text was extracted from the file and run for both chip types at the window boundaries (149999999, 150000000, 960000000, 960000001, 1500000000, 2399999999, 2400000000, 2483000000, 2483000001, 0, 4294967295): 0 failures.
+- `wisblock_ral_lr20xx_bsp.c`, `LoRaP2PEngineLR2021.cpp`, `WisBlockLoRaHwConfig.cpp` and the PingPong sketch compile (g++ -fsyntax-only, host stubs). `WisBlockLoRaAT.cpp` compiles up to stub gaps that are not on the changed lines (nRF SoftDevice and Stream stubs of the host check). No build with the Arduino nRF52 core, no AT session on a board.
+
+## 2026-11-09 - AT bandwidth index extended for the 2.4 GHz bandwidths
+
+Request: extend the AT bandwidth index.
+
+### Change
+
+- New indexes 10 = 203 kHz, 11 = 406 kHz, 12 = 812.5 kHz, 13 = 1000 kHz for `AT+PBW` and the `<bw>` field of `AT+P2P` (they are the same numbers as `WISBLOCK_BW_203` ... `WISBLOCK_BW_1000`, so they need no conversion). Accepted on an LR2021 only; an SX1262 board answers `AT_PARAM_ERROR` because its engine does not know them and would run at 7.81 kHz. The indexes 0 - 9 and their order (RUI3 numbering) are unchanged.
+- `WisBlockLoRaAT.cpp`: `p2pBwToggle()` converted every index from 3 up (`12 - v`), which would have turned 10..13 into 2..-1. It now converts 3..9 only and leaves 10..13 as they are (still its own inverse). New constant `kP2pBwWideMax` = 13 and helper `isP2pBwIndexValid()` (LR2021 check with `wisblock_radio_hal_is_lr2021()`, like the frequency windows), used by `AT+PBW` and `AT+P2P`. The query forms print the new indexes through the same toggle.
+- The wide bandwidths are not tied to a frequency: the radio is not asked if it accepts them in the sub-GHz band (not known from the driver documentation). The same holds for the API.
+- Reference (`AT+PBW`, `AT+P2P`, with an example `AT+PFREQ=2425000000` / `AT+PBW=12`), README, CHANGELOG, header of the `LoRaP2PPingPong2G4` example updated.
+
+### Found, not changed
+
+- The P2P block of the status output (`AT+STATUS`) prints `BW=` with the library enum value (`cfg.p2p.bandwidth`), not through `p2pBwToggle()`. For 125, 250, 500 kHz and the new wide indexes the number is the same as the AT index; for the narrow bandwidths 3..9 it is not (62.5 kHz prints 3 there, `AT+PBW=?` prints 9). The reference calls the value the bandwidth index. Left alone because it changes existing output; one line would fix it.
+- The AT TX power range 5 - 22 dBm is unchanged.
+
+### Checked / not checked
+
+- The real `p2pBwToggle()`, the constants and `isP2pBwIndexValid()` were extracted from the file and run with the real `bandwidthToHz()` of the P2P engine, for the indexes -1 .. 14 on both chip types: 0 - 9 map to 125 / 250 / 500 / 7.81 / 10.42 / 15.63 / 20.83 / 31.25 / 41.67 / 62.5 kHz as documented, 10 - 13 map to 203125 / 406250 / 812500 / 1000000 Hz on the LR2021 and are rejected on the SX1262, -1 and 14 are rejected, the toggle is its own inverse: 0 failures.
+- `WisBlockLoRaAT.cpp` compiles up to stub gaps that are not on the changed lines. No AT session on a board, no build with the Arduino nRF52 core.
+
+## 2026-11-10 - 2.4 GHz LoRaWAN: WW_2G4_SINGLE_DATARATE enabled as a documented option
+
+Finding from the logs: the 2.4 GHz gateway is a RAK5148 (SX1280 concentrator) that listens on 2403, 2479 and 2425 MHz, BW 812 kHz, each channel configured for SF12 only (gateway startup log). The SX1280 test device sends SF12 on all three channels and is received (TTN shows channel index 0 - 2). The LR2021 draws its join data rate at random (DR0 5 %, DR1 10 %, DR2 15 %, DR3 20 %, DR4 20 %, DR5 30 %, `JOIN_DR_DISTRIBUTION_WW_2G4`), so only the DR0 attempt (SF12) can be heard, about 1 in 20 attempts; it joined on the 5th attempt, at 2403 MHz SF12, and the join accept was received at -51 dBm. After the join the application forced DR3 (SF9), which the gateway cannot hear at all. So the earlier idea of a gateway listening on 2403 MHz only is replaced: all three channels are heard, but only at SF12. The LR2021 TX and RX path at 2.4 GHz is not suspected from these logs.
+
+### Change
+
+- `wb_lbm_config.h`: documented, commented out line `// #define WW_2G4_SINGLE_DATARATE` (the macro of the vendored `region_ww_2g4.c`, which includes `wb_lbm_config.h` before it uses the macro, so removing the `//` or `-DWW_2G4_SINGLE_DATARATE` both work). With it the join distribution is `DEFAULT_DR_DISTRIBUTION_WW_2G4` (DR0 100 %) and the mobile low power / long range ADR profiles use the same. The network controlled ADR default (DR0 start) and custom profiles are not touched. The channel is not touched (still random among 2403, 2425, 2479 MHz).
+- README (LR2021 build options) and CHANGELOG.
+
+### Checked / not checked
+
+- Preprocessed `region_ww_2g4.c` without and with the macro: the join `memcpy` takes `JOIN_DR_DISTRIBUTION_WW_2G4` by default and `DEFAULT_DR_DISTRIBUTION_WW_2G4` with it, the mobile profiles switch in the same way. Also with the `#define` uncommented in the header copy. Both variants compile (gcc -fsyntax-only).
+- Not tested on hardware. For the test app: `lora.setDataRate(3)` after the join must become `lora.setDataRate(0)` (or be removed) for the gateway to hear the uplinks.

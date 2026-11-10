@@ -168,7 +168,7 @@ void loop()
 	if (has_tx_finished)
 	{
 		has_tx_finished = false;
-		Serial.println("TX finished");
+		Serial.println("[LoRaWAN] TX finished");
 	}
 	if (class_changed)
 	{

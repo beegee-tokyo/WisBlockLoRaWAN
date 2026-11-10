@@ -13,17 +13,21 @@
  *  - 2.4 GHz antenna switch (RFI_HF): controlled by DIO9
  *  - sub-GHz antenna switch (RF_LF1 and RF_LF2, tied together): controlled by DIO7
  *  - both antenna switches are powered from WB_IO3 (see useRxenAntPwr in WisBlockLoRaHwConfig.h)
- *  - TCXO 3.3 V / 50 ms, supplied by the VTCXO pin of the LR2021
- *  - 32.768 kHz crystal between DIO10 and DIO11
+ *  - TCXO 1.6 V / 50 ms, supplied by the VTCXO pin of the LR2021 (WISBLOCK_LR2021_TCXO_VOLTAGE selects the voltage)
+ *  - no 32.768 kHz crystal fitted (schematic "32.768K/NC"), the internal RC is used, see ral_bsp_lr20xx_get_lfclk_cfg()
  *  - DC-DC regulator
  * The DIO numbers, regulator and TCXO values are read from wisblock_radio_hal_get_bsp_config(), they
  * come from the WisBlockLoRaHwConfig of the board, see wisblockLoRaHwConfigRAK3401_RAK13702().
  *
- * NOT VERIFIED ON HARDWARE, please check with the RAK13702:
- *  1. RF switch truth table. Assumed to behave like DIO2 of an SX1262: the DIO of a switch is high
- *     while transmitting in its band and low in standby and receive.
- *  2. TX power amplifier settings, see ral_lr20xx_bsp_get_tx_cfg() below. The LR2021 datasheet says
- *     the PA parameters depend on the matching network of the board. The table below is a placeholder.
+ * Status on a RAK3401 + RAK13702:
+ *  - Verified: LoRa P2P in the sub-GHz and the 2.4 GHz band (RSSI about -45 dBm at short distance), LoRa P2P to
+ *    an SX1262 node, and LoRaWAN OTAA joins and uplinks in AS923-3 against ChirpStack, TTN and Actility. That
+ *    covers the RF switch truth table (see ral_lr20xx_bsp_get_dio_rf_switch_cfg(): sub-GHz DIO7 is high in RX,
+ *    2.4 GHz DIO9 is high in TX; the switches, PE4259, run in single-pin control mode: pin 6 (VDD) = IO3 =
+ *    high, CTRL = DIO7 / DIO9, CTRL high = RFC to RF1, CTRL low = RFC to RF2) and the TCXO supply.
+ *  - NOT verified: the TX power amplifier settings, see ral_lr20xx_bsp_get_tx_cfg() below. The LR2021
+ *    datasheet says the PA parameters depend on the matching network of the board. The sub-GHz table is a
+ *    placeholder, the real output power was not measured. 2.4 GHz LoRaWAN is not tested yet.
  */
 
 /* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
@@ -32,7 +36,7 @@
 #if defined(WISBLOCK_ENABLE_LR2021)
 
 #include "lbm/smtc_modem_core/smtc_ral/src/ral_lr20xx_bsp.h" // vendored: src/lbm/smtc_modem_core/smtc_ral/src/ral_lr20xx_bsp.h
-#include "lbm/smtc_modem_core/smtc_ralf/src/ralf_lr20xx.h" // vendored: src/lbm/smtc_modem_core/smtc_ralf/src/ralf_lr20xx.h
+#include "lbm/smtc_modem_core/smtc_ralf/src/ralf_lr20xx.h"	 // vendored: src/lbm/smtc_modem_core/smtc_ralf/src/ralf_lr20xx.h
 #include "wisblock_radio_bsp_config.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -73,11 +77,38 @@ typedef struct
 } lr2021_lf_pa_row_t;
 
 static const lr2021_lf_pa_row_t kLfPa[LR2021_LF_MAX_PWR_DBM - LR2021_LF_MIN_PWR_DBM + 1] = {
-	{6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, // -9 ... -2 dBm
-	{6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, // -1 ...  6 dBm
-	{6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, //  7 ... 14 dBm
-	{6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7}, {6, 7},		   // 15 ... 21 dBm
-	{6, 7},															   // 22 dBm
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7}, // -9 ... -2 dBm
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7}, // -1 ...  6 dBm
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7}, //  7 ... 14 dBm
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7},
+	{6, 7}, // 15 ... 21 dBm
+	{6, 7}, // 22 dBm
 };
 
 // High frequency PA duty cycle, the default the driver documents for this field
@@ -113,9 +144,14 @@ void ral_lr20xx_bsp_get_reg_mode(const void *context, lr20xx_system_reg_mode_t *
 void ral_bsp_lr20xx_get_lfclk_cfg(const void *context, lr20xx_system_lfclk_cfg_t *lfclk_cfg)
 {
 	(void)context;
-	// 32.768 kHz crystal between DIO10 and DIO11. DIO10/DIO11 must have no other function, see
-	// ral_lr20xx_bsp_get_dio_function()
+#if defined(WISBLOCK_LR2021_LFCLK_XTAL)
+	// 32.768 kHz crystal between DIO10 and DIO11. The RAK13702 does NOT have it fitted (schematic: "32.768K/NC"),
+	// with the crystal selected ral_lr20xx_init() fails (device error LF_XOSC_START), so this is opt-in
 	*lfclk_cfg = LR20XX_SYSTEM_LFCLK_XTAL;
+#else
+	// Internal 32 kHz RC oscillator (default)
+	*lfclk_cfg = LR20XX_SYSTEM_LFCLK_RC;
+#endif
 }
 
 void ral_lr20xx_bsp_get_xosc_cfg(const void *context, ral_xosc_cfg_t *xosc_cfg,
@@ -202,15 +238,29 @@ void ral_lr20xx_bsp_get_dio_rf_switch_cfg(const void *context, lr20xx_system_dio
 										  lr20xx_system_dio_rf_switch_cfg_t *rf_switch_cfg)
 {
 	(void)context;
-	// ASSUMPTION, see the top of this file: like DIO2 of an SX1262, a switch DIO is high while
-	// transmitting in its band and low in standby and receive.
+	// Each band has an SPDT switch that connects the antenna (RFC) to the TX output or to the RX input. Per the
+	// switch logic checked on the RAK13702 board (CTRL high = RFC to RF1, CTRL low = RFC to RF2):
+	//  - 2.4 GHz, CTRL = DIO9: RF1 = RFO_HF (TX), RF2 = RFI_HF (RX) -> DIO9 high while transmitting, low in RX
+	//  - sub-GHz, CTRL = DIO7: RF1 = RX input, RF2 = RFO_LF (TX)    -> DIO7 high while receiving, low in TX
+	// The two bands are wired the opposite way round. In standby both DIOs are low.
+	// Options to swap the polarity of one band, for testing: -DWISBLOCK_LR2021_RFSW_LF_INVERT (DIO7 high in TX,
+	// low in RX: the behavior before this table was known) and -DWISBLOCK_LR2021_RFSW_HF_INVERT (DIO9 high in RX,
+	// low in TX).
 	if (is_dio(dio, cfg()->lrRfSwitchDioLf))
 	{
+#if defined(WISBLOCK_LR2021_RFSW_LF_INVERT)
 		*rf_switch_cfg = LR20XX_SYSTEM_DIO_RF_SWITCH_WHEN_TX_LF;
+#else
+		*rf_switch_cfg = LR20XX_SYSTEM_DIO_RF_SWITCH_WHEN_RX_LF;
+#endif
 	}
 	else if (is_dio(dio, cfg()->lrRfSwitchDioHf))
 	{
+#if defined(WISBLOCK_LR2021_RFSW_HF_INVERT)
+		*rf_switch_cfg = LR20XX_SYSTEM_DIO_RF_SWITCH_WHEN_RX_HF;
+#else
 		*rf_switch_cfg = LR20XX_SYSTEM_DIO_RF_SWITCH_WHEN_TX_HF;
+#endif
 	}
 	else
 	{

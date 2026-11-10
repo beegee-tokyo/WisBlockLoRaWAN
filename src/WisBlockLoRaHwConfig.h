@@ -188,11 +188,11 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13300();
  * BUSY, antenna switch power), with chipType WISBLOCK_LORA_CHIP_LR2021. The LR2021 drives its IRQ
  * on DIO8, which is wired to the same MCU pin as DIO1 of the RAK13300. Antenna switch RFI_HF
  * (2.4 GHz) is steered by DIO9, RF_LF1/RF_LF2 (sub-GHz) by DIO7, both powered by the same pin
- * as on the RAK13300. TCXO 3.3 V / 50 ms, DC-DC regulator.
+ * as on the RAK13300. TCXO 1.6 V / 50 ms (WISBLOCK_LR2021_TCXO_VOLTAGE), DC-DC regulator.
  *
  * Needs WISBLOCK_ENABLE_LR2021 (wb_lbm_config.h or the build flags), without it
- * WisBlockLoRaWAN::begin() refuses this configuration. Not tested on hardware yet, see the top of
- * wisblock_ral_lr20xx_bsp.c for the assumptions (antenna switch truth table, PA settings).
+ * WisBlockLoRaWAN::begin() refuses this configuration. Tested on hardware with LoRa P2P (sub-GHz and 2.4 GHz)
+ * and sub-GHz LoRaWAN, see the top of wisblock_ral_lr20xx_bsp.c for what is not verified (PA settings).
  *
  * @return Hardware configuration
  */

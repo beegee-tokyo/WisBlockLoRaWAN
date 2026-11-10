@@ -81,6 +81,14 @@ uint32_t bandwidthToHz(WisBlockP2PBandwidth bw)
 		return 15630;
 	case WISBLOCK_BW_010:
 		return 10420;
+	case WISBLOCK_BW_203:
+		return 203125;
+	case WISBLOCK_BW_406:
+		return 406250;
+	case WISBLOCK_BW_812:
+		return 812500;
+	case WISBLOCK_BW_1000:
+		return 1000000;
 	case WISBLOCK_BW_007:
 	default:
 		return 7810;

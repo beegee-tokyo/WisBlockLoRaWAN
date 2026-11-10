@@ -16,7 +16,8 @@
  *  - the TX power is limited to the range of the PA that is used for the frequency, see the BSP
  *  - the LoRa sync word is the 8 bit form (0x12 / 0x34), derived from the 16 bit settings.syncWord
  *
- * NOT TESTED ON HARDWARE yet.
+ * Tested on a RAK3401 + RAK13702: LoRa P2P in the sub-GHz and the 2.4 GHz band (LR2021 to LR2021) and LoRa
+ * P2P to an SX1262 node. FSK P2P on the LR2021 is not tested.
  */
 
 /* WisBlockLoRaWAN: build flags for the Arduino IDE, see wb_lbm_config.h */
@@ -37,125 +38,162 @@ extern "C" const ral_t *wisblock_lr20xx_get_ral(void);
 
 namespace
 {
-// The LR20xx HAL (wisblock_radio_hal.cpp) ignores the context, see the note there
-constexpr void *kCtx = nullptr;
+	// The LR20xx HAL (wisblock_radio_hal.cpp) ignores the context, see the note there
+	constexpr void *kCtx = nullptr;
 
-// Longest RX timeout the RAL accepts, ral_lr20xx_set_rx()
-constexpr uint32_t kMaxRxTimeoutMs = 511999;
+	// Longest RX timeout the RAL accepts, ral_lr20xx_set_rx()
+	constexpr uint32_t kMaxRxTimeoutMs = 511999;
 
-const ral_t *radio()
-{
-	return wisblock_lr20xx_get_ral();
-}
-
-uint32_t clampValue(uint32_t v, uint32_t lo, uint32_t hi)
-{
-	return v < lo ? lo : (v > hi ? hi : v);
-}
-
-ral_lora_bw_t toRalBandwidth(WisBlockP2PBandwidth bw)
-{
-	switch (bw)
+	const ral_t *radio()
 	{
-	case WISBLOCK_BW_125:
-		return RAL_LORA_BW_125_KHZ;
-	case WISBLOCK_BW_250:
-		return RAL_LORA_BW_250_KHZ;
-	case WISBLOCK_BW_500:
-		return RAL_LORA_BW_500_KHZ;
-	case WISBLOCK_BW_062:
-		return RAL_LORA_BW_062_KHZ;
-	case WISBLOCK_BW_041:
-		return RAL_LORA_BW_041_KHZ;
-	case WISBLOCK_BW_031:
-		return RAL_LORA_BW_031_KHZ;
-	case WISBLOCK_BW_020:
-		return RAL_LORA_BW_020_KHZ;
-	case WISBLOCK_BW_015:
-		return RAL_LORA_BW_015_KHZ;
-	case WISBLOCK_BW_010:
-		return RAL_LORA_BW_010_KHZ;
-	case WISBLOCK_BW_007:
-	default:
-		return RAL_LORA_BW_007_KHZ;
+		return wisblock_lr20xx_get_ral();
 	}
-}
 
-/**
- * @brief 8 bit LoRa sync word (0x12 private, 0x34 public) from the 16 bit register form
- *
- * 0x1424 -> 0x12, 0x3444 -> 0x34: the high nibbles of both bytes. Other values lose their low nibbles.
- */
-uint8_t toShortSyncWord(uint16_t syncWord)
-{
-	return (uint8_t)(((syncWord >> 8) & 0xF0) | ((syncWord >> 4) & 0x0F));
-}
-
-ral_lora_mod_params_t buildLoraModParams(const WisBlockP2PSettings &s)
-{
-	ral_lora_mod_params_t p;
-	p.sf = (ral_lora_sf_t)s.spreadingFactor; // RAL_LORA_SF5..12 are the numbers 5..12
-	p.bw = toRalBandwidth(s.bandwidth);
-	p.cr = (ral_lora_cr_t)s.codingRate; // WisBlockP2PCodingRate values 1..4 are RAL_LORA_CR_4_5..4_8
-	p.ldro = ral_compute_lora_ldro(p.sf, p.bw);
-	return p;
-}
-
-ral_lora_pkt_params_t buildLoraPktParams(const WisBlockP2PSettings &s, uint8_t payloadLen)
-{
-	ral_lora_pkt_params_t p;
-	p.preamble_len_in_symb = s.preambleLength;
-	p.header_type = RAL_LORA_PKT_EXPLICIT;
-	p.pld_len_in_bytes = payloadLen;
-	p.crc_is_on = true;
-	p.invert_iq_is_on = s.iqInversion;
-	return p;
-}
-
-ral_gfsk_mod_params_t buildGfskModParams(const WisBlockP2PSettings &s)
-{
-	ral_gfsk_mod_params_t p;
-	p.br_in_bps = clampValue(s.fskBitrate, WISBLOCK_FSK_BITRATE_MIN, WISBLOCK_FSK_BITRATE_MAX);
-	p.fdev_in_hz = clampValue(s.fskFreqDevHz, WISBLOCK_FSK_FDEV_MIN, WISBLOCK_FSK_FDEV_MAX);
-	p.bw_dsb_in_hz = s.fskBandwidthHz;
-	p.pulse_shape = RAL_GFSK_PULSE_SHAPE_BT_1;
-	return p;
-}
-
-// Variable length packets, 2 byte inverted CCITT CRC, whitening, no address filtering. preambleLength is in bytes.
-ral_gfsk_pkt_params_t buildGfskPktParams(const WisBlockP2PSettings &s, uint8_t payloadLen)
-{
-	ral_gfsk_pkt_params_t p;
-	uint32_t bits = clampValue(s.preambleLength, 1, 8191) * 8;
-	p.preamble_len_in_bits = (uint16_t)bits;
-	p.preamble_detector = bits >= 16 ? RAL_GFSK_PREAMBLE_DETECTOR_MIN_16BITS : RAL_GFSK_PREAMBLE_DETECTOR_MIN_8BITS;
-	uint8_t swLen = s.fskSyncWordLen;
-	if (swLen < 1 || swLen > WISBLOCK_FSK_SYNCWORD_MAX_LEN)
+	uint32_t clampValue(uint32_t v, uint32_t lo, uint32_t hi)
 	{
-		swLen = 3;
+		return v < lo ? lo : (v > hi ? hi : v);
 	}
-	p.sync_word_len_in_bits = swLen * 8;
-	p.address_filtering = RAL_GFSK_ADDRESS_FILTERING_DISABLE;
-	p.header_type = RAL_GFSK_PKT_VAR_LEN;
-	p.pld_len_in_bytes = payloadLen;
-	p.crc_type = RAL_GFSK_CRC_2_BYTES_INV;
-	p.dc_free = RAL_GFSK_DC_FREE_WHITENING;
-	return p;
-}
 
-constexpr ral_irq_t kIrqsForTx = (ral_irq_t)(RAL_IRQ_TX_DONE | RAL_IRQ_RX_TIMEOUT);
-constexpr ral_irq_t kIrqsForRx = (ral_irq_t)(RAL_IRQ_RX_DONE | RAL_IRQ_RX_TIMEOUT | RAL_IRQ_RX_CRC_ERROR);
-constexpr ral_irq_t kIrqsForCad = (ral_irq_t)(RAL_IRQ_CAD_DONE | RAL_IRQ_CAD_OK);
+	ral_lora_bw_t toRalBandwidth(WisBlockP2PBandwidth bw)
+	{
+		switch (bw)
+		{
+		case WISBLOCK_BW_125:
+			return RAL_LORA_BW_125_KHZ;
+		case WISBLOCK_BW_250:
+			return RAL_LORA_BW_250_KHZ;
+		case WISBLOCK_BW_500:
+			return RAL_LORA_BW_500_KHZ;
+		case WISBLOCK_BW_062:
+			return RAL_LORA_BW_062_KHZ;
+		case WISBLOCK_BW_041:
+			return RAL_LORA_BW_041_KHZ;
+		case WISBLOCK_BW_031:
+			return RAL_LORA_BW_031_KHZ;
+		case WISBLOCK_BW_020:
+			return RAL_LORA_BW_020_KHZ;
+		case WISBLOCK_BW_015:
+			return RAL_LORA_BW_015_KHZ;
+		case WISBLOCK_BW_010:
+			return RAL_LORA_BW_010_KHZ;
+		case WISBLOCK_BW_203:
+			return RAL_LORA_BW_200_KHZ; // the RAL names are nominal, the LR20xx driver gets 203.125 kHz
+		case WISBLOCK_BW_406:
+			return RAL_LORA_BW_400_KHZ; // 406.25 kHz
+		case WISBLOCK_BW_812:
+			return RAL_LORA_BW_800_KHZ; // 812.5 kHz
+		case WISBLOCK_BW_1000:
+			return RAL_LORA_BW_1000_KHZ;
+		case WISBLOCK_BW_007:
+		default:
+			return RAL_LORA_BW_007_KHZ;
+		}
+	}
+
+	/**
+	 * @brief 8 bit LoRa sync word (0x12 private, 0x34 public) from the 16 bit register form
+	 *
+	 * 0x1424 -> 0x12, 0x3444 -> 0x34: the high nibbles of both bytes. Other values lose their low nibbles.
+	 */
+	uint8_t toShortSyncWord(uint16_t syncWord)
+	{
+		return (uint8_t)(((syncWord >> 8) & 0xF0) | ((syncWord >> 4) & 0x0F));
+	}
+
+	ral_lora_mod_params_t buildLoraModParams(const WisBlockP2PSettings &s)
+	{
+		ral_lora_mod_params_t p;
+		p.sf = (ral_lora_sf_t)s.spreadingFactor; // RAL_LORA_SF5..12 are the numbers 5..12
+		p.bw = toRalBandwidth(s.bandwidth);
+		p.cr = (ral_lora_cr_t)s.codingRate; // WisBlockP2PCodingRate values 1..4 are RAL_LORA_CR_4_5..4_8
+		p.ldro = ral_compute_lora_ldro(p.sf, p.bw);
+		return p;
+	}
+
+	ral_lora_pkt_params_t buildLoraPktParams(const WisBlockP2PSettings &s, uint8_t payloadLen)
+	{
+		ral_lora_pkt_params_t p;
+		p.preamble_len_in_symb = s.preambleLength;
+		p.header_type = RAL_LORA_PKT_EXPLICIT;
+		p.pld_len_in_bytes = payloadLen;
+		p.crc_is_on = true;
+		p.invert_iq_is_on = s.iqInversion;
+		return p;
+	}
+
+	ral_gfsk_mod_params_t buildGfskModParams(const WisBlockP2PSettings &s)
+	{
+		ral_gfsk_mod_params_t p;
+		p.br_in_bps = clampValue(s.fskBitrate, WISBLOCK_FSK_BITRATE_MIN, WISBLOCK_FSK_BITRATE_MAX);
+		p.fdev_in_hz = clampValue(s.fskFreqDevHz, WISBLOCK_FSK_FDEV_MIN, WISBLOCK_FSK_FDEV_MAX);
+		p.bw_dsb_in_hz = s.fskBandwidthHz;
+		p.pulse_shape = RAL_GFSK_PULSE_SHAPE_BT_1;
+		return p;
+	}
+
+	// Variable length packets, 2 byte inverted CCITT CRC, whitening, no address filtering. preambleLength is in bytes.
+	ral_gfsk_pkt_params_t buildGfskPktParams(const WisBlockP2PSettings &s, uint8_t payloadLen)
+	{
+		ral_gfsk_pkt_params_t p;
+		uint32_t bits = clampValue(s.preambleLength, 1, 8191) * 8;
+		p.preamble_len_in_bits = (uint16_t)bits;
+		p.preamble_detector = bits >= 16 ? RAL_GFSK_PREAMBLE_DETECTOR_MIN_16BITS : RAL_GFSK_PREAMBLE_DETECTOR_MIN_8BITS;
+		uint8_t swLen = s.fskSyncWordLen;
+		if (swLen < 1 || swLen > WISBLOCK_FSK_SYNCWORD_MAX_LEN)
+		{
+			swLen = 3;
+		}
+		p.sync_word_len_in_bits = swLen * 8;
+		p.address_filtering = RAL_GFSK_ADDRESS_FILTERING_DISABLE;
+		p.header_type = RAL_GFSK_PKT_VAR_LEN;
+		p.pld_len_in_bytes = payloadLen;
+		p.crc_type = RAL_GFSK_CRC_2_BYTES_INV;
+		p.dc_free = RAL_GFSK_DC_FREE_WHITENING;
+		return p;
+	}
+
+	constexpr ral_irq_t kIrqsForTx = (ral_irq_t)(RAL_IRQ_TX_DONE | RAL_IRQ_RX_TIMEOUT);
+	constexpr ral_irq_t kIrqsForRx = (ral_irq_t)(RAL_IRQ_RX_DONE | RAL_IRQ_RX_TIMEOUT | RAL_IRQ_RX_CRC_ERROR);
+	constexpr ral_irq_t kIrqsForCad = (ral_irq_t)(RAL_IRQ_CAD_DONE | RAL_IRQ_CAD_OK);
 } // namespace
+
+// ---- Debug output: define WISBLOCK_LR2021_DEBUG (build flag) to see the result of every radio call ----
+#if defined(WISBLOCK_LR2021_DEBUG)
+#include <Arduino.h>
+static int lrDbg(const char *step, int status)
+{
+	Serial.printf("[LR2021] %-26s %s (%d)\n", step, status == 0 ? "ok" : "FAILED", status);
+	return status;
+}
+#define LR_CALL(step, call) lrDbg(step, (int)(call))
+#else
+#define LR_CALL(step, call) ((int)(call))
+#endif
 
 void LoRaP2PEngine::lrBegin()
 {
 	const ral_t *r = radio();
-	ral_reset(r);
-	ral_init(r); // regulator, TCXO, 32 kHz clock, DIO functions, RF switch and front end calibration, see the BSP
-	ral_set_standby(r, RAL_STANDBY_CFG_RC);
-	ral_set_pkt_type(r, isFsk() ? RAL_PKT_TYPE_GFSK : RAL_PKT_TYPE_LORA);
+	LR_CALL("ral_reset", ral_reset(r));
+	LR_CALL("ral_init", ral_init(r)); // regulator, TCXO, 32 kHz clock, DIO functions, RF switch and front end calibration, see the BSP
+	LR_CALL("ral_set_standby", ral_set_standby(r, RAL_STANDBY_CFG_RC));
+	LR_CALL("ral_set_pkt_type", ral_set_pkt_type(r, isFsk() ? RAL_PKT_TYPE_GFSK : RAL_PKT_TYPE_LORA));
 	lrApplyRadioParams();
+#if defined(WISBLOCK_LR2021_DEBUG)
+	// Proof that SPI works: a dead bus reads 0.0 or 255.255 here
+	lr20xx_system_version_t ver = {0, 0};
+	int vs = LR_CALL("get_version", lr20xx_system_get_version(kCtx, &ver));
+	Serial.printf("[LR2021] firmware version %u.%u (status %d)\n", ver.major, ver.minor, vs);
+	uint8_t chipMode = 0, cmdStatus = 0;
+	uint16_t devErrors = 0;
+	if (lrGetRadioStatus(chipMode, cmdStatus, devErrors))
+	{
+		Serial.printf("[LR2021] chip_mode=%u cmd_status=%u device_errors=0x%04X\n", chipMode, cmdStatus, devErrors);
+	}
+	else
+	{
+		Serial.println("[LR2021] get_status/get_errors FAILED");
+	}
+#endif
 }
 
 void LoRaP2PEngine::lrApplySettings(bool modulationChanged)
@@ -173,7 +211,7 @@ void LoRaP2PEngine::lrApplySettings(bool modulationChanged)
 void LoRaP2PEngine::lrApplyRadioParams()
 {
 	const ral_t *r = radio();
-	ral_set_rf_freq(r, settings.frequencyHz);
+	LR_CALL("ral_set_rf_freq", ral_set_rf_freq(r, settings.frequencyHz));
 
 	if (isFsk())
 	{
@@ -182,14 +220,14 @@ void LoRaP2PEngine::lrApplyRadioParams()
 	else
 	{
 		ral_lora_mod_params_t mod = buildLoraModParams(settings);
-		ral_set_lora_mod_params(r, &mod);
+		LR_CALL("ral_set_lora_mod_params", ral_set_lora_mod_params(r, &mod));
 		lrApplyPktParams(255); // max; overridden per TX in lrSend(), irrelevant for RX (explicit header)
-		ral_set_lora_sync_word(r, toShortSyncWord(settings.syncWord));
+		LR_CALL("ral_set_lora_sync_word", ral_set_lora_sync_word(r, toShortSyncWord(settings.syncWord)));
 	}
 
 	// PA selection, power and ramp time. The BSP picks the LF or HF PA from the frequency and limits the
 	// power to its range. Has to come after the frequency is set.
-	ral_set_tx_cfg(r, settings.txPowerDbm, settings.frequencyHz);
+	LR_CALL("ral_set_tx_cfg", ral_set_tx_cfg(r, settings.txPowerDbm, settings.frequencyHz));
 }
 
 void LoRaP2PEngine::lrApplyFskParams()
@@ -251,26 +289,35 @@ void LoRaP2PEngine::lrStartRadioReceive(uint32_t mode)
 {
 	const ral_t *r = radio();
 	lrReconfigureAfterColdSleep();
-	ral_set_standby(r, RAL_STANDBY_CFG_RC);
+	LR_CALL("rx: set_standby", ral_set_standby(r, RAL_STANDBY_CFG_RC));
 
 	lrApplyPktParams(255);
 
-	ral_set_dio_irq_params(r, kIrqsForRx);
-	ral_clear_irq_status(r, RAL_IRQ_ALL);
+	LR_CALL("rx: set_dio_irq_params", ral_set_dio_irq_params(r, kIrqsForRx));
+	LR_CALL("rx: clear_irq_status", ral_clear_irq_status(r, RAL_IRQ_ALL));
 
 	if (mode == WISBLOCK_P2P_RX_CONTINUOUS_TX || mode == WISBLOCK_P2P_RX_CONTINUOUS)
 	{
-		ral_set_rx(r, RAL_RX_TIMEOUT_CONTINUOUS_MODE);
+		LR_CALL("rx: set_rx (continuous)", ral_set_rx(r, RAL_RX_TIMEOUT_CONTINUOUS_MODE));
 	}
 	else if (mode == WISBLOCK_P2P_RX_SINGLE)
 	{
 		// No timeout, the radio goes to standby after the first packet (timeout 0 in the RAL)
-		ral_set_rx(r, 0);
+		LR_CALL("rx: set_rx (single)", ral_set_rx(r, 0));
 	}
 	else
 	{
-		ral_set_rx(r, mode > kMaxRxTimeoutMs ? kMaxRxTimeoutMs : mode);
+		LR_CALL("rx: set_rx (timeout)", ral_set_rx(r, mode > kMaxRxTimeoutMs ? kMaxRxTimeoutMs : mode));
 	}
+#if defined(WISBLOCK_LR2021_DEBUG)
+	// chip_mode should now be an RX mode, device_errors 0
+	uint8_t chipMode = 0, cmdStatus = 0;
+	uint16_t devErrors = 0;
+	if (lrGetRadioStatus(chipMode, cmdStatus, devErrors))
+	{
+		Serial.printf("[LR2021] after set_rx: chip_mode=%u cmd_status=%u device_errors=0x%04X\n", chipMode, cmdStatus, devErrors);
+	}
+#endif
 }
 
 void LoRaP2PEngine::lrStartReceiveDutyCycle(uint32_t rxTimeMs, uint32_t sleepTimeMs)
@@ -400,12 +447,35 @@ uint32_t LoRaP2PEngine::lrHandleEvents()
 	// comment in handleEvents())
 	if (WisBlockRadioHal::isAsleep())
 	{
+#if defined(WISBLOCK_LR2021_DEBUG)
+		Serial.printf("[LR2021] poll t=%lu ms: radio is marked ASLEEP, no IRQ check\n", (unsigned long)millis());
+#endif
 		return kNoScheduledDeadlineMs;
 	}
 
+#if defined(WISBLOCK_LR2021_DEBUG)
+	{
+		// Read the chip state WITHOUT clearing anything: chip mode, raw IRQ flags, device errors and the
+		// level of the MCU pin that DIO8 is wired to
+		lr20xx_system_stat1_t s1;
+		lr20xx_system_stat2_t s2;
+		lr20xx_system_irq_mask_t rawIrq = 0;
+		lr20xx_system_errors_t errs = 0;
+		int st = (int)lr20xx_system_get_status(kCtx, &s1, &s2, &rawIrq);
+		lr20xx_system_get_errors(kCtx, &errs);
+		Serial.printf("[LR2021] poll t=%lu ms: status=%d chip_mode=%u cmd=%u irq=0x%08lX errors=0x%04X IRQpin=%d\n",
+					  (unsigned long)millis(), st, (unsigned)s2.chip_mode, (unsigned)s1.command_status,
+					  (unsigned long)rawIrq, (unsigned)errs, (int)digitalRead(WisBlockRadioHal::dio1Pin()));
+	}
+#endif
+
 	const ral_t *r = radio();
 	ral_irq_t irq = RAL_IRQ_NONE;
-	if (ral_get_and_clear_irq_status(r, &irq) != RAL_STATUS_OK || irq == RAL_IRQ_NONE)
+	ral_status_t irqSt = ral_get_and_clear_irq_status(r, &irq);
+#if defined(WISBLOCK_LR2021_DEBUG)
+	Serial.printf("[LR2021] get_and_clear_irq: status=%d ral_irq=0x%08lX\n", (int)irqSt, (unsigned long)irq);
+#endif
+	if (irqSt != RAL_STATUS_OK || irq == RAL_IRQ_NONE)
 	{
 		return kNoScheduledDeadlineMs; // nothing pending, the common case
 	}

@@ -583,7 +583,7 @@ void loop()
 
 			if (!lora.setADR(false))
 			{
-				Serial.println("[JOIN] Failed to disable ADR");
+				Serial.println("[JOIN] ADR change queued, the stack applies it after the join");
 			}
 			if (!lora.setDataRate(3))
 			{

@@ -106,4 +106,14 @@
 #define REGION_WW_2G4
 #endif
 
+// 2.4 GHz LoRaWAN, single data rate: join requests use DR0 (SF12, BW 812.5 kHz) only, and the mobile ADR
+// profiles use DR0 only. Without it the join data rate is drawn at random for every attempt (DR0 5 %, DR1 10 %,
+// DR2 15 %, DR3 20 %, DR4 20 %, DR5 30 %), which is the standard behavior but only works with a gateway that
+// listens to all of these spreading factors. Gateways with an SX1280 concentrator, for example the RAK5148, have
+// one fixed spreading factor per channel (SF12 as shipped), so only about 1 of 20 join requests would be heard.
+// The join channel is still picked at random from the three default channels (2403, 2425 and 2479 MHz). Enable
+// it by removing the // in front of the #define below, or by defining WW_2G4_SINGLE_DATARATE in the build flags.
+// After the join the data rate follows the ADR settings of the application (the default is DR0).
+// #define WW_2G4_SINGLE_DATARATE
+
 #endif /* WB_LBM_CONFIG_H */

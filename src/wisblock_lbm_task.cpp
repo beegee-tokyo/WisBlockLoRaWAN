@@ -33,268 +33,272 @@
 
 namespace
 {
-constexpr uint32_t kStackSize = 4096; // matches SX126x-Arduino's own start_lora_task() default
+	constexpr uint32_t kStackSize = 4096; // matches SX126x-Arduino's own start_lora_task() default
 // Priority of the task. nRF52/ESP32: 1, the same as loop(). Arduino-Pico runs setup()/loop() at
 // configMAX_PRIORITIES / 2, so the task is one above it, otherwise a loop() that does not block
 // would starve it (the task is pinned to core 0 below). Override with -DWB_LBM_TASK_PRIORITY=n
 #ifndef WB_LBM_TASK_PRIORITY
 #if defined(ARDUINO_ARCH_RP2040)
 #define WB_LBM_TASK_PRIORITY ((configMAX_PRIORITIES / 2) + 1)
-#elif defined (ARDUINO_ARCH_ESP32) 
+#elif defined(ARDUINO_ARCH_ESP32)
 #define WB_LBM_TASK_PRIORITY 3 // higher than loop task to avoid blocking
 #else
 #define WB_LBM_TASK_PRIORITY 1 // matches SX126x-Arduino's TASK_PRIO_NORMAL
 #endif
 #endif
-constexpr UBaseType_t kTaskPriority = WB_LBM_TASK_PRIORITY;
+	constexpr UBaseType_t kTaskPriority = WB_LBM_TASK_PRIORITY;
 
-// First wait after the task starts, before eventHandler has ever run once -
-// bounded (not portMAX_DELAY) specifically so a join()/send()/etc. call
-// made shortly after enableBackgroundTask() (before any external trigger
-// has fired) still gets picked up promptly instead of stalling forever.
-constexpr uint32_t kInitialWaitMs = 100;
+	// First wait after the task starts, before eventHandler has ever run once -
+	// bounded (not portMAX_DELAY) specifically so a join()/send()/etc. call
+	// made shortly after enableBackgroundTask() (before any external trigger
+	// has fired) still gets picked up promptly instead of stalling forever.
+	constexpr uint32_t kInitialWaitMs = 100;
 
 // Safety ceiling on how long the task will ever wait, regardless of what
 // eventHandler returns - keeps a periodic "still alive" check-in even if
 // an engine misreports an enormous or bogus deadline.
-constexpr uint32_t kMaxWaitMs = 60000;
+#if defined(WISBLOCK_LR2021_DEBUG)
+	constexpr uint32_t kMaxWaitMs = 2000; // DEBUG: poll the radio every 2 s
+#else
+	constexpr uint32_t kMaxWaitMs = 60000;
+#endif
 
-SemaphoreHandle_t eventSemaphore = NULL;
-TaskHandle_t eventTaskHandle = NULL;
-TimerHandle_t swTimerHandle = NULL;
-SemaphoreHandle_t lbmMutex = NULL;
-uint32_t (*registeredEventHandler)() = nullptr;
-void (*registeredTimerCallback)(void *context) = nullptr;
-void *registeredTimerContext = nullptr;
-bool active = false;
+	SemaphoreHandle_t eventSemaphore = NULL;
+	TaskHandle_t eventTaskHandle = NULL;
+	TimerHandle_t swTimerHandle = NULL;
+	SemaphoreHandle_t lbmMutex = NULL;
+	uint32_t (*registeredEventHandler)() = nullptr;
+	void (*registeredTimerCallback)(void *context) = nullptr;
+	void *registeredTimerContext = nullptr;
+	bool active = false;
 
-/**
- * @brief Background task: waits for a wake-up event and runs the event handler
- *
- * @param pvParameters Not used
- */
-void eventTask(void *pvParameters)
-{
-	(void)pvParameters;
-	TickType_t waitTicks = pdMS_TO_TICKS(kInitialWaitMs);
-	while (true)
+	/**
+	 * @brief Background task: waits for a wake-up event and runs the event handler
+	 *
+	 * @param pvParameters Not used
+	 */
+	void eventTask(void *pvParameters)
 	{
-		xSemaphoreTake(eventSemaphore, waitTicks);
+		(void)pvParameters;
+		TickType_t waitTicks = pdMS_TO_TICKS(kInitialWaitMs);
+		while (true)
+		{
+			xSemaphoreTake(eventSemaphore, waitTicks);
 
-		// Whether this wake came from an actual semaphore give (DIO1 IRQ,
-		// timer expiry) or just from the bounded wait timing out, always
-		// re-pump the handler - LBM's smtc_modem_run_engine() contract
-		// requires being called again within its last reported budget
-		// regardless of why we woke up.
-		uint32_t nextWaitMs = kMaxWaitMs;
-		if (registeredEventHandler)
-		{
-			xSemaphoreTake(lbmMutex, portMAX_DELAY);
-			nextWaitMs = registeredEventHandler();
-			xSemaphoreGive(lbmMutex);
-		}
-		if (nextWaitMs > kMaxWaitMs)
-		{
-			nextWaitMs = kMaxWaitMs;
-		}
-		waitTicks = pdMS_TO_TICKS(nextWaitMs);
-		if (waitTicks == 0)
-		{
-			waitTicks = 1; // avoid a zero-tick busy-loop if the engine ever reports "call me back immediately"
+			// Whether this wake came from an actual semaphore give (DIO1 IRQ,
+			// timer expiry) or just from the bounded wait timing out, always
+			// re-pump the handler - LBM's smtc_modem_run_engine() contract
+			// requires being called again within its last reported budget
+			// regardless of why we woke up.
+			uint32_t nextWaitMs = kMaxWaitMs;
+			if (registeredEventHandler)
+			{
+				xSemaphoreTake(lbmMutex, portMAX_DELAY);
+				nextWaitMs = registeredEventHandler();
+				xSemaphoreGive(lbmMutex);
+			}
+			if (nextWaitMs > kMaxWaitMs)
+			{
+				nextWaitMs = kMaxWaitMs;
+			}
+			waitTicks = pdMS_TO_TICKS(nextWaitMs);
+			if (waitTicks == 0)
+			{
+				waitTicks = 1; // avoid a zero-tick busy-loop if the engine ever reports "call me back immediately"
+			}
 		}
 	}
-}
 
-/**
- * @brief Callback of the FreeRTOS software timer, calls the callback registered by the LoRa Basics Modem
- *
- * Runs in the FreeRTOS Timer Service Task context (a normal task, not an
- * ISR) - safe to call the LBM-registered callback directly and to use the
- * non-ISR semaphore give.
- *
- * @param handle Timer handle (not used)
- */
-void swTimerExpired(TimerHandle_t handle)
-{
-	(void)handle;
-	xSemaphoreTake(lbmMutex, portMAX_DELAY);
-	if (registeredTimerCallback)
+	/**
+	 * @brief Callback of the FreeRTOS software timer, calls the callback registered by the LoRa Basics Modem
+	 *
+	 * Runs in the FreeRTOS Timer Service Task context (a normal task, not an
+	 * ISR) - safe to call the LBM-registered callback directly and to use the
+	 * non-ISR semaphore give.
+	 *
+	 * @param handle Timer handle (not used)
+	 */
+	void swTimerExpired(TimerHandle_t handle)
 	{
-		registeredTimerCallback(registeredTimerContext);
+		(void)handle;
+		xSemaphoreTake(lbmMutex, portMAX_DELAY);
+		if (registeredTimerCallback)
+		{
+			registeredTimerCallback(registeredTimerContext);
+		}
+		xSemaphoreGive(lbmMutex);
+		if (eventSemaphore)
+		{
+			xSemaphoreGive(eventSemaphore);
+		}
 	}
-	xSemaphoreGive(lbmMutex);
-	if (eventSemaphore)
-	{
-		xSemaphoreGive(eventSemaphore);
-	}
-}
 } // namespace
 
 namespace WisBlockLbmTask
 {
-bool start(uint32_t (*eventHandler)())
-{
-	registeredEventHandler = eventHandler;
-
-	eventSemaphore = xSemaphoreCreateBinary();
-	if (eventSemaphore == NULL)
+	bool start(uint32_t (*eventHandler)())
 	{
-		return false;
-	}
-	// Start "empty" - matches SX126x-Arduino's own start_lora_task()
-	// pattern (give then immediately take), so the very first
-	// xSemaphoreTake() in eventTask() blocks until real work arrives
-	// instead of firing once immediately on a freshly-created semaphore.
-	xSemaphoreGive(eventSemaphore);
-	xSemaphoreTake(eventSemaphore, 0);
+		registeredEventHandler = eventHandler;
 
-	lbmMutex = xSemaphoreCreateMutex();
-	if (lbmMutex == NULL)
-	{
-		return false;
-	}
+		eventSemaphore = xSemaphoreCreateBinary();
+		if (eventSemaphore == NULL)
+		{
+			return false;
+		}
+		// Start "empty" - matches SX126x-Arduino's own start_lora_task()
+		// pattern (give then immediately take), so the very first
+		// xSemaphoreTake() in eventTask() blocks until real work arrives
+		// instead of firing once immediately on a freshly-created semaphore.
+		xSemaphoreGive(eventSemaphore);
+		xSemaphoreTake(eventSemaphore, 0);
 
-	// One-shot, reused via xTimerChangePeriod()/xTimerStart() on every
-	// scheduleTimer() call rather than creating a new timer each time.
-	swTimerHandle = xTimerCreate("LBM_TMR", pdMS_TO_TICKS(1000), pdFALSE, NULL, swTimerExpired);
-	if (swTimerHandle == NULL)
-	{
-		return false;
-	}
+		lbmMutex = xSemaphoreCreateMutex();
+		if (lbmMutex == NULL)
+		{
+			return false;
+		}
 
-	if (xTaskCreate(eventTask, "LBM_EVT", kStackSize, NULL, kTaskPriority, &eventTaskHandle) != pdPASS)
-	{
-		return false;
-	}
+		// One-shot, reused via xTimerChangePeriod()/xTimerStart() on every
+		// scheduleTimer() call rather than creating a new timer each time.
+		swTimerHandle = xTimerCreate("LBM_TMR", pdMS_TO_TICKS(1000), pdFALSE, NULL, swTimerExpired);
+		if (swTimerHandle == NULL)
+		{
+			return false;
+		}
+
+		if (xTaskCreate(eventTask, "LBM_EVT", kStackSize, NULL, kTaskPriority, &eventTaskHandle) != pdPASS)
+		{
+			return false;
+		}
 #if defined(ARDUINO_ARCH_RP2040) && (configUSE_CORE_AFFINITY == 1)
-	// FreeRTOS SMP: tasks may run on either core. Keep the engine on core 0, where setup()/loop()
-	// and (normally) the DIO1 interrupt run, so noInterrupts() in the modem HAL really blocks the
-	// radio interrupt for it, as on the single core nRF52.
-	vTaskCoreAffinitySet(eventTaskHandle, 1u << 0);
+		// FreeRTOS SMP: tasks may run on either core. Keep the engine on core 0, where setup()/loop()
+		// and (normally) the DIO1 interrupt run, so noInterrupts() in the modem HAL really blocks the
+		// radio interrupt for it, as on the single core nRF52.
+		vTaskCoreAffinitySet(eventTaskHandle, 1u << 0);
 #endif
 
-	active = true;
-	return true;
-}
-
-void lock()
-{
-	if (active && lbmMutex)
-	{
-		xSemaphoreTake(lbmMutex, portMAX_DELAY);
+		active = true;
+		return true;
 	}
-}
 
-void unlock()
-{
-	if (active && lbmMutex)
+	void lock()
 	{
-		xSemaphoreGive(lbmMutex);
+		if (active && lbmMutex)
+		{
+			xSemaphoreTake(lbmMutex, portMAX_DELAY);
+		}
 	}
-}
 
-bool isActive()
-{
-	return active;
-}
-
-void notifyFromISR()
-{
-	if (!active)
+	void unlock()
 	{
-		return;
+		if (active && lbmMutex)
+		{
+			xSemaphoreGive(lbmMutex);
+		}
 	}
-	BaseType_t higherPriorityTaskWoken = pdFALSE;
-	xSemaphoreGiveFromISR(eventSemaphore, &higherPriorityTaskWoken);
-	portYIELD_FROM_ISR(higherPriorityTaskWoken);
-}
 
-void notify()
-{
-	if (!active)
+	bool isActive()
 	{
-		return;
+		return active;
 	}
-	xSemaphoreGive(eventSemaphore);
-}
 
-void scheduleTimer(uint32_t milliseconds, void (*callback)(void *context), void *context)
-{
-	if (!active)
+	void notifyFromISR()
 	{
-		return;
+		if (!active)
+		{
+			return;
+		}
+		BaseType_t higherPriorityTaskWoken = pdFALSE;
+		xSemaphoreGiveFromISR(eventSemaphore, &higherPriorityTaskWoken);
+		portYIELD_FROM_ISR(higherPriorityTaskWoken);
 	}
-	registeredTimerCallback = callback;
-	registeredTimerContext = context;
 
-	TickType_t ticks = pdMS_TO_TICKS(milliseconds);
-	if (ticks == 0)
+	void notify()
 	{
-		ticks = 1; // 0 would mean "fire immediately with no delay", not intended here
+		if (!active)
+		{
+			return;
+		}
+		xSemaphoreGive(eventSemaphore);
 	}
-	xTimerChangePeriod(swTimerHandle, ticks, 0);
-	xTimerStart(swTimerHandle, 0);
-}
 
-void cancelTimer()
-{
-	if (!active)
+	void scheduleTimer(uint32_t milliseconds, void (*callback)(void *context), void *context)
 	{
-		return;
+		if (!active)
+		{
+			return;
+		}
+		registeredTimerCallback = callback;
+		registeredTimerContext = context;
+
+		TickType_t ticks = pdMS_TO_TICKS(milliseconds);
+		if (ticks == 0)
+		{
+			ticks = 1; // 0 would mean "fire immediately with no delay", not intended here
+		}
+		xTimerChangePeriod(swTimerHandle, ticks, 0);
+		xTimerStart(swTimerHandle, 0);
 	}
-	xTimerStop(swTimerHandle, 0);
-}
+
+	void cancelTimer()
+	{
+		if (!active)
+		{
+			return;
+		}
+		xTimerStop(swTimerHandle, 0);
+	}
 } // namespace WisBlockLbmTask
 
 #else // !WISBLOCK_LBM_TASK_HAS_FREERTOS
 
 namespace WisBlockLbmTask
 {
-bool start(uint32_t (*eventHandler)())
-{
-	(void)eventHandler;
-	return false; // caller should fall back to manual handleEvents() polling
-}
+	bool start(uint32_t (*eventHandler)())
+	{
+		(void)eventHandler;
+		return false; // caller should fall back to manual handleEvents() polling
+	}
 
-bool isActive()
-{
-	return false;
-}
+	bool isActive()
+	{
+		return false;
+	}
 
-void notifyFromISR()
-{
-	// no-op
-}
+	void notifyFromISR()
+	{
+		// no-op
+	}
 
-void notify()
-{
-	// no-op - bare-metal build has no background task to wake; the
-	// application's own loop()-polled handleEvents() calls are what drive
-	// smtc_modem_run_engine() in that mode instead.
-}
+	void notify()
+	{
+		// no-op - bare-metal build has no background task to wake; the
+		// application's own loop()-polled handleEvents() calls are what drive
+		// smtc_modem_run_engine() in that mode instead.
+	}
 
-void scheduleTimer(uint32_t milliseconds, void (*callback)(void *context), void *context)
-{
-	(void)milliseconds;
-	(void)callback;
-	(void)context;
-	// no-op - falls back to WisBlockLbmPort's own millis()-polled timer
-}
+	void scheduleTimer(uint32_t milliseconds, void (*callback)(void *context), void *context)
+	{
+		(void)milliseconds;
+		(void)callback;
+		(void)context;
+		// no-op - falls back to WisBlockLbmPort's own millis()-polled timer
+	}
 
-void cancelTimer()
-{
-	// no-op
-}
+	void cancelTimer()
+	{
+		// no-op
+	}
 
-void lock()
-{
-	// no-op - single-threaded bare-metal build, nothing to serialize against
-}
+	void lock()
+	{
+		// no-op - single-threaded bare-metal build, nothing to serialize against
+	}
 
-void unlock()
-{
-	// no-op
-}
+	void unlock()
+	{
+		// no-op
+	}
 } // namespace WisBlockLbmTask
 
 #endif // WISBLOCK_LBM_TASK_HAS_FREERTOS

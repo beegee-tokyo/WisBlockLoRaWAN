@@ -151,6 +151,14 @@ WisBlockLoRaHwConfig wisblockLoRaHwConfigRAK3401_RAK13702()
 	cfg.radioRxEn = 21;
 	cfg.useRxenAntPwr = true;
 	cfg.useLdo = false; // DC-DC
+	// TCXO supply voltage. This was inherited from the RAK13300 preset (3.3 V), which is the SX1262 module and
+	// not the same board. The Meshtastic RAK3401 + LR2021 variant (RAK13700 / RAK13702, conducted TX measured
+	// in both bands) uses 1.6 V, so that is the default now. To try another value, build with
+	// -DWISBLOCK_LR2021_TCXO_VOLTAGE=SX126X_TCXO_CTRL_1_8V (or _3_3V for the old behavior).
+#ifndef WISBLOCK_LR2021_TCXO_VOLTAGE
+#define WISBLOCK_LR2021_TCXO_VOLTAGE SX126X_TCXO_CTRL_1_6V
+#endif
+	cfg.tcxoCtrlVoltage = WISBLOCK_LR2021_TCXO_VOLTAGE;
 	// LR2021 chip DIOs: the IRQ (DIO8) is wired to the MCU pin that is DIO1 on the RAK13300
 	cfg.lrIrqDio = 8;
 	cfg.lrRfSwitchDioLf = 7; // RF_LF1 / RF_LF2 (sub-GHz) antenna switch

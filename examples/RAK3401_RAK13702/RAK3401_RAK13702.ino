@@ -13,9 +13,9 @@
  * `#define WISBLOCK_ENABLE_LR2021` in src/wb_lbm_config.h of this library, or in PlatformIO with
  * `build_flags = -DWISBLOCK_ENABLE_LR2021`. Without it begin() prints a message and does nothing.
  *
- * NOT TESTED ON HARDWARE yet. Two things of the RAK13702 are assumptions that have to be checked
- * (see wisblock_ral_lr20xx_bsp.c): the truth table of the two antenna switches, and the transmit power
- * amplifier settings, so the real output power can differ from the requested one.
+ * Tested on a RAK3401 + RAK13702 with sub-GHz OTAA joins and uplinks (AS923-3) against ChirpStack, TTN and
+ * Actility. Not tested yet: 2.4 GHz LoRaWAN, and the output power (see the transmit power amplifier settings
+ * in wisblock_ral_lr20xx_bsp.c, the real power can differ from the requested one).
  *
  * 2.4 GHz LoRaWAN: set USE_2G4_REGION to 1 below. The 2.4 GHz region WW2G4 is selected with
  * lora.setRegion(WISBLOCK_REGION_WW2G4), see the comment in setup().
