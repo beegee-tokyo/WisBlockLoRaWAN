@@ -4185,3 +4185,23 @@ Finding from the logs: the 2.4 GHz gateway is a RAK5148 (SX1280 concentrator) th
 
 - Preprocessed `region_ww_2g4.c` without and with the macro: the join `memcpy` takes `JOIN_DR_DISTRIBUTION_WW_2G4` by default and `DEFAULT_DR_DISTRIBUTION_WW_2G4` with it, the mobile profiles switch in the same way. Also with the `#define` uncommented in the header copy. Both variants compile (gcc -fsyntax-only).
 - Not tested on hardware. For the test app: `lora.setDataRate(3)` after the join must become `lora.setDataRate(0)` (or be removed) for the gateway to hear the uplinks.
+
+## 2026-11-10 - Document: device setup for Arduino IDE and PlatformIO
+
+Request: a document that shows for every device the required settings in the Arduino IDE and PlatformIO (RAK4631 + internal SX1262, RAK3312 + internal SX1262, RAK11310 + internal SX1262, RAK3401 + RAK13300 / RAK13302, RAK3401 + RAK13702 with LR2021) and any other option. Hardware result before the request: 2.4 GHz LoRaWAN works (immediate join, every uplink received, Class A downlinks) with `WW_2G4_SINGLE_DATARATE` and DR0 on the RAK5148 gateway. The user asked if Class B and Class C exist in ISM2400.
+
+### What was done
+
+- New file `WisBlockLoRaWAN-Device-Setup.md` (overview table, common setup, one section per device with Arduino IDE and PlatformIO settings, other devices, Class B / C in ISM2400, troubleshooting, what was tested). Linked from the README and listed in the CHANGELOG.
+- Sources: README, `wb_lbm_config.h`, `extra_script.py`, the PlatformIO templates and their board definitions (`rakwireless/boards`, `variants`), the examples, the test application of the user, RAKwireless documentation (the RAKwireless BSP index, RAK3401 quick start: the RAK3401 uses the RAK4631 board entry; RAK3312 / RAK3212: Espressif core, board `RAKwireless RAK3112`) and the arduino-pico documentation (board `RAKwireless RAK11300`, FreeRTOS SMP).
+- Class B / C: the vendored `region_ww_2g4_defs.h` has beacon (2424 MHz, DR3), ping slot (2424 MHz) and RX2 (2423 MHz, DR0); `ADD_CLASS_B` and `ADD_CLASS_C` are on by default. Not tested in the 2.4 GHz band; documented as such (Class B needs beacons from the gateway).
+
+### Findings while collecting the settings
+
+- The PlatformIO templates (`BM-LoRaWAN-Template`, `BM-LoRa-P2P-Template`, `BM-LoRaWAN-T_H`, `LoRaP2PPingPong-PIO`) have an environment `rak3400` but call plain `lora.begin()` in `main.cpp`, which is the RAK4631 wiring. The README says the templates come with settings for "RAK3400+RAK1330x". On a RAK3401 they need `lora.begin(wisblockLoRaHwConfigRAK3401_RAK13300())` (the `rak3400` variant defines `RAK3400`). Documented in the new file, not changed in the templates.
+- The Arduino IDE example sketches `BasicLoRaWAN` and `LowPowerLoRaWAN` select the RAK3401 begin line with `#ifdef RAK3400` (in `LowPowerLoRaWAN`); `RAK3400` is defined by the PlatformIO variant only, in the Arduino IDE (board `WisBlock Core RAK4631 Board`) it is not defined, so the dedicated examples `RAK3401_RAK13300` and `RAK3401_RAK13702` (which call the config version directly) are the way for a RAK3401 there.
+- The RP2040 PlatformIO template contains `-D HEARTH_SERIAL_PORT=Serial1 ; Not sure why this is needed :-(`. Left out of the document, noted there.
+
+### Not checked
+
+- No sketch was built for the RAK4631, RAK3312, RAK11310 or the RAK3401 + RAK13300 for this document, the board names, URLs and settings come from the files and documents above. The Espressif core URL and the BSP package names were not looked up in the board managers. The statement that the RAK3112 / RAK3212 wiring equals the RAK3312 wiring is marked as not verified.

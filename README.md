@@ -36,8 +36,15 @@ After that, picotool uploads and the automatic reset into BOOTSEL both work.
 
 ## Supported hardware
 
+# ⚠️ INFO
+The settings for every device (Arduino IDE board and core, PlatformIO platform and board, code line, build options) are collected in [WisBlockLoRaWAN-Device-Setup](WisBlockLoRaWAN-Device-Setup.md).
+
+----
+
 Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, _**only with Earle F. Philhower BSP, MBED BSP is not supported**_).       
 `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
+
+### SX1262 on a RAK4631, RAK3312, RAK11310 or RAK3401 with RAK13300/RAK13302 LoRa IO module
 
 On nRF52840, ESP32-S3 and RP2040, any other board with an SX1262 wired up in a common way can be used too, without a new library file: describe its pins and RF-switch/TCXO wiring with a
 `WisBlockLoRaHwConfig` (`src/WisBlockLoRaHwConfig.h`) and pass it to `WisBlockLoRaWAN::begin(const WisBlockLoRaHwConfig&)` instead of plain `begin()`. A RAK3401 (RAK3400 WisDuo module + RAK13300/RAK13302 transceiver) preset is included as a worked example - `wisblockLoRaHwConfigRAK3401_RAK13300()` (formerly `wisblockLoRaHwConfigRAK3401()`, still available) - see `examples/RAK3401_RAK13300/`. The wiring of a RAK3401 with a RAK13702 (Semtech LR2021) module is described by `wisblockLoRaHwConfigRAK3401_RAK13702()`; the LR2021 backend is **optional and off by default**, see "LR2021 (RAK13702)" below (`examples/RAK3401_RAK13702/`). This flexible path is
@@ -152,7 +159,7 @@ This example is converted from the ArduinoIDE based example LoRaP2PPingPong to b
 
 The library builds in the Arduino IDE / arduino-cli as well as in PlatformIO. Install it into your `libraries` folder (or from the ZIP) and select a WisBlock board (RAK4631, RAK3112/RAK3312). 
 
-For PlatformIO, simply add the library to the _**`lib_deps1**_ section in platformio.ini.     
+For PlatformIO, simply add the library to the _**`lib_deps**_ section in platformio.ini.     
 
 ```
 lib_deps =
