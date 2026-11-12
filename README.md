@@ -14,6 +14,18 @@ It supports Class A, B and C (Class B tested on AS923-3 with Chirpstack LNS and 
 - LoRaWAN FUOTA function is not implemented and is not planned at this time due to the complexity of FUOTA and challenge to implement it in an Arduino library.     
 - LoRaWAN Relay function is not implemented and it is not planned at this time. 
 
+----     
+
+# ⚠️ INFO
+
+Please check the **[Wiki](https://github.com/beegee-tokyo/WisBlockLoRaWAN/wiki)** for detailed information about
+- how to setup Arduino IDE and PlatformIO for the different WisBlock Modules
+- API call description
+- AT command description
+- common information about LoRaWAN (channels, datarate, packet size)
+
+----
+
 # ⚠️ DISCLAIMER
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
 - This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
@@ -35,11 +47,6 @@ If firmware upload does not work with RAK11300/RAK11310 on Windows, change drive
 After that, picotool uploads and the automatic reset into BOOTSEL both work.
 
 ## Supported hardware
-
-# ⚠️ INFO
-The settings for every device (Arduino IDE board and core, PlatformIO platform and board, code line, build options) are collected in [WisBlockLoRaWAN-Device-Setup](WisBlockLoRaWAN-Device-Setup.md).
-
-----
 
 Built-in, compile-time-selected presets: RAK4631 (nRF52840), RAK3312 (ESP32-S3) and RAK11310 (RP2040, _**only with Earle F. Philhower BSP, MBED BSP is not supported**_).       
 `WisBlockLoRaWAN::begin()` with no argument picks one of these automatically from the target architecture, same as before.
