@@ -180,7 +180,6 @@ namespace
 
 	/** Regions as text array */
 	char *regions_list[15] = {(char *)"EU433", (char *)"CN470", (char *)"RU864", (char *)"IN865", (char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"KR920", (char *)"AS923", (char *)"AS923-2", (char *)"AS923-3", (char *)"AS923-4", (char *)"LA915", (char *)"ISM2400", (char *)"Unknown"};
-
 	/** Network modes as text array*/
 	char *nwm_list[3] = {(char *)"P2P", (char *)"LoRaWAN", (char *)"FSK"};
 
@@ -188,7 +187,8 @@ namespace
 	 * @brief Handler for ATC+STATUS
 	 *
 	 * ATC+STATUS=? prints the module, firmware version, send interval, network mode and the settings
-	 * of the active mode (region, join mode and keys for LoRaWAN, radio parameters for P2P). More
+	 * of the active mode (region, join mode and keys for LoRaWAN, radio parameters for LoRa P2P
+	 * and FSK P2P). More
 	 * comprehensive than the built-in AT+STATUS.
 	 *
 	 * @param port Stream the AT command was received on
