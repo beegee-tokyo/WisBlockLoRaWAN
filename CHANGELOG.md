@@ -3,6 +3,9 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
+Nov 15, 2026 V1.0.4 Add password protection
+- Add password protection to block readout of credentials with AT commands
+
 Nov 10, 2026 V1.0.4
 - First release for RAK13702 LoRa module with LR2021 (subGHz & 2.4 GHz LoRa)
 
@@ -76,6 +79,19 @@ For latest released
 ## LR2021 LoRaWAN RX windows
 
 - The LR2021 needs about 60 ms longer than the SX1262 from the radio command to being on air, so the RX1 / RX2 windows opened too late and the join accept preamble was missed. The delay reported to the modem stack (`smtc_modem_hal_get_radio_tcxo_startup_delay_ms()`) is now 64 ms longer for an LR2021. Override with `-DWISBLOCK_LR2021_RX_STARTUP_EXTRA_MS=<ms>` (default 64). The value was derived from the join logs, not measured on the chip. With the default the join works on sub-GHz AS923-3 with ChirpStack, TTN and Actility.
+
+## AT commands: password protection for credentials and keys
+
+- New optional password protection for **reading and writing** the LoRaWAN credentials and keys with AT commands. Off by default (nothing changes without a password). `AT+PASSWD=<password>` sets the password and turns the protection on, `AT+UNLOCK=<password>` sends it, `AT+RELOCK` locks again, `AT+PASSDEL` deletes the password and turns the protection off (it stays off, also after a restart, until a password is set again), `AT+PASSWD=?` shows `OFF`, `ON,LOCKED` or `ON,UNLOCKED`.
+- While a password is set and was not sent, the queries of `AT+DEVEUI`, `AT+APPEUI` / `AT+JOINEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY` and `AT+LSTMULC`, the writing of the same values, `AT+ADDMULC`, `AT+RMVMULC`, `AT+RESTORE`, `AT+FACTORY` and `ATR` return the new status code `AT_ACCESS_ERROR` and do nothing. Changing or deleting a password needs the unlocked state. The password is 4 - 32 printable characters, case sensitive.
+- Wrong passwords: after 5 in a row `AT+UNLOCK` refuses every attempt for 30 seconds, then allows one attempt, a wrong one blocks again. The count is kept in the flash (`wb_pwfail`, written only when it changes, at most 5 times per series of wrong passwords) until the right password is sent, so a reset or power cycle does not clear it: after a restart the first attempt is possible 30 seconds after the start.
+- The password is stored as a salted SHA-256 hash (1000 rounds, salt = unique ID of the chip) in its own flash entry (`wb_pwd`), `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY` and `ATR` do not change it. New source files `WisBlockPassword.h` / `.cpp` (no hardware dependency).
+- Not protected: `ATZ`, `AT+SAVE`, the API in your own code, the flash contents, the serial line. Not tested on a board yet.
+- `AT+SN=?`: the code that reads the unique ID moved into a helper, the output is unchanged.
+
+## Documentation: device setup
+
+- New document `WisBlockLoRaWAN-Device-Setup.md`: required settings in the Arduino IDE and PlatformIO for the RAK4631, RAK3312, RAK11310, RAK3401 + RAK13300 / RAK13302 and RAK3401 + RAK13702, other devices and options, Class B / C in ISM2400, troubleshooting.
 
 ## 2.4 GHz LoRaWAN: single data rate option
 

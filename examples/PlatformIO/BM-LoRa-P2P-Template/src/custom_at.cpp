@@ -175,8 +175,8 @@ namespace
 	}
 
 	/** Regions as text array */
-	char *regions_list[13] = {(char *)"EU433", (char *)"CN470", (char *)"RU864", (char *)"IN865", (char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"KR920", (char *)"AS923", (char *)"AS923-2", (char *)"AS923-3", (char *)"AS923-4", (char *)"LA915"};
-	// char *regions_list[13] = {(char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"AS923_1", (char *)"AS923_2", (char *)"AS923_3", (char *)"AS923_4", (char *)"KR920", (char *)"IN865", (char *)"RU864", (char *)"CN470", (char *)"CN470_RP_1_0", (char *)"WW2G4"};
+	char *regions_list[15] = {(char *)"EU433", (char *)"CN470", (char *)"RU864", (char *)"IN865", (char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"KR920", (char *)"AS923", (char *)"AS923-2", (char *)"AS923-3", (char *)"AS923-4", (char *)"LA915", (char *)"ISM2400", (char *)"Unknown"};
+
 	/** Network modes as text array*/
 	char *nwm_list[3] = {(char *)"P2P", (char *)"LoRaWAN", (char *)"FSK"};
 
@@ -218,8 +218,8 @@ namespace
 			{
 				Serial.printf("Network %s\r\n", lora.isJoined() ? "joined" : "not joined");
 				region_set = lora.getRegion();
-				Serial.printf("Region: %d\r\n", region_set);
-				Serial.printf("Region: %s\r\n", regions_list[region_set]);
+				Serial.printf("Region: %d - %s\r\n", region_set, regions_list[region_set]);
+
 				if (lora.getConfig().lorawan.joinMode == WISBLOCK_JOIN_OTAA)
 				{
 					Serial.printf("OTAA mode\r\n");

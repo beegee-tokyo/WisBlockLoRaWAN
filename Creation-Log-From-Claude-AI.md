@@ -4205,3 +4205,53 @@ Request: a document that shows for every device the required settings in the Ard
 ### Not checked
 
 - No sketch was built for the RAK4631, RAK3312, RAK11310 or the RAK3401 + RAK13300 for this document, the board names, URLs and settings come from the files and documents above. The Espressif core URL and the BSP package names were not looked up in the board managers. The statement that the RAK3112 / RAK3212 wiring equals the RAK3312 wiring is marked as not verified.
+
+## 2026-11-10 - AT commands: optional password protection for reading credentials and keys
+
+Request (security): at the moment the LoRaWAN credentials and network keys can be set and read with AT commands. Add password protection: 1) off by default, 2) setting a password with an AT command turns it on, 3) deleting the password with an AT command turns it off, 4) reading credentials and keys is only possible if the password is sent before the query commands; keep the protection off until a password is set again.
+
+### Interpretation and decisions (please check)
+
+- The spec protects **reading**. Writing the values is left open, as are `AT+FACTORY`, `AT+RESTORE`, `ATR` and `ATZ` (they can overwrite or reset values but do not show them and do not touch the password). Protecting writes too would be a few lines (the same `readAllowed()` gate in the write branches).
+- "Keep the protection off until a password is set again": read as: after `AT+PASSDEL` the protection is off and stays off, also after a restart, until `AT+PASSWD` sets a password (the record is deleted from the flash, there is no "disabled" flag).
+- Which values count as credentials and keys: `AT+DEVEUI`, `AT+APPEUI` / `AT+JOINEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY` and `AT+LSTMULC` (it lists the multicast keys). `AT+STATUS` does not print keys (checked).
+- Changing or deleting a password needs the unlocked state, otherwise anyone could delete it and read the keys. After setting or changing a password the device is locked (the new password has to be sent), the unlocked state is RAM only, so every restart locks again.
+- New commands (own names, not RUI3's `AT+PWORD` / `AT+LOCK`, which are listed as not implemented and may mean something else in RUI3): `AT+PASSWD`, `AT+UNLOCK`, `AT+RELOCK`, `AT+PASSDEL`, new status code `AT_ACCESS_ERROR`. The command matching uppercases the whole line, so the password is taken from the original line (`rawValue` in `processLine()`), it is case sensitive.
+- Brute force: 5 wrong passwords in a row block `AT+UNLOCK` for 30 s (non-blocking, uses `millis()`, wrap-around safe). Hash: SHA-256 over salt (8 byte chip ID) and password, 1000 rounds, constant-time compare. The keys themselves are stored unencrypted in the flash and the password goes over the serial line in clear text, so this only keeps people who can type AT commands from reading the keys. Documented as a warning in the AT manual.
+- Storage: own flash key `wb_pwd` (41 bytes: version, salt, hash). Verified in the code that no command erases the whole storage; the only wipe is the existing format when the flash file system cannot be mounted, it would delete the password with everything else.
+
+### Changes
+
+- New `src/WisBlockPassword.h/.cpp`: SHA-256, password record, `Guard` state machine (no Arduino, no flash; storage through a small interface).
+- `WisBlockLoRaAT.h/.cpp`: the four handlers, `PasswordFlashStorage`, `readAllowed()` gate in the seven query handlers, `rawValue`, four table entries; the unique ID code of `AT+SN` moved to a helper `readUniqueId()` (used for the salt), `AT+SN=?` output unchanged.
+- AT manual (new section Password Protection, status code, notes at the keys and `AT+LSTMULC`), README, CHANGELOG.
+
+### Checked / not checked
+
+- `WisBlockPassword.cpp`: SHA-256 and the record checked against Python `hashlib` (empty string, "abc", the two-block FIPS vector, one million "a", lengths 54 - 66 around the padding boundary, and the 1000 round password record); state machine unit test: default off, set, lock, wrong / right password, case, change and delete needing unlock, restart (new Guard on the same storage) after set and after delete, lockout and the 30 s release including the 32 bit wrap of `millis()`, storage failures, damaged record.
+- End-to-end on the PC: the real `WisBlockLoRaAT.cpp` (compiled with host stubs for Arduino and FreeRTOS, flash replaced by an in-memory map, the unique ID registers by variables) driven with real command lines through `processLine()`: all seven queries answer `AT_ACCESS_ERROR` without printing key bytes while locked and the values while unlocked, the case sensitivity of the password with a case-insensitive command (`at+unlock=...`), writes still work while locked, change / delete rules, restart behaviour, invalid input (`AT+PASSWD=abc`, with space, 33 characters, bare commands, `=?` forms), passwords containing `=`, `,` and `?`, lockout and release, flash write failure, `AT+SN=?` still works; the stored record does not contain the password. Plain build and AddressSanitizer build: all checks pass. An UndefinedBehaviorSanitizer build crashes in the existing command table loop (`(this->*handler)(...)`), the same way with the unmodified file of the last upload, so it is a quirk of the host toolchain with pointer-to-member calls, not of this change.
+- Not tested: on a board (nRF52840, ESP32-S3, RP2040), real flash (`WisBlockLoRaFlash` read / write / erase of the 41 byte entry), over USB / UART with a terminal program (line endings, a password typed with a program that adds characters), the RP2040 branch of the unique ID helper (it was moved, not changed).
+
+## 2026-11-10 - Password protection: writes protected, lockout survives a reset
+
+Request: protect writes while password protection is active; question: if locked out after wrong password attempts, does a reset / power cycle change the lockout period?
+
+### Answer to the question, and the fix
+
+With the first version a reset or power cycle **cleared** the lockout and the count of wrong passwords (both were in RAM only). Because `ATZ` is an AT command that is not protected, someone who can type AT commands could do 4 wrong passwords, `ATZ`, 4 more, and so on: the 30 s pause did not limit anything. Now:
+
+- The count of wrong passwords is kept in the flash (key `wb_pwfail`, 1 byte), written only when it changes (at most 5 times per series of wrong passwords, once when the right password clears it), so an attacker cannot wear out the flash with it. The right password, a new password and deleting the password clear it.
+- After 5 wrong passwords in a row `AT+UNLOCK` is refused for 30 s, then one attempt is allowed, a wrong one blocks again for 30 s (before: the counter was cleared when the pause ended, which would have given 5 new attempts every 30 s).
+- After a restart with a count of 5 in the flash the first attempt is possible 30 s after the start of the device (`millis()` starts at 0). Wait per attempt: at least 30 s, with or without resets (a reset only adds the start time of the device).
+- Found in my own first version while doing this: the pause was checked with a signed time difference, which would keep refusing for up to ~25 days of uptime if nobody had tried the password in between. Now an unsigned elapsed time is used (test added).
+- Remaining weakness: with a 4 character minimum and one attempt per 30 s the password can still be guessed over days. A longer minimum length is a one-line change (`kMinLength` in `WisBlockPassword.h`).
+
+### Write protection
+
+While a password is set and was not sent, the following return `AT_ACCESS_ERROR` and do nothing (`accessAllowed()` at the start of the handlers, before any value is parsed): writing `AT+DEVEUI`, `AT+APPEUI` / `AT+JOINEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY`; `AT+ADDMULC`, `AT+RMVMULC` (multicast groups hold keys); and `AT+RESTORE`, `AT+FACTORY`, `ATR`, because they replace the keys with the saved / factory ones or take the current ones as the factory backup, so leaving them open would be a way around the write protection. That last group is my reading of "writes": please say if you want them open. Not protected: `ATZ` and `AT+SAVE` (they neither change nor show credentials). A malformed command (for example `AT+FACTORY=1`) still answers `AT_ERROR`. The helper `readAllowed()` was renamed `accessAllowed()`.
+
+### Checked
+
+- Unit tests of `WisBlockPassword.cpp` extended: reset after the 5th wrong password (blocked for 30 s from the start of the device, one attempt, blocked again, right password works 30 s later), 4 + 4 + 4 wrong passwords over resets do not give new attempts, flash writes of the counter (5 for 40 wrong passwords, 1 for the reset by the right password, none without wrong passwords), set / delete clear the counter, a failing counter write does not break unlock, garbage in the counter entry counts as 5, the 24.8 day case. SHA-256 / record cross-check with hashlib unchanged (19 vectors, 0 mismatches).
+- End-to-end with the real `WisBlockLoRaAT.cpp` (plain and AddressSanitizer builds): all 12 writing commands answer `AT_ACCESS_ERROR` while locked, no library function behind them was called and the DevEUI is unchanged; after `AT+UNLOCK` they work (the factory, restore and key setters were counted); after `AT+RELOCK` they are refused again; with no password they work without unlocking; the lockout survives a simulated power cycle (several times, right password refused 1 s and 29.999 s after the start, one wrong attempt at 30 s, blocked again at 30.001 s); the counter entry is 0 after the right password.
+- Not tested: on a board, with the real flash, from a terminal program; the flash wear of the counter is limited by design, not measured.

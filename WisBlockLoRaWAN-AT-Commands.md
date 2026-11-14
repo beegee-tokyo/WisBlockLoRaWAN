@@ -57,6 +57,7 @@ The possible status codes are:
 - `OK`: command runs correctly without error.
 - `AT_ERROR`: generic error, or unknown command. Often preceded by a line of plain text that tells the reason, for example `unsupported band index - LA915 not built into this LBM vendoring`.
 - `AT_PARAM_ERROR`: a parameter of the command is wrong.
+- `AT_ACCESS_ERROR`: a password is set and was not sent with `AT+UNLOCK`, or the password is wrong. See [Password Protection](#password-protection).
 - `AT_NO_NETWORK_JOINED`: the uplink of `AT+SEND` was not accepted. Most often the device has not joined yet, but the same code is also returned for an invalid port or a rejected payload.
 
 The RUI3 status codes `AT_BUSY_ERROR`, `AT_TEST_PARAM_OVERFLOW`, `AT_NO_CLASSB_ENABLE` and `AT_RX_ERROR` are **never** returned by this library.
@@ -99,6 +100,11 @@ _Commands starting with `ATC+` are application defined custom commands, see [Cus
     + [AT+DEVADDR](#atdevaddr)
     + [AT+APPSKEY](#atappskey)
     + [AT+NWKSKEY](#atnwkskey)
+  * [Password Protection](#password-protection)
+    + [AT+PASSWD](#atpasswd)
+    + [AT+UNLOCK](#atunlock)
+    + [AT+RELOCK](#atrelock)
+    + [AT+PASSDEL](#atpassdel)
   * [LoRaWAN Joining and Sending](#lorawan-joining-and-sending)
     + [AT+CFM](#atcfm)
     + [AT+JOIN](#atjoin)
@@ -525,7 +531,7 @@ This section describes the commands related to the activation of the end device.
 
 ## _💡 NOTE_
 ----
-_All keys and IDs can be **read back in plain text**, including `AT+APPKEY`, `AT+NWKSKEY` and `AT+APPSKEY`. This is intentional and identical to RUI3._
+_All keys and IDs can be **read back in plain text**, including `AT+APPKEY`, `AT+NWKSKEY` and `AT+APPSKEY`. This is intentional and identical to RUI3, as long as no password is set. With a password set (see [Password Protection](#password-protection)) the queries of `AT+DEVEUI`, `AT+APPEUI` / `AT+JOINEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY` and `AT+LSTMULC` return `AT_ACCESS_ERROR` until the password is sent. Setting the values returns `AT_ACCESS_ERROR` as well._
 
 _The session keys that an OTAA join generates cannot be read, the values of `AT+NWKSKEY` and `AT+APPSKEY` are the ABP keys of the configuration._
 
@@ -687,6 +693,144 @@ This command is used to access the network session key in ABP mode.
 AT+NWKSKEY=01020AFBA1CD4D20010230405A6B7F88
 OK
 ```
+
+[Back](#content)
+
+## Password Protection
+
+This section describes the optional password protection for **reading and changing** the LoRaWAN credentials and keys. It is a command set of this library, it does not exist in RUI3.
+
+## _💡 NOTE_
+----
+_By default there is **no password** and nothing is protected, the behavior is the same as without these commands._
+
+_`AT+PASSWD=<password>` sets a password and turns the protection on. From then on the following commands return `AT_ACCESS_ERROR` and do nothing, until the password is sent with `AT+UNLOCK=<password>`:_
+
+- _**Reading:** the queries `AT+DEVEUI=?`, `AT+APPEUI=?` (and `AT+JOINEUI=?`), `AT+APPKEY=?`, `AT+DEVADDR=?`, `AT+NWKSKEY=?`, `AT+APPSKEY=?` and `AT+LSTMULC=?`. No value is printed._
+- _**Writing:** `AT+DEVEUI=`, `AT+APPEUI=` (and `AT+JOINEUI=`), `AT+APPKEY=`, `AT+DEVADDR=`, `AT+NWKSKEY=`, `AT+APPSKEY=`, `AT+ADDMULC`, `AT+RMVMULC`, and the commands that replace the keys with other stored ones or take the current ones as the factory backup: `AT+RESTORE`, `AT+FACTORY` and `ATR`._
+
+_`AT+PASSDEL` deletes the password and turns the protection off. It stays off, also after a restart, until a password is set again._
+
+_The device is **locked** after a restart and after setting a password. It is unlocked with `AT+UNLOCK` and stays unlocked until `AT+RELOCK` or the next restart. Changing or deleting a password needs the unlocked state._
+
+_The password is 4 to 32 printable ASCII characters (no space) and **case sensitive**, the command itself is not (`at+unlock=Secret1!` works)._
+
+_After 5 wrong passwords in a row `AT+UNLOCK` refuses every attempt, also the right password, for 30 seconds. After that one attempt is possible, and a wrong one blocks again for 30 seconds. The count of wrong passwords is kept in the flash until the right password is sent, so a **reset or a power cycle does not clear it** (`ATZ` is not protected, it would otherwise be a way around the pause): after a restart the first attempt is possible 30 seconds after the start of the device._
+
+----
+
+### AT+PASSWD
+
+Description: Set a password, or get the protection state
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PASSWD=?` | - | `AT+PASSWD=OFF`, `AT+PASSWD=ON,LOCKED` or `AT+PASSWD=ON,UNLOCKED` | OK |
+| `AT+PASSWD=<Input>` | `<password>` | - | OK<br/>`AT_PARAM_ERROR`<br/>`AT_ACCESS_ERROR` |
+
+**Example:**
+
+```text
+AT+PASSWD=?
+AT+PASSWD=OFF
+OK
+
+AT+PASSWD=Secret1!
+OK
+
+AT+APPKEY=?
+AT_ACCESS_ERROR
+```
+
+## _💡 NOTE_
+----
+_`AT_PARAM_ERROR` is returned when the password is shorter than 4 or longer than 32 characters, or contains a space or a character that is not printable ASCII._
+
+_`AT_ACCESS_ERROR` is returned when a password is already set and the device is locked: send the password with `AT+UNLOCK` first to change it. After setting or changing a password the device is locked, the new password has to be sent before the protected values can be read._
+
+_If the password cannot be saved to the flash, a line `password could not be saved` and `AT_ERROR` are returned and nothing changes._
+
+_The password is never printed. It is stored as a salted SHA-256 hash in its own flash entry (the count of wrong passwords in another one), `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY` and `ATR` do not change or delete them._
+
+----
+
+[Back](#content)
+
+### AT+UNLOCK
+
+Description: Send the password
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+UNLOCK=<Input>` | `<password>` | - | OK<br/>`AT_ACCESS_ERROR` |
+
+**Example:**
+
+```text
+AT+UNLOCK=Secret1!
+OK
+
+AT+APPKEY=?
+AT+APPKEY=01020AFBA1CD4D20010230405A6B7F88
+OK
+```
+
+## _💡 NOTE_
+----
+_`AT_ACCESS_ERROR` is returned for a wrong password. After 5 wrong passwords in a row the line `too many wrong passwords, try again later` and `AT_ACCESS_ERROR` are returned for every attempt in the next 30 seconds, also after a reset or a power cycle (the first attempt is possible 30 seconds after the start). The count is cleared by the right password and written to the flash only when it changes, at most 5 times in a row of wrong passwords._
+
+_Without a password `OK` is returned, there is nothing to unlock._
+
+----
+
+[Back](#content)
+
+### AT+RELOCK
+
+Description: Lock again, without a restart
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+RELOCK` | - | - | OK |
+
+**Example:**
+
+```text
+AT+RELOCK
+OK
+```
+
+[Back](#content)
+
+### AT+PASSDEL
+
+Description: Delete the password, the protection is off
+
+| Command | Input Parameter | Return Value | Return Code |
+| ------- | --------------- | ------------ | ----------- |
+| `AT+PASSDEL` | - | - | OK<br/>`AT_ACCESS_ERROR`<br/>`AT_ERROR` |
+
+**Example:**
+
+```text
+AT+UNLOCK=Secret1!
+OK
+
+AT+PASSDEL
+OK
+```
+
+## _💡 NOTE_
+----
+_The device must be unlocked (`AT_ACCESS_ERROR` otherwise). Without a password the line `no password set` and `AT_ERROR` are returned._
+
+----
+
+## _⚠️ WARNING_
+----
+_This protects the AT interface only, against someone who can type AT commands. It does **not** protect against reading the flash with a debugger or a flash dump (the keys are stored unencrypted), against listening to the serial line (the password is sent unencrypted), against the API of the library in your own code, or against someone who flashes other firmware. If the flash file system is damaged and formatted at the start, the password is deleted together with all other settings. `ATZ` (reset) and `AT+SAVE` are not protected: they do not change or show the credentials, and a reset does not clear the pause after wrong passwords._
+
+----
 
 [Back](#content)
 
@@ -1424,7 +1568,7 @@ OK
 
 ## _💡 NOTE_
 ----
-_The keys are shown in plain text, as in RUI3. Only the groups that are in use are listed. Without a group only `OK` is returned._
+_The keys are shown in plain text, as in RUI3, unless a password is set and was not sent (then `AT_ACCESS_ERROR`, see [Password Protection](#password-protection)). Only the groups that are in use are listed. Without a group only `OK` is returned._
 
 _The lines do not have the `AT+LSTMULC=` prefix and no group number._
 
@@ -1920,7 +2064,7 @@ These RUI3 commands are **not** available. They return `AT_ERROR`.
 | ----- | -------- |
 | General | `AT?`, `ATE`, `AT+BAT`, `AT+BUILDTIME`, `AT+REPOINFO`, `AT+CLIVER`, `AT+APIVER`, `AT+SYSV`, `AT+BLEMAC`, `AT+BOOTVER` |
 | Low power | `AT+SLEEP`, `AT+LPM`, `AT+LPMLVL` |
-| Serial | `AT+LOCK`, `AT+PWORD`, `AT+BAUD`, `AT+ATM` |
+| Serial | `AT+LOCK`, `AT+PWORD`, `AT+BAUD`, `AT+ATM` (the password protection of this library uses its own commands, see [Password Protection](#password-protection)) |
 | Bootloader | `AT+BOOTSTATUS`, `AT+RUN`, `AT+RESET`, `AT+UPDATE` (the library has no separate bootloader command mode) |
 | Keys | `AT+NETID`, `AT+MCROOTKEY` |
 | Join and send | `AT+CFS`, `AT+RECV`, `AT+LPSEND`, `AT+RETY` |

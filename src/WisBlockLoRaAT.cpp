@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "WisBlockLoRaAT.h"
 #include "wisblock_radio_bsp_config.h" // wisblock_radio_hal_is_lr2021()
+#include "WisBlockLoRaFlash.h"           // password record, key "wb_pwd"
 #include "WisBlockLoRaWAN_all.h" // WISBLOCK_LORAWAN_VERSION_STRING, used by the AT+VER handler
 #include <ctype.h>
 #include <stdio.h>
@@ -265,6 +266,10 @@ const WisBlockLoRaAT::AtCommandEntry WisBlockLoRaAT::atCommandTable[] = {
 	{"+ADDMULC", &WisBlockLoRaAT::atAddMulc},
 	{"+RMVMULC", &WisBlockLoRaAT::atRmvMulc},
 	{"+LSTMULC", &WisBlockLoRaAT::atLstMulc},
+	{"+PASSWD", &WisBlockLoRaAT::atPasswd},
+	{"+PASSDEL", &WisBlockLoRaAT::atPassDel},
+	{"+UNLOCK", &WisBlockLoRaAT::atUnlock},
+	{"+RELOCK", &WisBlockLoRaAT::atRelock},
 	{"Z", &WisBlockLoRaAT::atZ},
 	{"R", &WisBlockLoRaAT::atR},
 	{"+BOOT", &WisBlockLoRaAT::atBoot},
@@ -572,6 +577,10 @@ void WisBlockLoRaAT::processLine(const char *line)
 		op = AtOp::Run;
 	}
 
+	// The password commands need the value as it was typed: the line was uppercased above for the command
+	// matching, a password is case sensitive. `value` points into upperLine, the same offset is the value in `line`.
+	rawValue = value ? (line + (value - upperLine)) : nullptr;
+
 	// "ATC+<CMD>" - an application-registered custom command (see
 	// addCustomATCommand()); "C+" is RUI3's own prefix convention for
 	// custom AT commands (see api.system.atMode.add() in RAKSystem.h),
@@ -700,8 +709,17 @@ void WisBlockLoRaAT::atNwm(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atDevEui(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		port->printf("AT+DEVEUI=");
 		printHex(port, lora->getConfig().lorawan.otaa.devEui, 8);
 		replyOk();
@@ -731,8 +749,17 @@ void WisBlockLoRaAT::atDevEui(AtOp op, const char *value)
 // either name for the same underlying value).
 void WisBlockLoRaAT::atAppEui(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		port->printf("AT+APPEUI=");
 		printHex(port, lora->getConfig().lorawan.otaa.joinEui, 8);
 		replyOk();
@@ -758,9 +785,19 @@ void WisBlockLoRaAT::atAppEui(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atAppKey(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		// Plaintext readback is intentional (confirmed by the maintainer,
+		// unless a password is set with AT+PASSWD, then accessAllowed() above applies;
 		// overriding the SECURITY-flavored comment this line used to carry
 		// - see Creation-Log-From-Claude-AI.md's 2026-09-22 entries for the
 		// full back-and-forth). Left as-is: printHex(port, ...16) below.
@@ -789,8 +826,17 @@ void WisBlockLoRaAT::atAppKey(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atDevAddr(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		// FIX: was lora->getConfig().lorawan.abp.devAddr, which only ever holds
 		// what setABPKeys()/AT+DEVADDR= itself last configured - correct for
 		// ABP, but always the stale ABP default (0) after an OTAA join, since
@@ -824,8 +870,17 @@ void WisBlockLoRaAT::atDevAddr(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atNwkSKey(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		// Plaintext readback is intentional - same as +APPKEY=? above.
 		//
 		// CLEANUP (kept - unrelated to the plaintext-vs-masked question
@@ -856,8 +911,17 @@ void WisBlockLoRaAT::atNwkSKey(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atAppSKey(AtOp op, const char *value)
 {
+	// Password set and not sent: the values cannot be changed either (queries are checked below)
+	if (op != AtOp::Query && !accessAllowed())
+	{
+		return; // AT_ACCESS_ERROR was sent
+	}
 	if (op == AtOp::Query)
 	{
+		if (!accessAllowed())
+		{
+			return; // password set and not sent, AT_ACCESS_ERROR was sent
+		}
 		// Plaintext readback is intentional - same as +APPKEY=? above.
 		port->printf("AT+APPSKEY=");
 		printHex(port, lora->getConfig().lorawan.abp.appSKey, 16);
@@ -2024,6 +2088,11 @@ void WisBlockLoRaAT::atRestore(AtOp op, const char *value)
 		replyError("AT_ERROR");
 		return;
 	}
+	// Changes keys or the saved configuration: password set and not sent, AT_ACCESS_ERROR was sent
+	if (!accessAllowed())
+	{
+		return;
+	}
 	lora->restoreConfig() ? replyOk() : replyError("AT_ERROR"); // no saved config found, defaults loaded
 }
 
@@ -2033,6 +2102,11 @@ void WisBlockLoRaAT::atFactory(AtOp op, const char *value)
 	if (op != AtOp::Run)
 	{
 		replyError("AT_ERROR");
+		return;
+	}
+	// Changes keys or the saved configuration: password set and not sent, AT_ACCESS_ERROR was sent
+	if (!accessAllowed())
+	{
 		return;
 	}
 	// Snapshots the CURRENT live configuration - not compiled-in struct
@@ -2073,6 +2147,11 @@ void WisBlockLoRaAT::atR(AtOp op, const char *value)
 	if (op != AtOp::Run)
 	{
 		replyError("AT_ERROR");
+		return;
+	}
+	// Changes keys or the saved configuration: password set and not sent, AT_ACCESS_ERROR was sent
+	if (!accessAllowed())
+	{
 		return;
 	}
 	// Copies the factory backup saved by AT+FACTORY back over the regular
@@ -2144,14 +2223,17 @@ void WisBlockLoRaAT::atHwId(AtOp op, const char *value)
 	replyOk();
 }
 
-void WisBlockLoRaAT::atSn(AtOp op, const char *value)
+namespace
 {
-	if (op != AtOp::Query)
-	{
-		replyError("AT_ERROR");
-		return;
-	}
-	uint8_t id[8];
+/**
+ * @brief Read the 8 byte unique ID of the chip
+ *
+ * Used by AT+SN=? and as the salt of the password hash.
+ *
+ * @param id Receives the 8 bytes
+ */
+void readUniqueId(uint8_t id[8])
+{
 #ifdef NRF52_SERIES
 	id[7] = ((*(uint32_t *)ID1));
 	id[6] = ((*(uint32_t *)ID1)) >> 8;
@@ -2185,6 +2267,18 @@ void WisBlockLoRaAT::atSn(AtOp op, const char *value)
 	pico_get_unique_board_id(&board_id);
 	memcpy(id, board_id.id, 8);
 #endif
+}
+} // namespace
+
+void WisBlockLoRaAT::atSn(AtOp op, const char *value)
+{
+	if (op != AtOp::Query)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	uint8_t id[8];
+	readUniqueId(id);
 	port->printf("AT+SN=");
 	printHex(port, id, 8);
 	replyOk();
@@ -2259,6 +2353,11 @@ void WisBlockLoRaAT::atAddMulc(AtOp op, const char *value)
 	if (op != AtOp::Write)
 	{
 		replyError("AT_ERROR");
+		return;
+	}
+	// Changes keys or the saved configuration: password set and not sent, AT_ACCESS_ERROR was sent
+	if (!accessAllowed())
+	{
 		return;
 	}
 	// AT+ADDMULC=[Class]:[DevAddr]:[NwkSKey]:[AppSKey]:[Frequency]:[Datarate]:[Periodicity]
@@ -2367,6 +2466,11 @@ void WisBlockLoRaAT::atRmvMulc(AtOp op, const char *value)
 		replyError("AT_ERROR");
 		return;
 	}
+	// Changes keys or the saved configuration: password set and not sent, AT_ACCESS_ERROR was sent
+	if (!accessAllowed())
+	{
+		return;
+	}
 	uint8_t addrBytes[4];
 	if (!parseHex(value, addrBytes, 4))
 	{
@@ -2391,6 +2495,10 @@ void WisBlockLoRaAT::atLstMulc(AtOp op, const char *value)
 	{
 		replyError("AT_ERROR");
 		return;
+	}
+	if (!accessAllowed())
+	{
+		return; // the list contains the keys: password set and not sent, AT_ACCESS_ERROR was sent
 	}
 	// One "Class:DevAddr:NwkSKey:AppSKey:Frequency:Datarate" line per configured group,
 	// matching RUI3's own AT+LSTMULC=? output format - keys included in plaintext
@@ -2431,6 +2539,144 @@ void WisBlockLoRaAT::atLstMulc(AtOp op, const char *value)
 		port->print(":");
 		port->println(g->dataRate);
 	}
+	replyOk();
+}
+
+// ---------------------------------------------------------------------------
+// Password protection for reading and changing the credentials and keys
+//
+// Off until a password is set. AT+PASSWD=<password> sets it and turns the protection on, AT+UNLOCK=<password>
+// sends it, AT+PASSDEL deletes it (protection off), AT+RELOCK locks again. While a password is set and was not
+// sent, AT_ACCESS_ERROR is the answer to: the queries of AT+DEVEUI, AT+APPEUI / AT+JOINEUI, AT+APPKEY,
+// AT+DEVADDR, AT+NWKSKEY, AT+APPSKEY and AT+LSTMULC, writing the same values, AT+ADDMULC, AT+RMVMULC,
+// AT+RESTORE, AT+FACTORY and ATR (accessAllowed() at the start of those handlers). The count of wrong passwords
+// is kept in the flash too, so a reset does not clear the pause. The logic is in WisBlockPassword.cpp.
+// ---------------------------------------------------------------------------
+
+bool WisBlockLoRaAT::PasswordFlashStorage::read(uint8_t record[WisBlockPassword::kRecordSize])
+{
+	return WisBlockLoRaFlash::read("wb_pwd", record, WisBlockPassword::kRecordSize);
+}
+
+bool WisBlockLoRaAT::PasswordFlashStorage::write(const uint8_t record[WisBlockPassword::kRecordSize])
+{
+	return WisBlockLoRaFlash::write("wb_pwd", record, WisBlockPassword::kRecordSize);
+}
+
+bool WisBlockLoRaAT::PasswordFlashStorage::erase()
+{
+	return WisBlockLoRaFlash::erase("wb_pwd");
+}
+
+bool WisBlockLoRaAT::PasswordFlashStorage::readFailures(uint8_t &count)
+{
+	return WisBlockLoRaFlash::read("wb_pwfail", &count, 1);
+}
+
+bool WisBlockLoRaAT::PasswordFlashStorage::writeFailures(uint8_t count)
+{
+	return WisBlockLoRaFlash::write("wb_pwfail", &count, 1);
+}
+
+bool WisBlockLoRaAT::accessAllowed()
+{
+	if (pwGuard.canRead())
+	{
+		return true;
+	}
+	replyError("AT_ACCESS_ERROR");
+	return false;
+}
+
+void WisBlockLoRaAT::atPasswd(AtOp op, const char *value)
+{
+	if (op == AtOp::Query)
+	{
+		// Only the state, never the password: OFF, ON,LOCKED or ON,UNLOCKED
+		port->printf("AT+PASSWD=");
+		port->println(!pwGuard.enabled() ? "OFF" : (pwGuard.unlocked() ? "ON,UNLOCKED" : "ON,LOCKED"));
+		replyOk();
+		return;
+	}
+	if (op != AtOp::Write || !rawValue)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	// The salt is the unique ID of the chip: different for every device, the secret is the password
+	uint8_t salt[8];
+	readUniqueId(salt);
+	switch (pwGuard.set(rawValue, salt))
+	{
+	case WisBlockPassword::Result::Ok:
+		replyOk(); // protection is on and locked, AT+UNLOCK=<password> is needed to read the keys
+		break;
+	case WisBlockPassword::Result::Denied:
+		replyError("AT_ACCESS_ERROR"); // a password is set: send it with AT+UNLOCK first to change it
+		break;
+	case WisBlockPassword::Result::Invalid:
+		replyError("AT_PARAM_ERROR"); // 4 - 32 printable characters, no space
+		break;
+	default:
+		replyError("password could not be saved"); // flash write failed
+		break;
+	}
+}
+
+void WisBlockLoRaAT::atPassDel(AtOp op, const char *value)
+{
+	if (op != AtOp::Run)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	switch (pwGuard.remove())
+	{
+	case WisBlockPassword::Result::Ok:
+		replyOk(); // protection is off, it stays off (also after a restart) until a password is set again
+		break;
+	case WisBlockPassword::Result::NoPassword:
+		replyError("no password set");
+		break;
+	case WisBlockPassword::Result::Denied:
+		replyError("AT_ACCESS_ERROR"); // send the password with AT+UNLOCK first
+		break;
+	default:
+		replyError("password could not be deleted"); // flash erase failed
+		break;
+	}
+}
+
+void WisBlockLoRaAT::atUnlock(AtOp op, const char *value)
+{
+	if (op != AtOp::Write || !rawValue)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	switch (pwGuard.unlock(rawValue, millis()))
+	{
+	case WisBlockPassword::Result::Ok:
+		replyOk(); // also if no password is set: there is nothing to unlock
+		break;
+	case WisBlockPassword::Result::Blocked:
+		port->println("too many wrong passwords, try again later");
+		replyError("AT_ACCESS_ERROR");
+		break;
+	default:
+		replyError("AT_ACCESS_ERROR"); // wrong password
+		break;
+	}
+}
+
+void WisBlockLoRaAT::atRelock(AtOp op, const char *value)
+{
+	if (op != AtOp::Run)
+	{
+		replyError("AT_ERROR");
+		return;
+	}
+	pwGuard.lock();
 	replyOk();
 }
 

@@ -14,6 +14,7 @@
 #define WISBLOCK_LORA_AT_H
 
 #include "WisBlockLoRaWAN.h"
+#include "WisBlockPassword.h"
 #include <Stream.h>
 #include <stddef.h> // size_t
 #include <stdint.h>
@@ -283,6 +284,30 @@ private:
 
 	WisBlockLoRaWAN *lora = nullptr;
 	Stream *port = nullptr;
+
+	/** Keeps the password record (key "wb_pwd") and the count of wrong passwords (key "wb_pwfail") in the flash,
+	 *  untouched by AT+SAVE, AT+RESTORE, AT+FACTORY and ATR */
+	class PasswordFlashStorage : public WisBlockPassword::Storage
+	{
+	  public:
+		bool read(uint8_t record[WisBlockPassword::kRecordSize]) override;
+		bool write(const uint8_t record[WisBlockPassword::kRecordSize]) override;
+		bool erase() override;
+		bool readFailures(uint8_t &count) override;
+		bool writeFailures(uint8_t count) override;
+	};
+	PasswordFlashStorage pwStorage;
+	/** Password protection for reading the credentials and keys, off until a password is set (AT+PASSWD) */
+	WisBlockPassword::Guard pwGuard{pwStorage};
+	/** The value after the '=' of the line that is processed, with its original upper and lower case (the
+	 *  line is uppercased for the command matching, which would change a password). Null without a value. */
+	const char *rawValue = nullptr;
+	/**
+	 * @brief Check that the credentials and keys may be read or changed, otherwise send AT_ACCESS_ERROR
+	 *
+	 * @return true if the command may go on (no password set, or the password was sent)
+	 */
+	bool accessAllowed();
 	/** Longest line (with the terminating zero) that is collected before it is run */
 	static const size_t LINE_BUFFER_SIZE = 256;
 	char lineBuffer[LINE_BUFFER_SIZE];
@@ -776,6 +801,34 @@ private:
 	 * @param value Text after the '=' (null for query and run)
 	 */
 	void atLstMulc(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PASSWD (Set the password that protects reading the credentials and keys, or query the state)
+	 *
+	 * @param op Operation: query (AT+PASSWD=?), write (AT+PASSWD=password) or run (AT+PASSWD, not accepted)
+	 * @param value Text after the '=' (uppercased, the password is taken from rawValue)
+	 */
+	void atPasswd(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+PASSDEL (Delete the password, the protection is off)
+	 *
+	 * @param op Operation: run (AT+PASSDEL)
+	 * @param value Not used
+	 */
+	void atPassDel(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+UNLOCK (Send the password)
+	 *
+	 * @param op Operation: write (AT+UNLOCK=password)
+	 * @param value Text after the '=' (uppercased, the password is taken from rawValue)
+	 */
+	void atUnlock(AtOp op, const char *value);
+	/**
+	 * @brief Handler for AT+RELOCK (Lock again without a restart)
+	 *
+	 * @param op Operation: run (AT+RELOCK)
+	 * @param value Not used
+	 */
+	void atRelock(AtOp op, const char *value);
 	/**
 	 * @brief Handler for ATZ (MCU Reset)
 	 *

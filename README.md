@@ -78,6 +78,10 @@ All AT commands are documented in the [WisBlockLoRaWAN-AT-Commands](WisBlockLoRa
 
 The AT interface follows the RUI3 command set. Commands that only exist in this library (`AT+STATUS`, `AT+FPENDING`, `AT+RXBOOST`, `AT+PRECVDC`, `AT+LOWPOWER`, `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY`, `AT+FIRMWAREVER`) and the RUI3 commands that are not implemented are listed there as well.
 
+### Password protection for the credentials and keys
+
+By default the LoRaWAN credentials and keys can be read with AT commands, as in RUI3. An optional password changes that: `AT+PASSWD=<password>` sets it and turns the protection on, from then on reading and writing `AT+DEVEUI`, `AT+APPEUI`, `AT+APPKEY`, `AT+DEVADDR`, `AT+NWKSKEY`, `AT+APPSKEY`, the multicast commands (`AT+LSTMULC`, `AT+ADDMULC`, `AT+RMVMULC`) and `AT+RESTORE`, `AT+FACTORY`, `ATR` return `AT_ACCESS_ERROR` until the password is sent with `AT+UNLOCK=<password>`. Wrong passwords are counted in the flash, 5 in a row block `AT+UNLOCK` for 30 seconds, also across a reset. `AT+RELOCK` locks again, `AT+PASSDEL` deletes the password and turns the protection off. It protects the AT interface only, not the flash contents, the serial line or your own code, see [Password Protection](WisBlockLoRaWAN-AT-Commands.md#password-protection) for the details.
+
 ## Examples for Arduino IDE
 Multiple examples are available in the examples folder of the library.
 
