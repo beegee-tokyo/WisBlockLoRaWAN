@@ -671,7 +671,7 @@ private:
 	 */
 	void atIqInver(AtOp op, const char *value);
 	/**
-	 * @brief Handler for AT+SYNCWORD (P2P sync word)
+	 * @brief Handler for AT+SYNCWORD (P2P sync word: 4 hex digits in LoRa mode, 2..16 hex digits = 1..8 bytes in FSK mode)
 	 *
 	 * @param op Operation: query (AT+SYNCWORD=?), write (AT+SYNCWORD=value) or run (AT+SYNCWORD)
 	 * @param value Text after the '=' (null for query and run)

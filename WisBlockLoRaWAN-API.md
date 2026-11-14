@@ -18,12 +18,14 @@ The top level operating mode of the library.
 | --- | --- | --- |
 | `WISBLOCK_MODE_LORAWAN` | 0 | LoRaWAN mode |
 | `WISBLOCK_MODE_LORA_P2P` | 1 | LoRa P2P mode |
+| `WISBLOCK_MODE_FSK_P2P` | 2 | GFSK P2P mode (RUI3 `AT+NWM=2`) |
 
 ```cpp
 enum WisBlockWorkMode : uint8_t
 {
   WISBLOCK_MODE_LORAWAN  = 0, ///< LoRaWAN mode
   WISBLOCK_MODE_LORA_P2P = 1, ///< LoRa P2P mode
+  WISBLOCK_MODE_FSK_P2P  = 2, ///< GFSK P2P mode
 };
 ```
 
@@ -653,7 +655,7 @@ WisBlockABPKeys abp
 
 ### WisBlockP2PSettings
 
-The persisted LoRa P2P settings, available as `lora.getP2PSettings()`.
+The persisted P2P settings (LoRa and FSK), available as `lora.getP2PSettings()`. `frequencyHz`, `preambleLength` (symbols in LoRa, **bytes** in FSK), `txPowerDbm` and `rxBoostedGainEnabled` are shared by both modulations. `cadEnabled`, `spreadingFactor`, `bandwidth`, `codingRate`, `iqInversion` and `syncWord` are LoRa only. The `fsk...` fields at the end are FSK only.
 
 #### frequencyHz
 
@@ -743,13 +745,61 @@ bool iqInversion
 uint16_t syncWord
 ```
 
+#### modulation
+
+Modulation of the P2P engine, `WISBLOCK_P2P_MOD_LORA` (0, default) or `WISBLOCK_P2P_MOD_FSK` (1). Follows the work mode: `setWorkMode(WISBLOCK_MODE_FSK_P2P)` selects FSK, `WISBLOCK_MODE_LORA_P2P` selects LoRa.
+
+```cpp
+WisBlockP2PModulation modulation
+```
+
+#### fskBitrate
+
+FSK bit rate in bit/s, 600 - 300000. Default 50000. Set with `setP2PFskBitrate()` or `AT+PBR`.
+
+```cpp
+uint32_t fskBitrate
+```
+
+#### fskFreqDevHz
+
+FSK frequency deviation in Hz, 600 - 200000. Default 25000. Set with `setP2PFskFrequencyDeviation()` or `AT+PFDEV`.
+
+```cpp
+uint32_t fskFreqDevHz
+```
+
+#### fskBandwidthHz
+
+FSK RX bandwidth in Hz, 4800 - 467000. Default 117300. The next larger bandwidth step of the radio is used. Set with `setP2PFskBandwidth()` or `AT+PBW` in FSK mode.
+
+```cpp
+uint32_t fskBandwidthHz
+```
+
+#### fskSyncWordLen
+
+Number of valid bytes in `fskSyncWord`, 1 - 8. Default 3.
+
+```cpp
+uint8_t fskSyncWordLen
+```
+
+#### fskSyncWord
+
+FSK sync word, up to `WISBLOCK_FSK_SYNCWORD_MAX_LEN` (8) bytes. Default `C1 94 C1`. Both ends of a link must match. Set with `setP2PFskSyncWord()` or `AT+SYNCWORD` in FSK mode.
+
+```cpp
+uint8_t fskSyncWord[WISBLOCK_FSK_SYNCWORD_MAX_LEN]
+```
+
 ### WisBlockPersistedConfig
 
 The complete persisted configuration, returned by `lora.getConfig()`.
 
 #### workMode
 
-LoRaWAN or LoRa P2P.
+LoRaWAN, LoRa P2P or FSK P2P.
 
 ```cpp
 WisBlockWorkMode workMode
@@ -1155,7 +1205,7 @@ void loop()
 
 ### setWorkMode()
 
-Sets the operating mode. Switching to `WISBLOCK_MODE_LORAWAN` starts the LoRaWAN engine.
+Sets the operating mode. Switching to `WISBLOCK_MODE_LORAWAN` starts the LoRaWAN engine. `WISBLOCK_MODE_FSK_P2P` switches the P2P engine to GFSK modulation, `WISBLOCK_MODE_LORA_P2P` back to LoRa. The FSK parameters are set with the `setP2PFsk...()` functions, see [setP2PFskBitrate()](#setp2pfskbitrate).
 
 ```cpp
 lora.setWorkMode(mode);
@@ -1164,7 +1214,7 @@ lora.setWorkMode(mode);
 | | |
 | --- | --- |
 | **Function** | `void setWorkMode(WisBlockWorkMode mode)` |
-| **Parameters** | **mode** - `WISBLOCK_MODE_LORAWAN` or `WISBLOCK_MODE_LORA_P2P` |
+| **Parameters** | **mode** - `WISBLOCK_MODE_LORAWAN`, `WISBLOCK_MODE_LORA_P2P` or `WISBLOCK_MODE_FSK_P2P` |
 
 <details>
 <summary><b>Click to view the code</b></summary>
@@ -2412,6 +2462,104 @@ lora.setP2PSyncWord(0x3444);
 | **Function** | `void setP2PSyncWord(uint16_t syncWord)` |
 | **Parameters** | **syncWord** - 16 bit sync word, for example `0x1424` or `0x3444` |
 
+### setP2PFskBitrate()
+
+Sets the FSK bit rate. Used in `WISBLOCK_MODE_FSK_P2P`. Applied to the radio immediately. Same as `AT+PBR`.
+
+```cpp
+lora.setP2PFskBitrate(50000);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setP2PFskBitrate(uint32_t bitrate)` |
+| **Parameters** | **bitrate** - bit rate in bit/s, 600 - 300000 (values outside are limited by the engine). Default 50000 |
+
+### setP2PFskFrequencyDeviation()
+
+Sets the FSK frequency deviation. Used in `WISBLOCK_MODE_FSK_P2P`. Applied to the radio immediately. Same as `AT+PFDEV`.
+
+```cpp
+lora.setP2PFskFrequencyDeviation(25000);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setP2PFskFrequencyDeviation(uint32_t deviationHz)` |
+| **Parameters** | **deviationHz** - deviation in Hz, 600 - 200000. Default 25000 |
+
+### setP2PFskBandwidth()
+
+Sets the FSK RX bandwidth. Used in `WISBLOCK_MODE_FSK_P2P`. Applied to the radio immediately. Same as `AT+PBW` in FSK mode. The next larger bandwidth step of the radio is used. It should be at least bit rate + 2 x frequency deviation.
+
+```cpp
+lora.setP2PFskBandwidth(117300);
+```
+
+| | |
+| --- | --- |
+| **Function** | `void setP2PFskBandwidth(uint32_t bandwidthHz)` |
+| **Parameters** | **bandwidthHz** - RX bandwidth in Hz, 4800 - 467000. Default 117300 |
+
+### setP2PFskSyncWord()
+
+Sets the FSK sync word. Both ends of a link must use the same sync word. Applied to the radio immediately. Same as `AT+SYNCWORD` in FSK mode.
+
+```cpp
+const uint8_t syncWord[] = {0xC1, 0x94, 0xC1};
+lora.setP2PFskSyncWord(syncWord, sizeof(syncWord));
+```
+
+| | |
+| --- | --- |
+| **Function** | `bool setP2PFskSyncWord(const uint8_t *syncWord, uint8_t length)` |
+| **Parameters** | **syncWord** - sync word bytes<br/>**length** - number of bytes, 1 - 8 |
+| **Returns** | bool |
+| **Return Values** | **TRUE** the sync word was set<br/>**FALSE** the pointer is null or the length is invalid, nothing changed |
+
+### getP2PFskStats()
+
+Reads the packet counters of the radio in FSK mode (diagnostics). The counters include packets that were dropped because of a wrong CRC or length.
+
+```cpp
+uint16_t received, crcErrors, lengthErrors;
+if (lora.getP2PFskStats(received, crcErrors, lengthErrors))
+{
+  Serial.printf("RX %u, CRC errors %u, length errors %u\n", received, crcErrors, lengthErrors);
+}
+```
+
+| | |
+| --- | --- |
+| **Function** | `bool getP2PFskStats(uint16_t &received, uint16_t &crcErrors, uint16_t &lengthErrors)` |
+| **Parameters** | **received** - packets received with a correct CRC<br/>**crcErrors** - packets with a wrong CRC<br/>**lengthErrors** - packets with a wrong length |
+| **Returns** | bool |
+| **Return Values** | **TRUE** the counters were read<br/>**FALSE** not in FSK mode or the counters could not be read |
+
+<details>
+<summary><b>Click to view the FSK example code</b></summary>
+
+```cpp
+WisBlockLoRaWAN lora;
+
+void setup()
+{
+  lora.begin();
+  lora.setWorkMode(WISBLOCK_MODE_FSK_P2P);
+  lora.setP2PFrequency(916000000);
+  lora.setP2PFskBitrate(50000);
+  lora.setP2PFskFrequencyDeviation(25000);
+  lora.setP2PFskBandwidth(117300);
+  lora.setP2PPreambleLength(5);   // bytes in FSK mode
+  lora.setP2PTxPower(14);
+  lora.startP2PReceive(WISBLOCK_P2P_RX_CONTINUOUS_TX); // continuous receive, restarts after each TX
+}
+```
+
+See the examples `BasicFskP2P`, `FskP2PTest` and `FSKP2PPingPong`.
+
+</details>
+
 ### getP2PSettings()
 
 Returns the P2P settings that are applied to the radio.
@@ -3087,7 +3235,7 @@ This section is for code written for the [SX126x-Arduino](https://github.com/bee
 
 | SX126x-Arduino | WisBlockLoRaWAN | Comment |
 | --- | --- | --- |
-| `Radio.xxx()` function table, `RadioEvents_t` struct | One object `WisBlockLoRaWAN lora;` with methods and `lora.onXxx()` callback registration | There is no direct access to the radio: no `Radio.Write()` / `Radio.Read()` registers, no `SetTxContinuousWave()`, no FSK modem. |
+| `Radio.xxx()` function table, `RadioEvents_t` struct | One object `WisBlockLoRaWAN lora;` with methods and `lora.onXxx()` callback registration | There is no direct access to the radio: no `Radio.Write()` / `Radio.Read()` registers, no `SetTxContinuousWave()`. GFSK is available as work mode `WISBLOCK_MODE_FSK_P2P` with `setP2PFskBitrate()`, `setP2PFskFrequencyDeviation()`, `setP2PFskBandwidth()` and `setP2PFskSyncWord()`, or with `AT+NWM=2`, `AT+PBR`, `AT+PFDEV`, `AT+PBW` and `AT+SYNCWORD`. |
 | `SetTxConfig()` + `SetRxConfig()` + `SetChannel()` | One setter per parameter (`setP2PFrequency()`, `setP2PSpreadingFactor()`, ...) | The settings are shared by TX and RX, so they cannot differ. Each setter is applied to the radio immediately. |
 | Settings live in the sketch only | Settings live in the library and can be **stored in flash** | Call `saveConfig()` to keep them. After `begin()`, [hasValidConfig()](#hasvalidconfig) tells whether stored settings were found. |
 | LoRaWAN: `LoRaMacHelper` (`lmh_xxx()`) with LoRaMac-node | LoRaWAN: same object, Semtech LoRa Basics Modem | See [LoRaWAN](#lorawan-from-sx126x-arduino) below. |
@@ -3134,7 +3282,7 @@ This section is for code written for the [SX126x-Arduino](https://github.com/bee
 
 | Parameter | WisBlockLoRaWAN | Comment |
 | --- | --- | --- |
-| `modem` | - | LoRa only, no FSK. |
+| `modem` | `setWorkMode()` | `WISBLOCK_MODE_LORA_P2P` or `WISBLOCK_MODE_FSK_P2P`. |
 | `power` [dBm] | `setP2PTxPower(dbm)` | Limited to -9 ... 22 dBm. |
 | `bandwidth` | `setP2PBandwidth(WisBlockP2PBandwidth)` | **Same index numbers as SX126x-Arduino** (0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 62.5 kHz ... 9 = 7.81 kHz), also as `WISBLOCK_BW_125` ... `WISBLOCK_BW_007`. The `AT+PBW` command and the `<bw>` field of `AT+P2P` use the RUI3 numbering instead, see the [AT command manual](WisBlockLoRaWAN-AT-Commands.md). |
 | `datarate` (spreading factor) | `setP2PSpreadingFactor(sf)` | The library does not check the range, use 7 ... 12. `AT+PSF` accepts 6 ... 12. |
@@ -3146,7 +3294,7 @@ This section is for code written for the [SX126x-Arduino](https://github.com/bee
 | `freqHopOn`, `hopPeriod` | - | Not available. |
 | `symbTimeout`, `rxContinuous` | `startP2PReceive(timeoutMs)` | `0` = continuous, any other value = single RX with that timeout. |
 | `timeout` (TX) | - | Handled by the library. |
-| `bandwidthAfc`, `fdev` | - | FSK only, not available. |
+| `bandwidthAfc`, `fdev` | `setP2PFskBandwidth()`, `setP2PFskFrequencyDeviation()` | FSK only. `bandwidthAfc` (AFC bandwidth) is not available, the RX bandwidth is set with `setP2PFskBandwidth()`. |
 | `SetChannel(freq)` | `setP2PFrequency(hz)` | |
 
 ### LoRaWAN (from SX126x-Arduino)

@@ -3,8 +3,10 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
-Nov 15, 2026 V1.0.4 Add password protection
+Nov 15, 2026 V1.0.4 Add password protection & FSK AT commands
 - Add password protection to block readout of credentials with AT commands
+- `AT+SYNCWORD` now sets and reads the FSK sync word (1 to 8 bytes, 2 to 16 hex digits) in FSK mode (`AT+NWM=2`). Before it only changed the LoRa sync word, which has no effect on FSK.
+- AT command documentation: added "FSK P2P setup", documented `AT+NWM=2`, `AT+PBR`, `AT+PFDEV` and the FSK variants of `AT+PBW`, `AT+PPL`, `AT+P2P` and `AT+SYNCWORD`. These commands were already in the code but the documentation said they were not implemented.
 
 Nov 10, 2026 V1.0.4
 - First release for RAK13702 LoRa module with LR2021 (subGHz & 2.4 GHz LoRa)

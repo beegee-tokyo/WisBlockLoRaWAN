@@ -135,6 +135,7 @@ _Commands starting with `ATC+` are application defined custom commands, see [Cus
     + [AT+RMVMULC](#atrmvmulc)
     + [AT+LSTMULC](#atlstmulc)
   * [P2P Instructions](#p2p-instructions)
+    + [FSK P2P setup](#fsk-p2p-setup)
     + [AT+NWM](#atnwm)
     + [AT+PFREQ](#atpfreq)
     + [AT+PSF](#atpsf)
@@ -1580,6 +1581,71 @@ _The lines do not have the `AT+LSTMULC=` prefix and no group number._
 
 This section describes the commands related to LoRa point-to-point functionality.
 
+### FSK P2P setup
+
+Besides LoRa P2P and LoRaWAN the library has a GFSK P2P mode (SX126x GFSK modem; FSK on the LR2021 is not verified). It is selected with `AT+NWM=2` and uses the same P2P commands as LoRa P2P. Some of them change their meaning in FSK mode:
+
+| Command | LoRa P2P | FSK P2P |
+| ------- | -------- | ------- |
+| `AT+NWM=<n>` | `0` | `2` |
+| `AT+PFREQ` | frequency in Hz | frequency in Hz (same) |
+| `AT+PBR` | - | bit rate in bit/s, `600` - `300000` (default 50000) |
+| `AT+PFDEV` | - | frequency deviation in Hz, `600` - `200000` (default 25000) |
+| `AT+PBW` | bandwidth **index** | RX bandwidth in **Hz**, `4800` - `467000` (default 117300) |
+| `AT+PPL` | preamble in symbols | preamble in **bytes**, `1` - `8191` |
+| `AT+PTP` | TX power in dBm | TX power in dBm (same) |
+| `AT+SYNCWORD` | 4 hex digits | 2 - 16 hex digits (1 - 8 bytes), default `C194C1` |
+| `AT+P2P` | `<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | `<freq>:<bitrate>:<fdev>:<bw>:<preamble>:<txpower>` |
+| `AT+PSEND`, `AT+PRECV`, `AT+RXBOOST` | same | same |
+| `AT+PRECVDC` | `<rx>:<sleep>` or automatic timing | only with explicit times `AT+PRECVDC=<rxTimeMs>:<sleepTimeMs>`, the automatic timing is LoRa specific and fails |
+| `AT+PSF`, `AT+PCR`, `AT+IQINVER`, `AT+CAD` | used | no effect (LoRa only, there is no CAD in FSK) |
+
+**Example:** 916 MHz, 50 kbit/s, 25 kHz deviation, 117.3 kHz RX bandwidth, 14 dBm. Run the same commands on both devices:
+
+```text
+AT+NWM=2
+OK
+AT+PFREQ=916000000
+OK
+AT+PBR=50000
+OK
+AT+PFDEV=25000
+OK
+AT+PBW=117300
+OK
+AT+PPL=5
+OK
+AT+PTP=14
+OK
+AT+SYNCWORD=C194C1
+OK
+AT+SAVE
+OK
+```
+
+The same with one command (the first five fields are required): `AT+P2P=916000000:50000:25000:117300:5:14`, then `AT+SYNCWORD=C194C1`.
+
+Then start the receiver on one device and send from the other:
+
+```text
+AT+PRECV=0
+OK
+AT+PSEND=48656C6C6F
+OK
+```
+
+## _💡 NOTE_
+----
+_Both ends of a link must use the same frequency, bit rate, frequency deviation, RX bandwidth, preamble length and sync word. The RX bandwidth should be at least bit rate + 2 x frequency deviation (50000 + 2 x 25000 = 100000, so 117300 fits)._
+
+_The packet format is fixed by the library: variable length packet, 2 byte inverted CCITT CRC (seed 0x1D0F, polynomial 0x1021), whitening (seed 0x01FF), Gaussian filter BT 1.0. It is not verified against other firmware such as RUI3, so to talk to a RUI3 device compare these settings first. A packet with a wrong CRC is reported with length 0. There is no SNR in FSK mode, only the RSSI._
+
+_`AT+NWM=2` applies the mode immediately without a restart, `AT+SAVE` keeps the settings over a reset. `AT+STATUS` shows `MODE=FSK_P2P` with FREQ, BR, FDEV, BW, PPL, TXP and SYNC. The bit rate, deviation, RX bandwidth and sync word of FSK are stored separately from the LoRa settings, but the frequency, the preamble length (symbols in LoRa, bytes in FSK) and the TX power are shared. Check them after switching between `AT+NWM=0` and `AT+NWM=2`._
+
+----
+
+[Back](#content)
+
 ### AT+NWM
 
 Description: LoRa network work mode
@@ -1588,8 +1654,8 @@ This command switches between LoRa P2P mode and LoRaWAN mode.
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+NWM=?` | - | `AT+NWM=<0 or 1>` | OK |
-| `AT+NWM=<Input>` | 0 (P2P) or 1 (LoRaWAN) | - | OK<br/>`AT_PARAM_ERROR` |
+| `AT+NWM=?` | - | `AT+NWM=<0, 1 or 2>` | OK |
+| `AT+NWM=<Input>` | 0 (LoRa P2P), 1 (LoRaWAN) or 2 (FSK P2P) | - | OK<br/>`AT_PARAM_ERROR` |
 
 **Example:**
 
@@ -1600,13 +1666,16 @@ OK
 
 AT+NWM=0
 OK
+
+AT+NWM=2
+OK
 ```
 
 ## _💡 NOTE_
 ----
 _The default value is **1** (LoRaWAN)._
 
-_`2` (P2P_FSK) is **not supported** and returns `AT_PARAM_ERROR`. Any other value than `1` selects P2P._
+_`2` selects the GFSK P2P mode (same numbering as RUI3), see [FSK P2P setup](#fsk-p2p-setup). Values above `2` return `AT_PARAM_ERROR`._
 
 _Unlike RUI3, the device does **not restart**. The mode change is active immediately. Use `AT+SAVE` to keep it over a reset._
 
@@ -1666,6 +1735,7 @@ Description: P2P mode bandwidth
 | ------- | --------------- | ------------ | ----------- |
 | `AT+PBW=?` | - | `AT+PBW=<0 - 9>` (`<0 - 13>` on an LR2021) | OK |
 | `AT+PBW=<Input>` | `0` - `9`, `10` - `13` on an LR2021 only | - | OK<br/>`AT_PARAM_ERROR` |
+|  | **FSK mode (`AT+NWM=2`):** *Input* = RX bandwidth in **Hz**, `4800` - `467000`. The query returns the value in Hz. |  |
 |  | *Input* = bandwidth **index** (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz. LR2021 only, for the 2.4 GHz band: 10 = 203 kHz, 11 = 406 kHz, 12 = 812.5 kHz (the bandwidth of the WW2G4 LoRaWAN region), 13 = 1000 kHz |  |  |
 
 **Example:**
@@ -1686,7 +1756,7 @@ OK
 
 _The indexes 10 - 13 are rejected with `AT_PARAM_ERROR` on an SX1262, which does not have these bandwidths. They are not tied to a frequency: the radio is not asked if it accepts them in the sub-GHz band._
 
-_The default is 0 (125 kHz)._
+_The default is 0 (125 kHz). In FSK mode the value is in Hz (default 117300) and the next larger bandwidth step of the radio is used. It should be at least bit rate + 2 x frequency deviation._
 
 [Back](#content)
 
@@ -1723,8 +1793,8 @@ Description: P2P mode preamble length
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+PPL=?` | - | `AT+PPL=<5 - 65535>` | OK |
-| `AT+PPL=<Input>` | `5` - `65535` | - | OK<br/>`AT_PARAM_ERROR` |
+| `AT+PPL=?` | - | `AT+PPL=<5 - 65535>` (`<1 - 8191>` in FSK mode) | OK |
+| `AT+PPL=<Input>` | `5` - `65535` (LoRa), `1` - `8191` (FSK) | - | OK<br/>`AT_PARAM_ERROR` |
 
 **Example:**
 
@@ -1733,7 +1803,7 @@ AT+PPL=12
 OK
 ```
 
-_The preamble length in symbols. The default is 8. For `AT+PRECVDC` the transmitter's preamble length decides how long the receiver can sleep, see [AT+PRECVDC](#atprecvdc)._
+_The preamble length in symbols (in **bytes** in FSK mode). The default is 8. For `AT+PRECVDC` the transmitter's preamble length decides how long the receiver can sleep, see [AT+PRECVDC](#atprecvdc)._
 
 [Back](#content)
 
@@ -1759,7 +1829,7 @@ _The TX power in dBm. The default is 14. `AT+P2P` accepts the same value as its 
 
 ### AT+P2P
 
-Description: LoRa P2P radio parameters
+Description: LoRa and FSK P2P radio parameters
 
 This command sets or gets the main P2P radio parameters with one command. The same values can be set one by one with [AT+PFREQ](#atpfreq), [AT+PSF](#atpsf), [AT+PBW](#atpbw), [AT+PCR](#atpcr), [AT+PPL](#atppl) and [AT+PTP](#atptp). The bandwidth index is the same in both. Mind that the coding rate is counted differently, see the warning at `AT+PCR`.
 
@@ -1767,6 +1837,7 @@ This command sets or gets the main P2P radio parameters with one command. The sa
 | ------- | --------------- | ------------ | ----------- |
 | `AT+P2P=?` | - | `AT+P2P=<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | OK |
 | `AT+P2P=<Input>` | `<freq>:<sf>:<bw>:<cr>:<preamble>:<txpower>` | - | OK<br/>`AT_PARAM_ERROR` |
+|  | **FSK mode (`AT+NWM=2`):** the fields are `<freq>:<bitrate>:<fdev>:<bw>:<preamble>:<txpower>`, see below |  |
 |  | *freq* = frequency in Hz: 150000000 - 960000000, or 2400000000 - 2483000000 on an LR2021 only |  |  |
 |  | *sf* = spreading factor 7 - 12 |  |  |
 |  | *bw* = bandwidth **index**, same as [AT+PBW](#atpbw) (RUI3 numbering): 0 = 125 kHz, 1 = 250 kHz, 2 = 500 kHz, 3 = 7.8 kHz, 4 = 10.4 kHz, 5 = 15.63 kHz, 6 = 20.83 kHz, 7 = 31.25 kHz, 8 = 41.67 kHz, 9 = 62.5 kHz, LR2021 only: 10 = 203 kHz, 11 = 406 kHz, 12 = 812.5 kHz, 13 = 1000 kHz |  |  |
@@ -1797,7 +1868,9 @@ _Parameters that are left out (from the end of the list) are replaced by the def
 
 _The settings are applied to the radio immediately and stored with `AT+SAVE`. The default frequency is 916000000._
 
-_`AT+ENCRY`, `AT+ENCKEY`, `AT+PBR` and `AT+PFDEV` are not implemented._
+_**FSK mode:** `AT+P2P` uses its own field layout `<freq>:<bitrate>:<fdev>:<bw>:<preamble>:<txpower>` (frequency in Hz, bit rate in bit/s 600 - 300000, frequency deviation in Hz 600 - 200000, RX bandwidth in Hz 4800 - 467000, preamble length in bytes 1 - 8191, TX power in dBm). The first five fields are required, the TX power is optional and keeps its value if left out. Example: `AT+P2P=916000000:50000:25000:117300:5:14`._
+
+_`AT+ENCRY` and `AT+ENCKEY` are not implemented. `AT+PBR` and `AT+PFDEV` exist for FSK mode, see [FSK P2P setup](#fsk-p2p-setup)._
 
 ----
 
@@ -1829,8 +1902,8 @@ Description: P2P sync word
 
 | Command | Input Parameter | Return Value | Return Code |
 | ------- | --------------- | ------------ | ----------- |
-| `AT+SYNCWORD=?` | - | `AT+SYNCWORD=<4 hex digits>` | OK |
-| `AT+SYNCWORD=<Input>` | `<4 hex digits>` | - | OK<br/>`AT_PARAM_ERROR` |
+| `AT+SYNCWORD=?` | - | `AT+SYNCWORD=<4 hex digits>` (`<2 - 16 hex digits>` in FSK mode) | OK |
+| `AT+SYNCWORD=<Input>` | `<4 hex digits>` (LoRa), `<2 - 16 hex digits>`, even count (FSK) | - | OK<br/>`AT_PARAM_ERROR` |
 
 **Example:**
 
@@ -1844,6 +1917,8 @@ OK
 ```
 
 _The 16 bit LoRa sync word, exactly 4 hex digits without `0x`, upper or lower case. `1424` is the private sync word (default, same as RUI3 P2P), `3444` is the public one used by LoRaWAN. Both sides of a P2P link must use the same value._
+
+_**FSK mode (`AT+NWM=2`):** the sync word is 1 to 8 bytes, written as 2 to 16 hex digits with an even number of digits, for example `AT+SYNCWORD=C194C1` (the default, the Semtech reference value) or `AT+SYNCWORD=AABBCCDD11223344`. The query returns the FSK sync word. The LoRa and the FSK sync word are stored separately, switching the mode with `AT+NWM` does not change either of them. A value with the wrong number of digits for the current mode (not 4 in LoRa mode, odd or more than 16 in FSK mode) returns `AT_PARAM_ERROR`._
 
 [Back](#content)
 
@@ -2072,7 +2147,7 @@ These RUI3 commands are **not** available. They return `AT_ERROR`.
 | Class B | `AT+BGW` |
 | Information | `AT+RSSI`, `AT+ARSSI`, `AT+SNR` |
 | Regional | `AT+CHE`, `AT+CHS` |
-| P2P | `AT+PBR`, `AT+PFDEV`, `AT+ENCRY`, `AT+ENCKEY`, `AT+PCRYPT`, `AT+PKEY`, `AT+CRYPIV`, `AT+RFFREQUENCY`, `AT+TXOUTPUTPOWER`, `AT+BANDWIDTH`, `AT+SPREADINGFACTOR`, `AT+CODINGRATE`, `AT+PREAMBLELENGTH`, `AT+SYMBOLTIMEOUT`, `AT+FIXLENGTHPAYLOAD` |
+| P2P | `AT+ENCRY`, `AT+ENCKEY`, `AT+PCRYPT`, `AT+PKEY`, `AT+CRYPIV`, `AT+RFFREQUENCY`, `AT+TXOUTPUTPOWER`, `AT+BANDWIDTH`, `AT+SPREADINGFACTOR`, `AT+CODINGRATE`, `AT+PREAMBLELENGTH`, `AT+SYMBOLTIMEOUT`, `AT+FIXLENGTHPAYLOAD` |
 | RF test | `AT+TRSSI`, `AT+TTONE`, `AT+TTX`, `AT+TRX`, `AT+TCONF`, `AT+TTH`, `AT+TOFF`, `AT+CERTIF`, `AT+CW`, `AT+TRTH` |
 
 Commands that exist **only** in this library: `AT+STATUS`, `AT+FPENDING`, `AT+RXBOOST`, `AT+PRECVDC`, `AT+LOWPOWER`, `AT+SAVE`, `AT+RESTORE`, `AT+FACTORY`, `AT+FIRMWAREVER`.

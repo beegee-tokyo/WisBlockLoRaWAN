@@ -1803,19 +1803,36 @@ void WisBlockLoRaAT::atIqInver(AtOp op, const char *value)
 
 void WisBlockLoRaAT::atSyncWord(AtOp op, const char *value)
 {
+	// FSK mode: the sync word is 1..8 bytes (2..16 hex digits, even count), e.g. AT+SYNCWORD=C194C1 (default).
+	// LoRa mode: the 16 bit LoRa sync word, 4 hex digits, e.g. 1424 (private, default) or 3444 (public).
+	bool fsk = lora->getWorkMode() == WISBLOCK_MODE_FSK_P2P;
 	if (op == AtOp::Query)
 	{
-		// 4 hex digits, e.g. AT+SYNCWORD=1424 (private, default) or 3444 (public)
 		port->printf("AT+SYNCWORD=");
-		char buf[8];
-		snprintf(buf, sizeof(buf), "%04X", (unsigned)lora->getP2PSettings().syncWord);
-		port->println(buf);
+		if (fsk)
+		{
+			const WisBlockP2PSettings &s = lora->getP2PSettings();
+			for (uint8_t i = 0; i < s.fskSyncWordLen && i < WISBLOCK_FSK_SYNCWORD_MAX_LEN; i++)
+			{
+				char hex[3];
+				snprintf(hex, sizeof(hex), "%02X", s.fskSyncWord[i]);
+				port->print(hex);
+			}
+			port->println();
+		}
+		else
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "%04X", (unsigned)lora->getP2PSettings().syncWord);
+			port->println(buf);
+		}
 		replyOk();
 	}
 	else if (op == AtOp::Write)
 	{
-		bool ok = value != nullptr && strlen(value) == 4;
-		for (int i = 0; ok && i < 4; i++)
+		size_t len = value != nullptr ? strlen(value) : 0;
+		bool ok = fsk ? (len >= 2 && len <= 2 * WISBLOCK_FSK_SYNCWORD_MAX_LEN && (len % 2) == 0) : (len == 4);
+		for (size_t i = 0; ok && i < len; i++)
 		{
 			ok = isxdigit((unsigned char)value[i]) != 0;
 		}
@@ -1824,7 +1841,24 @@ void WisBlockLoRaAT::atSyncWord(AtOp op, const char *value)
 			replyError("AT_PARAM_ERROR");
 			return;
 		}
-		lora->setP2PSyncWord((uint16_t)strtoul(value, nullptr, 16));
+		if (fsk)
+		{
+			uint8_t sw[WISBLOCK_FSK_SYNCWORD_MAX_LEN];
+			for (size_t i = 0; i < len / 2; i++)
+			{
+				char pair[3] = {value[2 * i], value[2 * i + 1], '\0'};
+				sw[i] = (uint8_t)strtoul(pair, nullptr, 16);
+			}
+			if (!lora->setP2PFskSyncWord(sw, (uint8_t)(len / 2)))
+			{
+				replyError("AT_PARAM_ERROR");
+				return;
+			}
+		}
+		else
+		{
+			lora->setP2PSyncWord((uint16_t)strtoul(value, nullptr, 16));
+		}
 		replyOk();
 	}
 	else
