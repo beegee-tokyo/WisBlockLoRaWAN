@@ -2,8 +2,8 @@
 #include <Arduino.h>
 #include "WisBlockLoRaAT.h"
 #include "wisblock_radio_bsp_config.h" // wisblock_radio_hal_is_lr2021()
-#include "WisBlockLoRaFlash.h"           // password record, key "wb_pwd"
-#include "WisBlockLoRaWAN_all.h" // WISBLOCK_LORAWAN_VERSION_STRING, used by the AT+VER handler
+#include "WisBlockLoRaFlash.h"		   // password record, key "wb_pwd"
+#include "WisBlockLoRaWAN_all.h"	   // WISBLOCK_LORAWAN_VERSION_STRING, used by the AT+VER handler
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -162,7 +162,7 @@ namespace
 	}
 	const uint32_t kP2pSfMin = 6;
 	const uint32_t kP2pSfMax = 12;
-	const uint32_t kP2pBwMax = 9;		// RUI3 bandwidth indexes 0 - 9
+	const uint32_t kP2pBwMax = 9;	   // RUI3 bandwidth indexes 0 - 9
 	const uint32_t kP2pBwWideMax = 13; // 10 - 13: 203 / 406 / 812.5 / 1000 kHz, LR2021 only
 
 	/**
@@ -427,64 +427,118 @@ void WisBlockLoRaAT::replyError(const char *reason)
 	port->flush();
 }
 
+/** Regions as text array */
+char *regions_list[15] = {(char *)"EU433", (char *)"CN470", (char *)"RU864", (char *)"IN865", (char *)"EU868", (char *)"US915", (char *)"AU915", (char *)"KR920", (char *)"AS923", (char *)"AS923-2", (char *)"AS923-3", (char *)"AS923-4", (char *)"LA915", (char *)"ISM2400", (char *)"Unknown"};
+/** Network modes as text array*/
+char *nwm_list[3] = {(char *)"P2P", (char *)"LoRaWAN", (char *)"FSK"};
+
 void WisBlockLoRaAT::handleStatusQuery()
 {
-	const WisBlockPersistedConfig &cfg = lora->getConfig();
-	port->print("MODE=");
-	port->println(cfg.workMode == WISBLOCK_MODE_LORAWAN ? "LORAWAN" : (cfg.workMode == WISBLOCK_MODE_FSK_P2P ? "FSK_P2P" : "LORA_P2P"));
-	if (cfg.workMode == WISBLOCK_MODE_LORAWAN)
+	String value_str = "";
+	int nw_mode = 0;
+	int region_set = 0;
+	uint8_t key_eui[16] = {0}; // efadff29c77b4829acf71e1a6e76f713
+
+	Serial.println("Device Status:");
+#ifdef NRF52_SERIES
+	Serial.println("Module: RAK4630");
+#elif defined(ARDUINO_ARCH_ESP32)
+	Serial.println("Module: RAK3112");
+#elif defined(ARDUINO_ARCH_RP2040)
+	Serial.println("Module: RAK11310");
+#endif
+	Serial.printf("Version: %s\r\n", lora->getFirmwareVer());
+
+	// Same numbering as AT+NWM: 0 = P2P (LoRa), 1 = LoRaWAN, 2 = FSK P2P
+	WisBlockWorkMode work_mode = lora->getWorkMode();
+	nw_mode = work_mode == WISBLOCK_MODE_LORAWAN ? 1 : (work_mode == WISBLOCK_MODE_FSK_P2P ? 2 : 0);
+	Serial.printf("Network mode %s\r\n", nwm_list[nw_mode]);
+	if (nw_mode == 1)
 	{
-		port->print("REGION=");
-		port->println((int)cfg.lorawan.region);
-		port->print("CLASS=");
-		port->println(cfg.lorawan.deviceClass == WISBLOCK_CLASS_A ? "A" : cfg.lorawan.deviceClass == WISBLOCK_CLASS_B ? "B"
-																													  : "C");
-		port->print("ADR=");
-		port->println(cfg.lorawan.adrEnabled ? "1" : "0");
-		port->print("MASK=");
+		Serial.printf("Network %s\r\n", lora->isJoined() ? "joined" : "not joined");
+		region_set = lora->getRegion();
+		Serial.printf("Region: %d - %s\r\n", region_set, regions_list[region_set]);
+
+		if (lora->getConfig().lorawan.joinMode == WISBLOCK_JOIN_OTAA)
 		{
-			char buf[5];
-			snprintf(buf, sizeof(buf), "%04X", cfg.lorawan.channelMask);
-			port->println(buf);
+			Serial.printf("OTAA mode\r\n");
+			if (accessAllowed())
+			{
+				memcpy(key_eui, lora->getConfig().lorawan.otaa.devEui, 8);
+				Serial.printf("DevEUI=%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+							  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+							  key_eui[4], key_eui[5], key_eui[6], key_eui[7]);
+				memcpy(key_eui, lora->getConfig().lorawan.otaa.joinEui, 8);
+				Serial.printf("AppEUI=%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+							  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+							  key_eui[4], key_eui[5], key_eui[6], key_eui[7]);
+				memcpy(key_eui, lora->getConfig().lorawan.otaa.appKey, 16);
+				Serial.printf("AppKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+							  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+							  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+							  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+							  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+			}
+			else
+			{
+				Serial.println("Credentials are password protected");
+			}
+		}
+		else
+		{
+			Serial.printf("ABP mode");
+			if (accessAllowed())
+			{
+				memcpy(key_eui, lora->getConfig().lorawan.abp.appSKey, 16);
+				Serial.printf("AppsKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+							  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+							  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+							  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+							  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+				memcpy(key_eui, lora->getConfig().lorawan.abp.nwkSKey, 16);
+				Serial.printf("NwsKey=%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X\r\n",
+							  key_eui[0], key_eui[1], key_eui[2], key_eui[3],
+							  key_eui[4], key_eui[5], key_eui[6], key_eui[7],
+							  key_eui[8], key_eui[9], key_eui[10], key_eui[11],
+							  key_eui[12], key_eui[13], key_eui[14], key_eui[15]);
+				uint32_t addr = lora->getConfig().lorawan.abp.devAddr;
+				uint8_t bytes[4] = {(uint8_t)(addr >> 24), (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr};
+				Serial.printf("DevAddr=%02X%02X%02X%02X\r\n",
+							  bytes[0], bytes[1], bytes[2], bytes[3]);
+			}
+			else
+			{
+				Serial.println("Credentials are password protected");
+			}
 		}
 		port->print("JOINSTATE=");
 		port->println((int)lora->joinState());
 	}
-	else if (cfg.workMode == WISBLOCK_MODE_FSK_P2P)
+	else if (nw_mode == 0)
 	{
-		port->print("FREQ=");
-		port->println(cfg.p2p.frequencyHz);
-		port->print("BR=");
-		port->println(cfg.p2p.fskBitrate);
-		port->print("FDEV=");
-		port->println(cfg.p2p.fskFreqDevHz);
-		port->print("BW=");
-		port->println(cfg.p2p.fskBandwidthHz);
-		port->print("PPL="); // preamble length in bytes
-		port->println(cfg.p2p.preambleLength);
-		port->print("TXP=");
-		port->println(cfg.p2p.txPowerDbm);
-		port->print("SYNC=");
-		for (uint8_t i = 0; i < cfg.p2p.fskSyncWordLen && i < WISBLOCK_FSK_SYNCWORD_MAX_LEN; i++)
-		{
-			char hex[3];
-			snprintf(hex, sizeof(hex), "%02X", cfg.p2p.fskSyncWord[i]);
-			port->print(hex);
-		}
-		port->println();
+		const WisBlockP2PSettings &s = lora->getP2PSettings();
+		Serial.printf("Frequency = %d\r\n", s.frequencyHz);
+		Serial.printf("SF = %d\r\n", s.spreadingFactor);
+		Serial.printf("BW = %d\r\n", (int)s.bandwidth);
+		Serial.printf("CR = %d\r\n", (int)s.codingRate);
+		Serial.printf("Preamble length = %d\r\n", s.preambleLength);
+		Serial.printf("TX power = %d\r\n", s.txPowerDbm);
 	}
-	else
+	else if (nw_mode == 2)
 	{
-		port->print("FREQ=");
-		port->println(cfg.p2p.frequencyHz);
-		port->print("SF=");
-		port->println(cfg.p2p.spreadingFactor);
-		port->print("BW=");
-		port->println((int)cfg.p2p.bandwidth);
-		port->print("CR=");
-		port->println((int)cfg.p2p.codingRate);
-		port->print("CAD=");
-		port->println(cfg.p2p.cadEnabled ? "1" : "0");
+		const WisBlockP2PSettings &s = lora->getP2PSettings();
+		Serial.printf("Frequency = %lu\r\n", (unsigned long)s.frequencyHz);
+		Serial.printf("Bit rate = %lu\r\n", (unsigned long)s.fskBitrate);
+		Serial.printf("Frequency deviation = %lu\r\n", (unsigned long)s.fskFreqDevHz);
+		Serial.printf("RX bandwidth = %lu\r\n", (unsigned long)s.fskBandwidthHz);
+		Serial.printf("Preamble length = %d bytes\r\n", s.preambleLength);
+		Serial.printf("TX power = %d\r\n", s.txPowerDbm);
+		Serial.print("Sync word = ");
+		for (uint8_t i = 0; i < s.fskSyncWordLen && i < WISBLOCK_FSK_SYNCWORD_MAX_LEN; i++)
+		{
+			Serial.printf("%02X", s.fskSyncWord[i]);
+		}
+		Serial.println("\r");
 	}
 }
 
@@ -2267,49 +2321,49 @@ void WisBlockLoRaAT::atHwId(AtOp op, const char *value)
 
 namespace
 {
-/**
- * @brief Read the 8 byte unique ID of the chip
- *
- * Used by AT+SN=? and as the salt of the password hash.
- *
- * @param id Receives the 8 bytes
- */
-void readUniqueId(uint8_t id[8])
-{
+	/**
+	 * @brief Read the 8 byte unique ID of the chip
+	 *
+	 * Used by AT+SN=? and as the salt of the password hash.
+	 *
+	 * @param id Receives the 8 bytes
+	 */
+	void readUniqueId(uint8_t id[8])
+	{
 #ifdef NRF52_SERIES
-	id[7] = ((*(uint32_t *)ID1));
-	id[6] = ((*(uint32_t *)ID1)) >> 8;
-	id[5] = ((*(uint32_t *)ID1)) >> 16;
-	id[4] = ((*(uint32_t *)ID1)) >> 24;
-	id[3] = ((*(uint32_t *)ID2));
-	id[2] = ((*(uint32_t *)ID2)) >> 8;
-	id[1] = ((*(uint32_t *)ID2)) >> 16;
-	id[0] = ((*(uint32_t *)ID2)) >> 24;
+		id[7] = ((*(uint32_t *)ID1));
+		id[6] = ((*(uint32_t *)ID1)) >> 8;
+		id[5] = ((*(uint32_t *)ID1)) >> 16;
+		id[4] = ((*(uint32_t *)ID1)) >> 24;
+		id[3] = ((*(uint32_t *)ID2));
+		id[2] = ((*(uint32_t *)ID2)) >> 8;
+		id[1] = ((*(uint32_t *)ID2)) >> 16;
+		id[0] = ((*(uint32_t *)ID2)) >> 24;
 #elif defined(ARDUINO_ARCH_ESP32)
-	uint64_t uniqueId = ESP.getEfuseMac();
-	// Using ESP32 MAC (48 bytes only, so upper 2 bytes will be 0)
-	id[7] = (uint8_t)(uniqueId >> 56);
-	id[6] = (uint8_t)(uniqueId >> 48);
-	id[5] = (uint8_t)(uniqueId >> 40);
-	id[4] = (uint8_t)(uniqueId >> 32);
-	id[3] = (uint8_t)(uniqueId >> 24);
-	id[2] = (uint8_t)(uniqueId >> 16);
-	id[1] = (uint8_t)(uniqueId >> 8);
-	id[0] = (uint8_t)(uniqueId);
+		uint64_t uniqueId = ESP.getEfuseMac();
+		// Using ESP32 MAC (48 bytes only, so upper 2 bytes will be 0)
+		id[7] = (uint8_t)(uniqueId >> 56);
+		id[6] = (uint8_t)(uniqueId >> 48);
+		id[5] = (uint8_t)(uniqueId >> 40);
+		id[4] = (uint8_t)(uniqueId >> 32);
+		id[3] = (uint8_t)(uniqueId >> 24);
+		id[2] = (uint8_t)(uniqueId >> 16);
+		id[1] = (uint8_t)(uniqueId >> 8);
+		id[0] = (uint8_t)(uniqueId);
 #elif defined(ARDUINO_ARCH_RP2040)
-	// CLEANUP: same RP2040 gap as AT+HWMODEL=?/AT+HWID=? above, but worse
-	// here - this platform fell all the way through this #ifdef with
-	// `id[]` never written, so AT+SN=? printed 8 bytes of uninitialized
-	// stack memory on RAK11310 builds. pico_get_unique_board_id()
-	// (pico/unique_id.h, part of the arduino-pico core) is this platform's
-	// documented equivalent of the nRF52 FICR/ESP32 eFuse MAC reads above.
-	// Not build- or hardware-tested as part of this change (no RP2040
-	// toolchain available) - please verify on real RAK11310 hardware.
-	pico_unique_board_id_t board_id;
-	pico_get_unique_board_id(&board_id);
-	memcpy(id, board_id.id, 8);
+		// CLEANUP: same RP2040 gap as AT+HWMODEL=?/AT+HWID=? above, but worse
+		// here - this platform fell all the way through this #ifdef with
+		// `id[]` never written, so AT+SN=? printed 8 bytes of uninitialized
+		// stack memory on RAK11310 builds. pico_get_unique_board_id()
+		// (pico/unique_id.h, part of the arduino-pico core) is this platform's
+		// documented equivalent of the nRF52 FICR/ESP32 eFuse MAC reads above.
+		// Not build- or hardware-tested as part of this change (no RP2040
+		// toolchain available) - please verify on real RAK11310 hardware.
+		pico_unique_board_id_t board_id;
+		pico_get_unique_board_id(&board_id);
+		memcpy(id, board_id.id, 8);
 #endif
-}
+	}
 } // namespace
 
 void WisBlockLoRaAT::atSn(AtOp op, const char *value)
@@ -2987,29 +3041,29 @@ static bool installRxHook()
 #if defined(WB_AT_USE_HWCDC) || defined(WB_AT_USE_USBCDC)
 namespace
 {
-/**
- * @brief Receive event handler of the native USB serial port (ESP32)
- *
- * Forwards the RX event to WisBlockLoRaAT::onBackgroundRxData().
- *
- * @param arg Not used
- * @param event_base Event base, ARDUINO_HW_CDC_EVENTS or ARDUINO_USB_CDC_EVENTS
- * @param event_id Event ID, only the RX event is handled
- * @param event_data Not used
- */
-void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
-	(void)arg;
-	(void)event_data;
-#if defined(WB_AT_USE_HWCDC)
-	if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT)
-#else
-	if (event_base == ARDUINO_USB_CDC_EVENTS && event_id == ARDUINO_USB_CDC_RX_EVENT)
-#endif
+	/**
+	 * @brief Receive event handler of the native USB serial port (ESP32)
+	 *
+	 * Forwards the RX event to WisBlockLoRaAT::onBackgroundRxData().
+	 *
+	 * @param arg Not used
+	 * @param event_base Event base, ARDUINO_HW_CDC_EVENTS or ARDUINO_USB_CDC_EVENTS
+	 * @param event_id Event ID, only the RX event is handled
+	 * @param event_data Not used
+	 */
+	void usbEventCallback(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 	{
-		WisBlockLoRaAT::onBackgroundRxData();
+		(void)arg;
+		(void)event_data;
+#if defined(WB_AT_USE_HWCDC)
+		if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT)
+#else
+		if (event_base == ARDUINO_USB_CDC_EVENTS && event_id == ARDUINO_USB_CDC_RX_EVENT)
+#endif
+		{
+			WisBlockLoRaAT::onBackgroundRxData();
+		}
 	}
-}
 } // namespace
 #endif
 
