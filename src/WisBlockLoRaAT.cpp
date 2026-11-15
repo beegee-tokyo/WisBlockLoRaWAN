@@ -2224,8 +2224,15 @@ void WisBlockLoRaAT::atHwModel(AtOp op, const char *value)
 		replyError("AT_ERROR");
 		return;
 	}
+	port->printf("AT+HWMODEL=");
 #ifdef NRF52_SERIES
+#ifdef WISBLOCK_ENABLE_LR2021
+	port->println("rak3400-rak13702");
+#elif defined (RAK13300)
+	port->println("rak3400-rak1330x");
+#else
 	port->println("rak4630");
+#endif
 #elif defined(ARDUINO_ARCH_ESP32)
 	port->println("rak3112");
 #elif defined(ARDUINO_ARCH_RP2040)
@@ -2246,6 +2253,7 @@ void WisBlockLoRaAT::atHwId(AtOp op, const char *value)
 		replyError("AT_ERROR");
 		return;
 	}
+	port->printf("AT+HWID=");
 #ifdef NRF52_SERIES
 	port->println("nrf52840");
 #elif defined(ARDUINO_ARCH_ESP32)
