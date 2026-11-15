@@ -1,7 +1,7 @@
 /**
  * @file main.cpp
  * @author Bernd Giesecke (bernd@giesecke.tk)
- * @brief WisBlock application template for LoRa P2P using BasicModem WisBlockLoRaWAN library
+ * @brief WisBlock application template for LoRa P2P using Basics Modem WisBlockLoRaWAN library
  * @version 0.1
  * @date 2026-10-05
  *
@@ -70,7 +70,7 @@ void setup(void)
 
 	// Announce module
 	Serial.println("==========================================================");
-	Serial.println("WisBlock Basic Modem example application");
+	Serial.println("WisBlock Basics Modem example application");
 	Serial.println("==========================================================");
 	Serial.println("If device is not configured, it will stay in a loop until");
 	Serial.println("LoRaWAN credentials and region are setup with AT commands.");

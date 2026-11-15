@@ -1180,7 +1180,7 @@ smtc_modem_return_code_t smtc_modem_alarm_get_remaining_time( uint32_t* remainin
     }
 }
 
-/* ------------ Basic Modem LR11XX Extension functions ------------*/
+/* ------------ Basics Modem LR11XX Extension functions ------------*/
 
 #if defined( USE_LR11XX_CE )
 smtc_modem_return_code_t smtc_modem_get_pin( uint8_t stack_id, uint8_t chip_pin[4] )

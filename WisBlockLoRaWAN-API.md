@@ -1361,7 +1361,7 @@ lora.setAlias("MyNode");
 
 ----
 
-_`getAlias()` returns a `const char *`. The factory default (for example `WISBLOCK_BASICMODEM_RAK4631`) is longer than 16 characters and can be read but not entered again through this setter._
+_`getAlias()` returns a `const char *`. The factory default (for example `WISBLOCK_BASICSMODEM_RAK4631`) is longer than 16 characters and can be read but not entered again through this setter._
 
 ----
 

@@ -10,7 +10,7 @@ RAKwireless WisBlock modules using the built-in **Semtech SX1262** transceiver:
 | RAK11310  | Raspberry Pi RP2040| arduino-pico core     |
 
 The LoRaWAN MAC layer is designed to sit on top of **Semtech's LoRa Basics Modem
-(LBM / "BasicModem")**, `smtc_modem_api`, rather than reimplementing the MAC
+(LBM / "Basics Modem")**, `smtc_modem_api`, rather than reimplementing the MAC
 from scratch. LoRa P2P uses the SX1262 radio driver directly (via
 `SX126x-Arduino` or the `smtc_ral`/`smtc_radio` HAL from LBM, either works).
 
@@ -2634,7 +2634,7 @@ handler reports `AT_PARAM_ERROR` for that case, matching RUI3's documented
 behavior rather than quietly cutting a long value short.
 
 **The existing hardcoded default text didn't fit RUI3's own 16-character
-limit** (`"WISBLOCK_BASICMODEM_RAK4631"` is 28 characters) - rather than
+limit** (`"WISBLOCK_BASICSMODEM_RAK4631"` is 28 characters) - rather than
 silently shortening text the user might already be relying on for
 identification purposes, the persisted `alias` field's buffer was sized to
 comfortably hold the existing longer defaults (32 bytes), and the 16-

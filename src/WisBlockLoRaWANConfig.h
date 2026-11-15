@@ -45,13 +45,13 @@ struct WisBlockPersistedConfig
 	// the longer factory-default text below, which predates the setter and was never itself
 	// meant to be re-entered verbatim through AT+ALIAS=.
 #ifdef NRF52_SERIES
-	char alias[32] = "WISBLOCK_BASICMODEM_RAK4631";
+	char alias[32] = "WISBLOCK_BASICSMODEM_RAK4631";
 	char firmwarever[32] = "WB_BM_RAK4631";
 #elif defined(ARDUINO_ARCH_ESP32)
-	char alias[32] = "WISBLOCK_BASICMODEM_RAK3312";
+	char alias[32] = "WISBLOCK_BASICSMODEM_RAK3312";
 	char firmwarever[32] = "WB_BM_RAK3312";
 #elif defined(ARDUINO_ARCH_RP2040)
-	char alias[32] = "WISBLOCK_BASICMODEM_RAK11310";
+	char alias[32] = "WISBLOCK_BASICSMODEM_RAK11310";
 	char firmwarever[32] = "WB_BM_RAK11310";
 #else
 	char alias[32] = "";

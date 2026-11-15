@@ -5,7 +5,7 @@
 This library is created to replace the [SX126x-Arduino](https://github.com/beegee-tokyo/SX126x-Arduino) in the future.     
 ## Supported    
 - an API for LoRa P2P and FSK P2P communication, including LoRa P2P CAD and RX-Duty-Cycle implementation.
-- an API to use a LoRaWAN modem stack based on Semtechs [SWL2001 Basic Modem](https://github.com/Lora-net/SWL2001/tree/master) implementation.     
+- an API to use a LoRaWAN modem stack based on Semtechs [SWL2001 Basics Modem](https://github.com/Lora-net/SWL2001/tree/master) implementation.     
 It supports Class A, B and C (Class B tested on AS923-3 with Chirpstack LNS and RAK2287 concentrator), LinkCheck, ServerTime and a full implementation of the [TS001-LoRaWAN L2 1.0.4](https://resources.lora-alliance.org/technical-specifications/ts001-1-0-4-lorawan-l2-1-0-4-specification) and [Regional Parameters RP2-1.0.3](https://resources.lora-alliance.org/technical-specifications/rp2-1-0-3-lorawan-regional-parameters) specifications.     
 - an AT command interface and a local storage for device setup, e.g. LoRa P2P settings, LoRaWAN credentials, DevNonces, ...     
 - same as with the SX126x-Arduino library, it uses an FreeRTOS task in the background to handle LoRa and LoRaWAN events. This allows to create application with minimum power consumption as there is no need to use the loop() to check for events and keep the LoRa and LoRaWAN engines running.     
@@ -28,7 +28,7 @@ Please check the **[Wiki](https://github.com/beegee-tokyo/WisBlockLoRaWAN/wiki)*
 
 # ⚠️ DISCLAIMER
 - _**This library is still under testing and development. Many parts are not fully tested and challenged in real world applications, use with caution!**_
-- This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basic Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
+- This library was created with support of Claude AI, where the AI was doing the simplification and integration of the SWL2001 Basics Modem source codes into an Arduino Library. The requirement definitions for functionality and testing of the functionality on real devices is done by the author of this repository.    
 
 # ⚠️ INFO
 _**RAK11300 and RAK11310 is only supported using the BSP from Earle F. Philhower, which supports FreeRTOS. The original Arduino and PlatformIO BSP's for the RP2040 MCU are based on MBED, which is no longer officially maintained and supported, therefor it is not supported by this library.**_     
