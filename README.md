@@ -148,6 +148,9 @@ Demonstrates fully background, non-polled operation on RAK4631/RAK3312:
 - lora.enableBackgroundTask()      - LoRaWAN/P2P event handling
 - atCommands.enableBackgroundRx()  - AT command processing
 
+### SimpleP2PMesh
+A simple P2P Mesh implementation, currently only tested with RAK4631 modules.
+
 ## Examples for PlatformIO
 Example projects for PlatformIO are in the folder [examples/PlatformIO](./examples/PlatformIO).      
 All examples come with platformio.ini files for RAK4631, RAK3312, RAK11300 and RAK3400+RAK1330x.     
@@ -165,6 +168,9 @@ This is a sensor application designed from the BM-LoRaWAN-Template by adding the
 
 ### LoRaP2PPingPong-PIO
 This example is converted from the ArduinoIDE based example LoRaP2PPingPong to be build with PlatformIO
+
+### BM-LoRa-P2P-Mesh
+A simple P2P Mesh implementation, currently only tested with RAK4631 modules.
 
 ## Arduino IDE / PlatformIO usage of the library
 
