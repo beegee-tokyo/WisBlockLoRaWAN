@@ -24,12 +24,11 @@ volatile xQueueHandle mesh_msg_queue;
 /** Semaphore for Mesh task wakeup */
 SemaphoreHandle_t mesh_task_wakeup_signal;
 
-#ifdef NRF52_SERIES
 /** Timer for network map sync */
-SoftwareTimer map_sync_timer;
-#endif
-#if defined ARDUINO_RAKWIRELESS_RAK11300
-/// \todo add ESP32 and RP2040
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040 || defined(ARDUINO_ARCH_ESP32)
+TimerHandle_t map_sync_timer;
+#else
+#error MCU not supported
 #endif
 
 /** Event flag for Mesh Task */
@@ -54,10 +53,12 @@ data_msg_s send_msg_buffer[SEND_QUEUE_SIZE];
 uint8_t send_msg_size[SEND_QUEUE_SIZE];
 /** Queue to handle send requests */
 volatile xQueueHandle send_queue;
-#ifdef ESP32
+
+#ifdef ARDUINO_ARCH_ESP32
 /** Mux used to enter critical code part (clear up queue content) */
 portMUX_TYPE access_msg_queue_mux = portMUX_INITIALIZER_UNLOCKED;
 #endif
+
 /** Mux used to enter critical code part (access to node list) */
 SemaphoreHandle_t access_node_list_sem;
 
@@ -103,7 +104,7 @@ boolean nodes_changed = false;
 #define ID1 (0x10000060)
 #define ID2 (0x10000064)
 
-#ifdef NRF52_SERIES
+#if defined(ARDUINO_ARCH_NRF52) || defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
 /**
  * @brief Callback for Mesh Map Update Timer
  *
@@ -111,20 +112,10 @@ boolean nodes_changed = false;
  */
 void map_sync_handler(TimerHandle_t unused)
 {
+	EVENT_LOCK();
 	mesh_event |= SYNC_MAP;
+	EVENT_UNLOCK();
 	xSemaphoreGive(mesh_task_wakeup_signal);
-}
-#endif
-
-#ifdef ARDUINO_RAKWIRELESS_RAK11300
-/**
- * @brief Callback for Mesh Map Update Timer
- *
- * @param unused
- */
-void map_sync_handler(void)
-{
-	/// \todo add ESP32 and RP2040
 }
 #endif
 
@@ -137,7 +128,7 @@ void init_mesh(mesh_events_s *events)
 {
 	_mesh_events = events;
 
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 	g_num_of_nodes = 48;
 #else
 	g_num_of_nodes = 30;
@@ -178,7 +169,7 @@ void init_mesh(mesh_events_s *events)
 	// Create node ID
 	uint8_t deviceMac[8];
 
-#ifdef NRF52_SERIES
+#ifdef ARDUINO_ARCH_NRF52
 	deviceMac[7] = ((*(uint32_t *)ID1));
 	deviceMac[6] = ((*(uint32_t *)ID1)) >> 8;
 	deviceMac[5] = ((*(uint32_t *)ID1)) >> 16;
@@ -199,14 +190,6 @@ void init_mesh(mesh_events_s *events)
 	deviceMac[1] = (uint8_t)(uniqueId >> 8);
 	deviceMac[0] = (uint8_t)(uniqueId);
 #elif defined(ARDUINO_ARCH_RP2040)
-	// CLEANUP: same RP2040 gap as AT+HWMODEL=?/AT+HWID=? above, but worse
-	// here - this platform fell all the way through this #ifdef with
-	// `id[]` never written, so AT+SN=? printed 8 bytes of uninitialized
-	// stack memory on RAK11310 builds. pico_get_unique_board_id()
-	// (pico/unique_id.h, part of the arduino-pico core) is this platform's
-	// documented equivalent of the nRF52 FICR/ESP32 eFuse MAC reads above.
-	// Not build- or hardware-tested as part of this change (no RP2040
-	// toolchain available) - please verify on real RAK11310 hardware.
 	pico_unique_board_id_t board_id;
 	pico_get_unique_board_id(&board_id);
 	memcpy(deviceMac, board_id.id, 8);
@@ -243,12 +226,9 @@ void init_mesh(mesh_events_s *events)
 		MYLOG("MESH", "Starting Mesh Sync Task success");
 	}
 
-#ifdef NRF52_SERIES
-	map_sync_timer.begin(sync_time, map_sync_handler, NULL, false);
-	map_sync_timer.start();
-#endif
-#ifdef ARDUINO_RAKWIRELESS_RAK11300
-/// \todo ADD ESP32 andRP2040
+#if defined(ARDUINO_ARCH_NRF52) || defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
+	map_sync_timer = xTimerCreate(NULL, mypdMS_TO_TICKS(sync_time), false, NULL, map_sync_handler);
+	xTimerStart(map_sync_timer, 0);
 #endif
 	// Wake up task to handle request for nodes map
 	mesh_event |= SYNC_MAP;
@@ -349,13 +329,11 @@ void mesh_task(void *pvParameters)
 					sync_time = DEFAULT_SYNCTIME;
 				}
 
-#ifdef NRF52_SERIES
-				// Restart map sync timer
-				map_sync_timer.setPeriod(sync_time);
-				map_sync_timer.start();
-#endif
-#ifdef ARDUINO_RAKWIRELESS_RAK11300
-/// \todo add ESP32 and RP2040
+#if defined ARDUINO_ARCH_NRF52 || defined(ARDUINO_ARCH_RP2040) || defined(ARDUINO_ARCH_ESP32)
+				xTimerChangePeriod(map_sync_timer, sync_time, 0);
+				xTimerStart(map_sync_timer, 0);
+#else
+#warning MCU not supported
 #endif
 			}
 
@@ -370,7 +348,7 @@ void mesh_task(void *pvParameters)
 				{
 					if (lora_state != MESH_TX)
 					{
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 						portENTER_CRITICAL(&access_msg_queue_mux);
 #else
 						taskENTER_CRITICAL();
@@ -381,7 +359,7 @@ void mesh_task(void *pvParameters)
 						if (xQueueReceive(send_queue, &queue_index, portMAX_DELAY) == pdTRUE)
 						{
 							send_msg_buffer[queue_index].type = 0;
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 							portEXIT_CRITICAL(&access_msg_queue_mux);
 #else
 							taskEXIT_CRITICAL();
@@ -403,7 +381,7 @@ void mesh_task(void *pvParameters)
 						}
 						else
 						{
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 							portEXIT_CRITICAL(&access_msg_queue_mux);
 #else
 							taskEXIT_CRITICAL();
@@ -800,7 +778,7 @@ bool add_send_request(data_msg_s *package, uint8_t msg_size)
 {
 	if (send_queue != NULL)
 	{
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 		portENTER_CRITICAL(&access_msg_queue_mux);
 #else
 		taskENTER_CRITICAL();
@@ -826,7 +804,7 @@ bool add_send_request(data_msg_s *package, uint8_t msg_size)
 			if (xQueueSend(send_queue, &next, (TickType_t)1000) != pdTRUE)
 			{
 				MYLOG("MESH", "Send queue is busy");
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 				portEXIT_CRITICAL(&access_msg_queue_mux);
 #else
 				taskEXIT_CRITICAL();
@@ -836,7 +814,7 @@ bool add_send_request(data_msg_s *package, uint8_t msg_size)
 			else
 			{
 				// MYLOG("MESH", "Queued msg #%d with len %d", next, msg_size);
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 				portEXIT_CRITICAL(&access_msg_queue_mux);
 #else
 				taskEXIT_CRITICAL();
@@ -850,7 +828,7 @@ bool add_send_request(data_msg_s *package, uint8_t msg_size)
 		{
 			MYLOG("MESH", "Send queue is full");
 			// Queue is already full!
-#ifdef ESP32
+#ifdef ARDUINO_ARCH_ESP32
 			portEXIT_CRITICAL(&access_msg_queue_mux);
 #else
 			taskEXIT_CRITICAL();

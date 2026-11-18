@@ -4,9 +4,9 @@
  * @brief Defines and includes for application
  * @version 0.1
  * @date 2026-10-05
- * 
+ *
  * @copyright Copyright (c) 2026
- * 
+ *
  */
 #ifndef MAIN_H
 #define MAIN_H
@@ -25,13 +25,13 @@
 #include "oled.h"
 #include "battery.h"
 
-#ifdef NRF52_SERIES
+#ifdef ARDUINO_ARCH_NRF52
 #include <nrf_nvic.h>
 #include <nrfx_power.h>
 
 #endif
 #ifdef ARDUINO_ARCH_ESP32
-#include <Ticker.h>
+#define isInISR() xPortInIsrContext() == pdTRUE
 #endif
 
 #ifdef ARDUINO_ARCH_RP2040
@@ -72,27 +72,29 @@
 
 // Wakeup events
 #define NO_EVENT 0
-#define STATUS           0b0000000000000001
-#define N_STATUS         0b1111111111111110
-#define CAD_FAIL         0b0000000000000010
-#define N_CAD_FAIL       0b1111111111111101
-#define LORA_DATA        0b0000000000000100
-#define N_LORA_DATA      0b1111111111111011
-#define LORA_TX_FIN      0b0000000000001000
-#define N_LORA_TX_FIN    0b1111111111110111
-#define NO_CONFIG        0b0000000000010000
-#define N_NO_CONFIG      0b1111111111101111
-#define USB_DATA         0b0000000000100000
-#define N_USB_DATA       0b1111111111011111
+#define STATUS 0b0000000000000001
+#define N_STATUS 0b1111111111111110
+#define CAD_FAIL 0b0000000000000010
+#define N_CAD_FAIL 0b1111111111111101
+#define LORA_DATA 0b0000000000000100
+#define N_LORA_DATA 0b1111111111111011
+#define LORA_TX_FIN 0b0000000000001000
+#define N_LORA_TX_FIN 0b1111111111110111
+#define NO_CONFIG 0b0000000000010000
+#define N_NO_CONFIG 0b1111111111101111
+#define USB_DATA 0b0000000000100000
+#define N_USB_DATA 0b1111111111011111
 
 // Define alternate pdMS_TO_TICKS that casts uint64_t for long intervals due to limitation in nrf52840 BSP
 #define mypdMS_TO_TICKS(xTimeInMs) ((TickType_t)(((uint64_t)(xTimeInMs) * configTICK_RATE_HZ) / 1000))
 
 /** Callbacks */
-#if defined ARDUINO_ARCH_ESP32
-void periodic_wakeup(void);
-#elif defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
+#if defined ARDUINO_ARCH_ESP32 || defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
 void periodic_wakeup(TimerHandle_t unused);
+// #elif defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
+// void periodic_wakeup(TimerHandle_t unused);
+#else
+#warning MCU not supported
 #endif
 void onUnhandledLine(const char *line);
 void onTxDone(const WisBlockTxResult &result);
@@ -111,12 +113,10 @@ extern WisBlockLoRaWAN lora;
 extern WisBlockLoRaAT at_serial;
 /** Flag for the event type */
 extern volatile uint16_t g_task_event_type;
-#if defined ARDUINO_ARCH_ESP32
-/** Timer to wakeup task frequently and send message */
-extern Ticker g_task_wakeup_timer;
-#elif defined ARDUINO_ARCH_NRF52
-/** Timer to wakeup task frequently and send message */
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_ESP32 || defined ARDUINO_ARCH_RP2040
 extern TimerHandle_t g_task_wakeup_timer;
+#else
+#warning MCU not supported
 #endif
 /** USB data buffer for non-AT commands */
 extern char usb_data[];

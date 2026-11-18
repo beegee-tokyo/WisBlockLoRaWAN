@@ -22,12 +22,9 @@ volatile uint16_t g_task_event_type = 0;
 
 // Custom settings
 CustomAtSettings custom_settings;
-#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040 || defined ARDUINO_ARCH_ESP32
 /** Timer to wakeup task frequently and send message */
 TimerHandle_t g_task_wakeup_timer;
-#elif defined(ARDUINO_ARCH_ESP32)
-/** Timer to wakeup task frequently and send message */
-Ticker g_task_wakeup_timer;
 #endif
 
 /** Uplink buffer in Cayenne LPP format */
@@ -155,23 +152,26 @@ void setup(void)
 	// Get saved custom settings
 	MYLOG("SETUP", "Get saved custom settings");
 	custom_settings = getCustomAtSettings();
+	MYLOG("SETUP", "Send interval %d s", (int) custom_settings.sendIntervalS);
+	if (custom_settings.sendIntervalS == 0)
+	{
+		custom_settings.sendIntervalS = 30;
+	}
+	MYLOG("SETUP", "Define timer");
 
-#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040 || defined ARDUINO_ARCH_ESP32
 	// Initialize the timer for frequent sending
-	g_task_wakeup_timer = xTimerCreate(NULL, mypdMS_TO_TICKS(custom_settings.sendIntervalS * 1000), true, NULL, periodic_wakeup);
+	g_task_wakeup_timer = xTimerCreate(NULL, mypdMS_TO_TICKS(custom_settings.sendIntervalS * 1000), pdTRUE, (void *)0, periodic_wakeup);
 
 	// Start the timer for frequent sending
 	if (custom_settings.sendIntervalS != 0)
 	{
 		xTimerStart(g_task_wakeup_timer, 0);
 	}
-#elif defined ESP32
-	// Start the timer for frequent sending
-	if (custom_settings.sendIntervalS != 0)
-	{
-		g_task_wakeup_timer.attach_ms(custom_settings.sendIntervalS * 1000, periodic_wakeup);
-	}
+#else
+#warning MCU not supported
 #endif
+	MYLOG("SETUP", "Send interval %d s", (int) custom_settings.sendIntervalS);
 	if (custom_settings.sendIntervalS != 0)
 	{
 		MYLOG("SETUP", "Request first packet sending");
@@ -314,7 +314,6 @@ void loop(void)
 			{
 				MYLOG("APP", "Could not enqueue packet for sending");
 			}
-
 		}
 		// Mesh Map changed
 		if ((g_task_event_type & MESH_MAP_CHANGED) == MESH_MAP_CHANGED)

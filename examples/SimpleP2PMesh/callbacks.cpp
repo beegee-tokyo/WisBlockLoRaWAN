@@ -21,28 +21,13 @@ bool last_LinkCheckSuccess = false;
 /** USB data buffer for non-AT commands */
 char usb_data[256];
 
-#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_RP2040
+#if defined ARDUINO_ARCH_NRF52 || defined ARDUINO_ARCH_ESP32 || defined ARDUINO_ARCH_RP2040
 /**
  * @brief Timer event that wakes up the loop task frequently
  *
  * @param unused
  */
 void periodic_wakeup(TimerHandle_t unused)
-{
-	if (g_task_sem != NULL)
-	{
-		taskEventSet(STATUS);
-		// Wake up task to handle status 
-		xSemaphoreGive(g_task_sem);
-	}
-}
-#elif defined ESP32 || defined ARDUINO_ARCH_RP2040
-/**
- * @brief Timer event that wakes up the loop task frequently
- *
- * @param unused
- */
-void periodic_wakeup(void)
 {
 	if (g_task_sem != NULL)
 	{
