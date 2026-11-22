@@ -37,7 +37,17 @@ Current workaround for RAK11300/RAK11310
 - With PlatformIO use [platform-raspberrypi](https://github.com/maxgerhardt/platform-raspberrypi)
 - Enable FreeRTOS support in Arduino BSP tools or for PIO in platformio.ini with _**`build_flags = -D PIO_FRAMEWORK_ARDUINO_ENABLE_FREERTOS`**_
 
+Use the following settings in Arduino IDE or Arduino-CLI for the RAK11300/RAK11310
+
+| Setting          | Selection                      |
+| ---------------- | ------------------------------ |
+| Flash Size       | 2MB (Sketch 1536KB, FS: 512KB) |
+| CPU Speed        | 133MHz                         |
+| Operating System | FreeRTOS SMP                   |
+| USB Stack        | Pico SDK                       |
+
 If firmware upload does not work with RAK11300/RAK11310 on Windows, change driver with ZADIG:    
+
 **Install the driver**
    - Put the board in BOOTSEL mode.
    - Start Zadig and enable Options → List All Devices.
