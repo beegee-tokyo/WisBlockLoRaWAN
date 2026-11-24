@@ -123,6 +123,9 @@ defines = [
     # comment - because RAKwireless WisBlock/WisCore modules still need it.
     "REGION_EU_433",
     "REGION_IN_865",
+    # LA915: Latin America 915 MHz (unofficial, AU915 based, first 8 channels by default).
+    # Library addition, see region_la_915_defs.h.
+    "REGION_LA_915",
     "REGION_KR_920",
     "REGION_RU_864",
     "REGION_US_915",

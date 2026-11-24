@@ -495,6 +495,38 @@ static status_channel_t lorawan_api_set_channel_mask_us_au_915( uint8_t stack_id
     return status;
 }
 
+/*
+ * LA915: same bank layout as AU915, but the boot default is NOT "all channels": only CH0 - CH7
+ * (125 kHz, 915.2 - 916.6 MHz, ChannelsDefaultMask[0] = 0x00FF) are enabled, see region_la_915_defs.h.
+ *
+ * The stored mask is 0 until the application sets one, and the engine applies it at every start
+ * (LoRaWANEngine::applySettings()). With the AU915 meaning of 0 ("no restriction, all channels") the
+ * LA915 default would be thrown away at once, so for LA915:
+ *   mask == 0       -> LA915 default channels only (CH0 - CH7, no 500 kHz channel)
+ *   mask 1 .. 0x00FF -> bank mode like AU915, bit N = sub-band N+1 (8 x 125 kHz + its 500 kHz channel)
+ *   mask == 0x00FF  -> all 8 sub-bands = all 72 channels
+ */
+static status_channel_t lorawan_api_set_channel_mask_la_915( uint8_t stack_id, uint16_t mask )
+{
+    status_channel_t status;
+    if( mask == 0 )
+    {
+        // ChMaskCntl 0 = channels 0-15 (0x00FF = CH0-7), 1..3 = channels 16-63 off, 4 = the 500 kHz channels off
+        status = smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 0, 0x00FF );
+        smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 1, 0x0000 );
+        smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 2, 0x0000 );
+        smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 3, 0x0000 );
+        smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 4, 0x0000 );
+    }
+    else
+    {
+        status = smtc_real_build_channel_mask( lr1_mac_obj[stack_id].real, 5, mask & 0x00FF );
+    }
+    // commit the staged mask, see the doc comment of lorawan_api_set_channel_mask_us_au_915()
+    smtc_real_set_channel_mask( lr1_mac_obj[stack_id].real );
+    return status;
+}
+
 static status_channel_t lorawan_api_set_channel_mask_cn_470( uint8_t stack_id, uint16_t mask,
                                                               uint8_t number_of_16ch_blocks )
 {
@@ -553,6 +585,12 @@ void lorawan_api_set_channel_mask( uint8_t stack_id, uint16_t mask )
 #if defined( REGION_AU_915 )
     case SMTC_REAL_REGION_AU_915:
         lorawan_api_set_channel_mask_us_au_915( stack_id, mask );
+        break;
+#endif
+#if defined( REGION_LA_915 )
+    case SMTC_REAL_REGION_LA_915:
+        // LA915: mask 0 = default channels (CH0 - CH7), not "all channels" - see the function's doc comment
+        lorawan_api_set_channel_mask_la_915( stack_id, mask );
         break;
 #endif
 #if defined( REGION_CN_470 )

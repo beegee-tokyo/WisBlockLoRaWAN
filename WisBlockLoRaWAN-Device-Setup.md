@@ -32,7 +32,7 @@ Plain `lora.begin()` picks the built-in preset from the MCU: nRF52840 = RAK4631 
 
 ### Compiled in by default (no setting needed)
 
-All LoRaWAN regions of the stack (AS923, AU915, CN470, EU868, EU433, IN865, KR920, RU864, US915), Class A, B and C, and multicast. The region is selected at run time with `lora.setRegion()` or `AT+BAND`. Not included: FUOTA and the LoRaWAN relay.
+All LoRaWAN regions of the stack (AS923, AU915, CN470, EU868, EU433, IN865, KR920, LA915, RU864, US915), Class A, B and C, and multicast. The region is selected at run time with `lora.setRegion()` or `AT+BAND`. Not included: FUOTA and the LoRaWAN relay.
 
 ### LoRaWAN credentials
 

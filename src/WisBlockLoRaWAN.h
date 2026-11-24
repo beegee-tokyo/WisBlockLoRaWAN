@@ -163,8 +163,8 @@ public:
 	 * WisBlockRegion before applying, via wisblockRUI3BandToRegion() - see its doc comment and
 	 * WisBlockRUI3Band's for why these two numberings exist.
 	 * @param band Region in RUI3 AT+BAND numbering
-	 * @return false (no change made) for WISBLOCK_RUI3_BAND_LA915, or any other band with no
-	 * WisBlockRegion equivalent in this vendored LBM build, and for WISBLOCK_RUI3_BAND_WW2G4 (2.4 GHz)
+	 * @return false (no change made) for any band with no WisBlockRegion equivalent in this
+	 * vendored LBM build (WISBLOCK_RUI3_BAND_UNKNOWN, out of range), and for WISBLOCK_RUI3_BAND_WW2G4 (2.4 GHz)
 	 * unless the radio is an LR2021 and the library is built with WISBLOCK_ENABLE_LR2021, see
 	 * wisblockRegionUsable(). Call it after begin() for that band.
 	 */
@@ -222,7 +222,7 @@ public:
 	/**
 	 * @brief Select the sub-band (channel mask) for many-channel regions
 	 *
-	 * Sub-band pre-selection for US915/AU915/CN470/CN470_RP_1_0; no effect elsewhere.
+	 * Sub-band pre-selection for US915/AU915/LA915/CN470/CN470_RP_1_0; no effect elsewhere.
 	 * See LoRaWANEngine::setChannelMask()'s doc comment for the encoding and why it matters -
 	 * short version: it avoids wasting join attempts cycling through the wrong sub-band on
 	 * these many-channel regions. Unlike setDeviceClass()/setADR(), safe to call before join().

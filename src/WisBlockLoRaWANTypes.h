@@ -109,6 +109,11 @@ enum WisBlockRegion : uint8_t
 	 * RAKwireless WisBlock/WisCore modules still need it - see region_eu_433_defs.h's doc
 	 * comment for the parameter sourcing. */
 	WISBLOCK_REGION_EU433 = 13,
+	/** LA915 (Latin America 915 MHz, unofficial "LA915A" plan used by Everynet and others). Based on
+	 * AU915 (same 64 x 125 kHz + 8 x 500 kHz channels, RX1/RX2 like AU915, no uplink dwell time limit) but only
+	 * the first 8 uplink channels (CH0 - CH7, 915.2 - 916.6 MHz, DR0 - DR5) are enabled by default
+	 * (ChannelsDefaultMask[0] = 0x00FF). Added by this library, see region_la_915_defs.h. RUI3 band 12. */
+	WISBLOCK_REGION_LA915 = 14,
 };
 
 /**
@@ -117,11 +122,9 @@ enum WisBlockRegion : uint8_t
  * WisBlockLoRaWAN::setRegion()/getRegion() and AT+BAND use, precisely so callers never have to
  * juggle two different "which region is this" numberings for the same setting.
  *
- * RUI3's LA915 (12) is part of RUI3's documented numbering but has no WisBlockRegion equivalent
- * at all in this vendored LBM build (its main.h doesn't define REGION_LA_915) -
- * wisblockRUI3BandToRegion() returns false for it rather than silently picking something else,
- * and setRegion()/AT+BAND reject it the same way. EU433 (0) *is* supported - see
- * WISBLOCK_REGION_EU433's doc comment.
+ * RUI3's LA915 (12) maps to WISBLOCK_REGION_LA915, a region added by this library (not part of
+ * upstream LBM) - see WISBLOCK_REGION_LA915's doc comment. EU433 (0) is supported the same way -
+ * see WISBLOCK_REGION_EU433's doc comment.
  */
 enum WisBlockRUI3Band : uint8_t
 {
@@ -155,9 +158,8 @@ enum WisBlockRUI3Band : uint8_t
  * AT+BAND) to this library's internal SWL2001/LBM-mirroring WisBlockRegion enum.
  * @param band Region in RUI3 numbering
  * @param outRegion Receives the region
- * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_LA915,
- * WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with no WisBlockRegion equivalent in this
- * vendored LBM build. WISBLOCK_RUI3_BAND_WW2G4 converts here whatever the radio is, whether the
+ * @return false (outRegion left untouched) for WISBLOCK_RUI3_BAND_UNKNOWN, or any other value with
+ * no WisBlockRegion equivalent in this vendored LBM build. WISBLOCK_RUI3_BAND_WW2G4 converts here whatever the radio is, whether the
  * region can be used is a separate question, see wisblockRegionUsable().
  */
 bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion);

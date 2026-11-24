@@ -58,6 +58,10 @@
 #ifndef REGION_EU_433
 #define REGION_EU_433
 #endif
+// LA915 (Latin America, unofficial AU915 based plan, first 8 channels by default): library addition
+#ifndef REGION_LA_915
+#define REGION_LA_915
+#endif
 #ifndef REGION_IN_865
 #define REGION_IN_865
 #endif

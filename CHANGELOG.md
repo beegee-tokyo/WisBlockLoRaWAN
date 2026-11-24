@@ -3,6 +3,12 @@ Unified LoRaWAN (Class A/B/C) and LoRa P2P library for RAKwireless WisBlock boar
 
 Release Notes
 
+Nov 24, 2026 V1.0.6 Add LA915 region
+- New region LA915 (Latin America 915 MHz, unofficial plan used by Everynet and others): `WISBLOCK_REGION_LA915` (14), RUI3 band 12 (`AT+BAND=12`, `setRegion(WISBLOCK_RUI3_BAND_LA915)`). Before, band 12 was refused.
+- AU915 based (64 x 125 kHz + 8 x 500 kHz channels, RX1 923.3 MHz + (channel % 8) x 0.6 MHz, RX2 923.3 MHz DR8), but only the first 8 uplink channels (915.2 - 916.6 MHz, DR0 - DR5, mask 0x00FF) are enabled by default and there is no uplink dwell time limit. `AT+MASK` / `setChannelMask()` work as for AU915, except that `0` selects the LA915 default channels (CH0 - CH7) and `0x00FF` enables all channels (with AU915 `0` would open all channels and cancel the LA915 default at every start).
+- Vendored as `region_la_915.c/.h/_defs.h` in `src/lbm/.../smtc_real`, enabled with `REGION_LA_915` (`wb_lbm_config.h`, `extra_script.py`). Added `SMTC_MODEM_REGION_LA_915` (15).
+- Tested as Class A against Actility ThingPark LNS with LA915 network setting. 
+
 Nov 15, 2026 V1.0.5 Add password protection & FSK AT commands
 - Add password protection to block readout of credentials with AT commands
 - `AT+SYNCWORD` now sets and reads the FSK sync word (1 to 8 bytes, 2 to 16 hex digits) in FSK mode (`AT+NWM=2`). Before it only changed the LoRa sync word, which has no effect on FSK.

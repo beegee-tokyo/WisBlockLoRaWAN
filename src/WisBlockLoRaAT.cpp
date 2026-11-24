@@ -1025,7 +1025,7 @@ void WisBlockLoRaAT::atBand(AtOp op, const char *value)
 			}
 			else
 			{
-				replyError("unsupported band index - LA915 not built into this LBM vendoring");
+				replyError("unsupported band index");
 			}
 			return;
 		}
@@ -1041,7 +1041,7 @@ void WisBlockLoRaAT::atMask(AtOp op, const char *value)
 {
 	if (op == AtOp::Query)
 	{
-		// Only meaningful for US915/AU915/CN470/CN470_RP_1_0 - see
+		// Only meaningful for US915/AU915/LA915/CN470/CN470_RP_1_0 - see
 		// LoRaWANEngine::setChannelMask()'s doc comment. Matches RUI3's
 		// AT+MASK: 4 hex digits, bit N (0-indexed) = sub-band N+1 enabled,
 		// 0000 = all channels (no restriction).

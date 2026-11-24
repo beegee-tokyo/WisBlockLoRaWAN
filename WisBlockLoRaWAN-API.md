@@ -47,7 +47,7 @@ The regions of LoRaWAN, using the **RUI3 `AT+BAND` numbering**. This is the enum
 | `WISBLOCK_RUI3_BAND_AS923_2` | 9 | AS923-2 |
 | `WISBLOCK_RUI3_BAND_AS923_3` | 10 | AS923-3 |
 | `WISBLOCK_RUI3_BAND_AS923_4` | 11 | AS923-4 |
-| `WISBLOCK_RUI3_BAND_LA915` | 12 | LA915 - **not supported**, `setRegion()` returns `false` |
+| `WISBLOCK_RUI3_BAND_LA915` | 12 | LA915 (Latin America 915 MHz, library addition, see `WISBLOCK_REGION_LA915`) |
 | `WISBLOCK_RUI3_BAND_WW2G4` | 13 | 2.4 GHz worldwide (LR2021 only). Library addition, not a RUI3 band. `setRegion()` returns `false` unless the library is built with `WISBLOCK_ENABLE_LR2021` and `begin()` got the LR2021 configuration |
 | `WISBLOCK_RUI3_BAND_UNKNOWN` | 0xFF | Returned by `getRegion()` if the active region has no RUI3 band number (`CN470_RP_1_0`). Never valid for `setRegion()`. |
 
@@ -98,6 +98,7 @@ The internal LoRaWAN region numbering (LoRa Basics Modem / SWL2001 order). Only 
 | `WISBLOCK_REGION_CN470_RP_1_0` | 11 | CN470 RP1.0 (no RUI3 band number) |
 | `WISBLOCK_REGION_WW2G4` | 12 | 2.4 GHz worldwide. Needs the LR2021 (RAK13702) and the library built with `WISBLOCK_ENABLE_LR2021`. RUI3 band number: `WISBLOCK_RUI3_BAND_WW2G4` (13, library addition) |
 | `WISBLOCK_REGION_EU433` | 13 | EU433, re-added by this library (see below) |
+| `WISBLOCK_REGION_LA915` | 14 | LA915 (Latin America), added by this library (see below). RUI3 band number: `WISBLOCK_RUI3_BAND_LA915` (12) |
 
 ```cpp
 enum WisBlockRegion : uint8_t
@@ -106,7 +107,7 @@ enum WisBlockRegion : uint8_t
   WISBLOCK_REGION_AS923_1 = 3, WISBLOCK_REGION_AS923_2 = 4, WISBLOCK_REGION_AS923_3 = 5,
   WISBLOCK_REGION_AS923_4 = 6, WISBLOCK_REGION_KR920 = 7,  WISBLOCK_REGION_IN865 = 8,
   WISBLOCK_REGION_RU864 = 9,  WISBLOCK_REGION_CN470 = 10, WISBLOCK_REGION_CN470_RP_1_0 = 11,
-  WISBLOCK_REGION_WW2G4 = 12, WISBLOCK_REGION_EU433 = 13,
+  WISBLOCK_REGION_WW2G4 = 12, WISBLOCK_REGION_EU433 = 13, WISBLOCK_REGION_LA915 = 14,
 };
 ```
 
@@ -121,6 +122,16 @@ _**EU433** is not part of Semtech's current LoRa Basics Modem anymore. The libra
 - _Data rates DR0 - DR7 (SF12 - SF7 BW125, SF7 BW250, FSK 50 kbps), no LR-FHSS_
 - _TX power: default max EIRP +12 dBm, 6 power steps (index 0 - 5) of 2 dB_
 - _One global duty cycle band with 1 %, no dwell time, no LBT_
+
+_**LA915** (Latin America 915 MHz) is an unofficial plan, used by Everynet and other operators in Latin America. It is not part of Semtech's LoRa Basics Modem. The library ships its own LA915 region (`region_la_915.c/.h/_defs.h`), a copy of AU915 with these differences:_
+
+- _Same 64 x 125 kHz (915.2 - 927.8 MHz, 200 kHz steps) and 8 x 500 kHz (915.9 - 927.1 MHz) uplink channels as AU915_
+- _Only the first 8 channels, CH0 - CH7 (915.2 - 916.6 MHz, DR0 - DR5), are enabled at start (ChannelsDefaultMask[0] = 0x00FF). The 500 kHz channels and CH8 - CH63 stay off until the application (`setChannelMask()`, `AT+MASK`) or the network (ChMask in LinkADRReq) enables them_
+- _RX1 downlink 923.3 MHz + (uplink channel % 8) x 0.6 MHz, RX2 923.3 MHz, DR8 (SF12, BW500). RX1 delay 1 s, join accept delays 5 s and 6 s_
+- _No uplink dwell time limit, so DR0 and DR1 can be used (AU915 has the limit on). DR0 - DR5 = SF12 - SF7 BW125, DR6 = SF8 BW500 (needs an enabled 500 kHz channel), DR7 = LR-FHSS_
+- _The channel mask is **not** opened step by step after the join like in AU915. The enabled channels stay as they were until the network changes them_
+- _`setChannelMask()` / `AT+MASK`: `0` = the LA915 default channels (not "all channels" as in AU915), `0x00FF` = all channels, bit N enables sub-band N+1 like in AU915_
+- _Not tested on a real LA915 network yet. The parameters come from a public summary of the Everynet LA915A plan, please compare them with your network server_
 
 ----
 
@@ -1530,7 +1541,7 @@ lora.setRegion(WISBLOCK_RUI3_BAND_EU868);
 | **Function** | `bool setRegion(WisBlockRUI3Band band)` |
 | **Parameters** | **band** - the region, see [WisBlockRUI3Band](#wisblockrui3band) |
 | **Returns** | bool |
-| **Return Values** | **TRUE** region set<br/>**FALSE** the band is not supported (`WISBLOCK_RUI3_BAND_LA915`, `WISBLOCK_RUI3_BAND_UNKNOWN`, any value out of range), or it is `WISBLOCK_RUI3_BAND_WW2G4` (2.4 GHz) and the radio is not an LR2021 / the library is built without `WISBLOCK_ENABLE_LR2021`; nothing changed |
+| **Return Values** | **TRUE** region set<br/>**FALSE** the band is not supported (`WISBLOCK_RUI3_BAND_UNKNOWN`, any value out of range), or it is `WISBLOCK_RUI3_BAND_WW2G4` (2.4 GHz) and the radio is not an LR2021 / the library is built without `WISBLOCK_ENABLE_LR2021`; nothing changed |
 
 ## ⚠️ WARNING
 
@@ -1762,7 +1773,7 @@ _Unlike RUI3's `cfm`, there is no per-call override and no retry count setting. 
 
 ### setChannelMask()
 
-Pre-selects a sub-band for regions with many channels (US915, AU915, CN470, CN470_RP_1_0). Mirrors RUI3's `AT+MASK`: bit N enables sub-band N+1 (8 channels each). `0` = all channels.
+Pre-selects a sub-band for regions with many channels (US915, AU915, LA915, CN470, CN470_RP_1_0). Mirrors RUI3's `AT+MASK`: bit N enables sub-band N+1 (8 channels each). `0` = all channels, except in LA915 (see the note below).
 
 ```cpp
 lora.setChannelMask(0x0001);
@@ -1777,6 +1788,8 @@ lora.setChannelMask(0x0001);
 
 ## 💡 NOTE
 ----
+_**LA915**: `0` is not "all channels" here. It selects the LA915 default channels (CH0 - CH7, 125 kHz). Use `0x00FF` for all channels. Bit N enables sub-band N+1 as in AU915, so `0x0001` also enables the 500 kHz channel CH64 of sub-band 1._
+
 _Set it **before** `join()`. It avoids wasting join attempts on sub-bands the gateway does not listen to. Unlike `setDeviceClass()` and `setADR()` it does not need a joined device. It is re-applied before every join attempt._
 
 ----
@@ -3185,7 +3198,7 @@ bool ok = wisblockRUI3BandToRegion(WISBLOCK_RUI3_BAND_EU433, r);
 | **Function** | `bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)` |
 | **Parameters** | **band** - RUI3 band<br/>**outRegion** - receives the region |
 | **Returns** | bool |
-| **Return Values** | **TRUE** converted<br/>**FALSE** no equivalent (`LA915`, `UNKNOWN`, out of range), `outRegion` untouched. `WW2G4` converts whatever the radio is, see `wisblockRegionUsable()` |
+| **Return Values** | **TRUE** converted<br/>**FALSE** no equivalent (`UNKNOWN`, out of range), `outRegion` untouched. `WW2G4` converts whatever the radio is, see `wisblockRegionUsable()` |
 
 ### wisblockRegionToRUI3Band()
 
@@ -3414,7 +3427,7 @@ Collected from the library's Creation Log (`Creation-Log-From-Claude-AI.md`) for
 - **`setADR()`, `setDataRate()`, `setDeviceClass()`** can return `FALSE` before the join although the request is stored and applied automatically later.
 - **`sendLoRaWAN()`** returning `TRUE` only means *queued*. One pending uplink plus one deferred uplink is the maximum.
 - **`join()`** must not be called from `onJoinFailed()`.
-- **Region** can only be changed before joining. LA915 is not supported. EU433 is provided by the library itself (RP002-1.0.4). The 2.4 GHz region WW2G4 is band number 13 (library addition, LR2021 only).
+- **Region** can only be changed before joining. EU433 (RP002-1.0.4) and LA915 (unofficial AU915 based plan, first 8 channels enabled by default) are provided by the library itself. The 2.4 GHz region WW2G4 is band number 13 (library addition, LR2021 only).
 - **OTAA/ABP keys** (`appKey`, session keys) cannot be read back from the stack. Multicast keys can.
 - **Multicast groups** live in RAM only and are lost at reboot. Remote Multicast Setup (over-the-air provisioning) and FUOTA are not enabled.
 - **Not vendored:** FUOTA, clock sync, cloud services, store-and-forward, geolocation, relay (removed on 2026-09-14). The 2.4 GHz region (`WISBLOCK_REGION_WW2G4`) is vendored and compiled in only with `WISBLOCK_ENABLE_LR2021`.

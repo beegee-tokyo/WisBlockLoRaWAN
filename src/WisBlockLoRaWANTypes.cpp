@@ -58,11 +58,13 @@ bool wisblockRUI3BandToRegion(WisBlockRUI3Band band, WisBlockRegion &outRegion)
 	case WISBLOCK_RUI3_BAND_AS923_4:
 		outRegion = WISBLOCK_REGION_AS923_4;
 		return true;
+	case WISBLOCK_RUI3_BAND_LA915:
+		outRegion = WISBLOCK_REGION_LA915;
+		return true;
 	case WISBLOCK_RUI3_BAND_WW2G4:
 		outRegion = WISBLOCK_REGION_WW2G4;
 		return true;
-	default: // WISBLOCK_RUI3_BAND_LA915 (12), WISBLOCK_RUI3_BAND_UNKNOWN, and anything else out
-			 // of range
+	default: // WISBLOCK_RUI3_BAND_UNKNOWN, and anything else out of range
 		return false;
 	}
 }
@@ -95,6 +97,8 @@ WisBlockRUI3Band wisblockRegionToRUI3Band(WisBlockRegion region)
 		return WISBLOCK_RUI3_BAND_RU864;
 	case WISBLOCK_REGION_CN470:
 		return WISBLOCK_RUI3_BAND_CN470;
+	case WISBLOCK_REGION_LA915:
+		return WISBLOCK_RUI3_BAND_LA915;
 	case WISBLOCK_REGION_WW2G4:
 		return WISBLOCK_RUI3_BAND_WW2G4;
 	default: // WISBLOCK_REGION_CN470_RP_1_0 - a library-specific region beyond RUI3's set

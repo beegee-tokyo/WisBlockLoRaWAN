@@ -105,6 +105,8 @@ smtc_modem_region_t toSmtcModemRegion(WisBlockRegion region)
 		return SMTC_MODEM_REGION_US_915;
 	case WISBLOCK_REGION_AU915:
 		return SMTC_MODEM_REGION_AU_915;
+	case WISBLOCK_REGION_LA915:
+		return SMTC_MODEM_REGION_LA_915;
 	case WISBLOCK_REGION_AS923_1:
 		return SMTC_MODEM_REGION_AS_923_GRP1;
 	case WISBLOCK_REGION_AS923_2:
@@ -253,6 +255,23 @@ bool drToSfBw(WisBlockRegion region, uint8_t dr, uint8_t &sf, uint32_t &bwHz)
 		default:
 			return false;
 		}
+	case WISBLOCK_REGION_LA915:
+		// LA915 uses the AU915 data rate table (region_la_915_defs.h, no dwell time limit):
+		// DR0-DR5 = SF12-SF7 at 125 kHz, DR6 = SF8 at 500 kHz. DR7 is LR-FHSS, DR8-DR13 are
+		// downlink only (500 kHz).
+		if (dr <= 5)
+		{
+			sf = (uint8_t)(12 - dr);
+			bwHz = 125000;
+			return true;
+		}
+		if (dr == 6)
+		{
+			sf = 8;
+			bwHz = 500000;
+			return true;
+		}
+		return false;
 	case WISBLOCK_REGION_WW2G4:
 		// 2.4 GHz (RP002-1.0.4 WW2G4, region_ww_2g4_defs.h): DR0-DR7 are SF12-SF5, all at the
 		// "800 kHz" setting of the radio, which is 812.5 kHz. Only DR0-DR5 (SF12-SF7) here: the

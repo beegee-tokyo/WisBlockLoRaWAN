@@ -1150,13 +1150,16 @@ status_lorawan_t lr1mac_core_update_join_channel( lr1_stack_mac_t* lr1_mac_obj )
 #if defined( REGION_AU_915 )
     case SMTC_REAL_REGION_AU_915:
 #endif
+#if defined( REGION_LA_915 )
+    case SMTC_REAL_REGION_LA_915:
+#endif
 #if defined( REGION_CN_470 )
     case SMTC_REAL_REGION_CN_470:
 #endif
 #if defined( REGION_CN_470_RP_1_0 )
     case SMTC_REAL_REGION_CN_470_RP_1_0:
 #endif
-#if defined( REGION_US_915 ) || defined( REGION_AU_915 ) || defined( REGION_CN_470 ) || \
+#if defined( REGION_US_915 ) || defined( REGION_AU_915 ) || defined( REGION_LA_915 ) || defined( REGION_CN_470 ) || \
     defined( REGION_CN_470_RP_1_0 )
         smtc_real_set_channel_mask( lr1_mac_obj->real );
         break;

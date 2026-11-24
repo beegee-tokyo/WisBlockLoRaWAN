@@ -55,7 +55,7 @@ _`<CR>` stands for “carriage return” and `<LF>` stands for “line feed”._
 The possible status codes are:
 
 - `OK`: command runs correctly without error.
-- `AT_ERROR`: generic error, or unknown command. Often preceded by a line of plain text that tells the reason, for example `unsupported band index - LA915 not built into this LBM vendoring`.
+- `AT_ERROR`: generic error, or unknown command. Often preceded by a line of plain text that tells the reason, for example `unsupported band index`.
 - `AT_PARAM_ERROR`: a parameter of the command is wrong.
 - `AT_ACCESS_ERROR`: a password is set and was not sent with `AT+UNLOCK`, or the password is wrong. See [Password Protection](#password-protection).
 - `AT_NO_NETWORK_JOINED`: the uplink of `AT+SEND` was not accepted. Most often the device has not joined yet, but the same code is also returned for an invalid port or a rejected payload.
@@ -1152,7 +1152,7 @@ _The value is not range checked by the command. If the data rate is not valid fo
 
 _The value has no effect while ADR is on._
 
-_**EU433 / RU864 / IN865 / EU868 / CN470 / KR920**: DR0 - DR5. **AS923**: DR2 - DR5. **US915**: DR0 - DR4. **AU915**: DR0 - DR6._
+_**EU433 / RU864 / IN865 / EU868 / CN470 / KR920**: DR0 - DR5. **AS923**: DR2 - DR5. **US915**: DR0 - DR4. **AU915**: DR0 - DR6. **LA915**: DR0 - DR5 (DR6 only when a 500 kHz channel is enabled)._
 
 _The query returns the **requested** data rate._
 
@@ -1427,9 +1427,11 @@ OK
 
 ## _💡 NOTE_
 ----
-_Only US915, AU915, CN470 and CN470 RP1.0 use the mask. In all other regions the command returns `OK` but has no effect and the query returns the mask that is active in the stack._
+_Only US915, AU915, LA915, CN470 and CN470 RP1.0 use the mask. In all other regions the command returns `OK` but has no effect and the query returns the mask that is active in the stack._
 
-_`<Input>`: up to 4 hex digits, 0-9, a-f, A-F, representing a 16-bit mask. Bit N enables sub-band N+1 (8 channels each), `0000` selects all channels. `AT_PARAM_ERROR` is returned for non-hex input or values above `FFFF`._
+_**LA915**: only the first 8 channels (CH0 - CH7, sub-band 1) are enabled at start. `AT+MASK=0000` selects exactly these default channels, it does **not** open all channels like in AU915. Use `AT+MASK=00FF` to enable all channels. `AT+MASK=0001` also enables the 500 kHz channel CH64 of sub-band 1._
+
+_`<Input>`: up to 4 hex digits, 0-9, a-f, A-F, representing a 16-bit mask. Bit N enables sub-band N+1 (8 channels each), `0000` selects all channels (LA915: the default channels CH0 - CH7, `00FF` selects all channels). `AT_PARAM_ERROR` is returned for non-hex input or values above `FFFF`._
 
 _Set it **before** the join. It is applied again before every join attempt._
 
@@ -1467,7 +1469,7 @@ _0: EU433, 1: CN470, 2: RU864, 3: IN865, 4: EU868, 5: US915, 6: AU915, 7: KR920,
 
 _The default value is **4** (EU868)._
 
-_`12` (LA915) is **not supported**. `AT_ERROR` is returned, preceded by the text `unsupported band index - LA915 not built into this LBM vendoring`. The same happens for values above 13. It is **not** `AT_PARAM_ERROR`._
+_`12` (LA915) is the unofficial Latin America plan (Everynet and others), based on AU915: the 125 kHz channels CH0 - CH7 at 915.2 - 916.6 MHz (DR0 - DR5) are enabled at start (ChannelsDefaultMask 0x00FF), RX1 downlink at 923.3 MHz + (uplink channel % 8) x 0.6 MHz, RX2 at 923.3 MHz DR8, no dwell time limit. See `AT+MASK` to open more channels. Values above 13 return `AT_ERROR`, preceded by the text `unsupported band index`. It is **not** `AT_PARAM_ERROR`._
 
 _`13` (WW2G4, 2.4 GHz) needs an LR2021 radio (`wisblockLoRaHwConfigRAK3401_RAK13702()`) and the library built with `WISBLOCK_ENABLE_LR2021`. Otherwise `AT_ERROR` is returned, preceded by the text `band 13 (WW2G4, 2.4 GHz) needs an LR2021 radio and WISBLOCK_ENABLE_LR2021`. Like every region, it can only be changed before joining._
 

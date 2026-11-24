@@ -221,9 +221,11 @@ public:
 	 * @brief Select the sub-band (channel mask)
 	 *
 	 * Pre-selects a sub-band for regions with more channels than a typical 8-channel gateway
-	 * supports (US915, AU915, CN470, CN470_RP_1_0) - no effect elsewhere (EU868, AS923, ...).
+	 * supports (US915, AU915, LA915, CN470, CN470_RP_1_0) - no effect elsewhere (EU868, AS923, ...).
 	 * Mirrors RUI3's AT+MASK / api.lorawan.mask: bit N (0-indexed) enables sub-band N+1 (8
-	 * channels each); 0 means no restriction (all channels enabled).
+	 * channels each); 0 means no restriction (all channels enabled). Exception LA915: 0 selects
+	 * the LA915 default channels (CH0 - CH7 only, 125 kHz) and 0x00FF enables all channels,
+	 * because 0 is also the stored default that is applied at every start.
 	 *
 	 * Without this, a device joining on one of these regions has to try every sub-band the
 	 * region defines in turn before it happens to land on the one the gateway actually
